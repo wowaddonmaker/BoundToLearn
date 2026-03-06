@@ -1,0 +1,18 @@
+## Interface: 120001, 120000
+## Title: BoundToLearn
+## Notes: Click-vs-keybind tracking and keybind practice game
+## Author: justawower
+## Version: 1.0.0
+## SavedVariables: BoundToLearnDB
+## DefaultState: enabled
+
+Utils.lua
+Core.lua
+Tracker.lua
+TrackerUI.lua
+Stats.lua
+CompetitiveData.lua
+Game.lua
+GameUI.lua
+StatsUI.lua
+Options.lua

@@ -1,0 +1,122 @@
+local ADDON_NAME, ns = ...
+
+local Stats = {}
+ns.Stats = Stats
+
+local Utils   = ns.Utils
+local tinsert = Utils.tinsert
+local tremove = Utils.tremove
+local mfloor  = Utils.mfloor
+local ipairs  = Utils.ipairs
+local GetTime = Utils.GetTime
+
+local MAX_SESSIONS = 100
+
+function Stats:Initialize()
+    -- Nothing to do on init; DB is already merged by Core
+end
+
+function Stats:RecordTrackerSession(sessionData)
+    local duration = GetTime() - sessionData.startTime
+    if duration < 10 then return end
+
+    local total = sessionData.clicks + sessionData.keybinds
+    if total == 0 then return end
+    local ratio = (sessionData.keybinds / total) * 100
+
+    local summary = {
+        timestamp = time(),
+        duration = mfloor(duration),
+        type = "tracker",
+        clicks = sessionData.clicks,
+        keybinds = sessionData.keybinds,
+        ratio = mfloor(ratio * 10) / 10,
+    }
+    self:AddSession(summary)
+
+    local db = BoundToLearn.db.stats
+    db.lifetimeClicks = db.lifetimeClicks + sessionData.clicks
+    db.lifetimeKeybinds = db.lifetimeKeybinds + sessionData.keybinds
+
+    if ratio > db.personalBest.bestKeybindRatio then
+        db.personalBest.bestKeybindRatio = mfloor(ratio * 10) / 10
+        BoundToLearn:Print("New personal best keybind ratio: " .. db.personalBest.bestKeybindRatio .. "%")
+    end
+end
+
+function Stats:RecordGameSession(gameData)
+    local totalNotes = gameData.hitCounts.perfect + gameData.hitCounts.great
+                     + gameData.hitCounts.good + gameData.hitCounts.miss
+    if totalNotes == 0 then return end
+
+    local accuracy = ((totalNotes - gameData.hitCounts.miss) / totalNotes) * 100
+
+    local summary = {
+        timestamp = time(),
+        duration = mfloor(gameData.duration),
+        type = "game",
+        score = gameData.score,
+        combo = gameData.maxCombo,
+        perfect = gameData.hitCounts.perfect,
+        great = gameData.hitCounts.great,
+        good = gameData.hitCounts.good,
+        miss = gameData.hitCounts.miss,
+        accuracy = mfloor(accuracy * 10) / 10,
+    }
+    self:AddSession(summary)
+
+    local db = BoundToLearn.db.stats
+    db.lifetimeGameNotes = db.lifetimeGameNotes + totalNotes
+    db.lifetimeGameHits = db.lifetimeGameHits + (totalNotes - gameData.hitCounts.miss)
+
+    local pb = db.personalBest
+    local newBest = false
+    if summary.score > pb.highestScore then
+        pb.highestScore = summary.score
+        newBest = true
+    end
+    if summary.combo > pb.longestCombo then
+        pb.longestCombo = summary.combo
+        newBest = true
+    end
+    if accuracy > pb.bestAccuracy then
+        pb.bestAccuracy = mfloor(accuracy * 10) / 10
+        newBest = true
+    end
+    if newBest then
+        BoundToLearn:Print("New personal best!")
+    end
+end
+
+function Stats:AddSession(summary)
+    local sessions = BoundToLearn.db.stats.sessions
+    tinsert(sessions, summary)
+    while #sessions > MAX_SESSIONS do
+        tremove(sessions, 1)
+    end
+end
+
+function Stats:GetRecentSessions(sessionType, count)
+    local result = {}
+    local sessions = BoundToLearn.db.stats.sessions
+    for i = #sessions, 1, -1 do
+        if sessions[i].type == sessionType then
+            tinsert(result, sessions[i])
+            if #result >= count then break end
+        end
+    end
+    return result
+end
+
+function Stats:GetLifetimeTrackerRatio()
+    local db = BoundToLearn.db.stats
+    local total = db.lifetimeClicks + db.lifetimeKeybinds
+    if total == 0 then return 0 end
+    return (db.lifetimeKeybinds / total) * 100
+end
+
+function Stats:GetLifetimeGameAccuracy()
+    local db = BoundToLearn.db.stats
+    if db.lifetimeGameNotes == 0 then return 0 end
+    return (db.lifetimeGameHits / db.lifetimeGameNotes) * 100
+end
