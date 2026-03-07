@@ -7,8 +7,11 @@ local type    = Utils.type
 local mmin, mmax = Utils.mmin, Utils.mmax
 local mfloor  = Utils.mfloor
 local ipairs  = Utils.ipairs
+local PlayUISound = Utils.PlayUISound
+local SOUND_CLICK = Utils.SOUND_CLICK
 
 BoundToLearn = {}
+BoundToLearn._ns = ns
 ns.BoundToLearn = BoundToLearn
 
 local DB_DEFAULTS = {
@@ -18,18 +21,22 @@ local DB_DEFAULTS = {
         widgetPosition = nil,
         widgetScale = 1.0,
         combatOnly = false,
+        hideInCombat = false,
         blocklist = {},
+        maxSegments = 6,
         filter = {
             mounts = true,
             toys = true,
             hearthstones = true,
             teleports = true,
+            consumables = true,
+            professions = true,
         },
     },
     game = {
         difficulty = "Medium",
         mode = "timed",            -- "timed", "practice", "competitive"
-        duration = 60,             -- seconds (timed/competitive)
+        duration = 90,             -- seconds (timed/competitive)
         fallSpeed = 150,
         fallDistance = 300,
         spawnInterval = 1.5,
@@ -41,13 +48,11 @@ local DB_DEFAULTS = {
         showCombo = true,
         bars = {
             main = true,           -- ActionButton1-12
-            bottomLeft = false,    -- MultiBarBottomLeft
+            bottomLeft = true,     -- MultiBarBottomLeft
             bottomRight = false,   -- MultiBarBottomRight
             right = false,         -- MultiBarRight
             left = false,          -- MultiBarLeft
         },
-        lastCompClass = "WARRIOR",
-        lastCompSpec = 1,
     },
     stats = {
         sessions = {},
@@ -56,6 +61,12 @@ local DB_DEFAULTS = {
             highestScore = 0,
             bestAccuracy = 0,
             bestKeybindRatio = 0,
+        },
+        difficultyBest = {
+            Easy = { highestScore = 0, longestCombo = 0 },
+            Medium = { highestScore = 0, longestCombo = 0 },
+            Hard = { highestScore = 0, longestCombo = 0 },
+            Extreme = { highestScore = 0, longestCombo = 0 },
         },
         lifetimeClicks = 0,
         lifetimeKeybinds = 0,
@@ -68,6 +79,17 @@ local DB_DEFAULTS = {
         firstRun = true,
         showGameWarning = true,
         muteChat = false,
+    },
+    leaderboard = {
+        Easy = {},
+        Medium = {},
+        Hard = {},
+        Extreme = {},
+    },
+    clickBlock = {
+        enabled = false,
+        mode = "all",   -- "all", "cc", "interrupt", "custom"
+        customBlacklist = {},  -- { [spellID] = spellName }
     },
     minimap = {
         angle = 220,
@@ -93,6 +115,11 @@ local function OnInitialize()
 
     ns.version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
 
+    SLASH_KBTRACK1 = "/kbtrack"
+    SlashCmdList["KBTRACK"] = function()
+        BoundToLearn:ToggleTracker()
+    end
+
     SLASH_BOUNDTOLEARN1 = "/btl"
     SlashCmdList["BOUNDTOLEARN"] = function(msg)
         msg = msg and msg:lower():trim() or ""
@@ -108,6 +135,24 @@ local function OnInitialize()
         elseif msg == "reset" then
             if ns.Tracker then ns.Tracker:ResetSession() end
             BoundToLearn:Print("Session reset.")
+        elseif msg == "lb" or msg == "leaderboard" then
+            if ns.LeaderboardUI then ns.LeaderboardUI:Toggle() end
+        elseif msg == "accept" then
+            if ns.Leaderboard then ns.Leaderboard:AcceptChallenge() end
+        elseif msg == "decline" then
+            if ns.Leaderboard then ns.Leaderboard:DeclineChallenge() end
+        elseif msg:sub(1, 9) == "challenge" then
+            local target = msg:sub(11):trim()
+            if target == "" then target = "party" end
+            if ns.Leaderboard then ns.Leaderboard:SendChallenge(target) end
+        elseif msg == "enforce" or msg == "block" then
+            if ns.ClickBlock then ns.ClickBlock:Toggle() end
+        elseif msg == "enforce all" or msg == "block all" then
+            if ns.ClickBlock then ns.ClickBlock:SetMode("all"); ns.ClickBlock:Enable() end
+        elseif msg == "enforce cc" or msg == "block cc" then
+            if ns.ClickBlock then ns.ClickBlock:SetMode("cc"); ns.ClickBlock:Enable() end
+        elseif msg == "enforce interrupt" or msg == "block interrupt" then
+            if ns.ClickBlock then ns.ClickBlock:SetMode("interrupt"); ns.ClickBlock:Enable() end
         elseif msg == "hide" then
             if ns.TrackerUI then ns.TrackerUI:Hide() end
             if ns.GameUI then ns.GameUI:Hide() end
@@ -121,13 +166,16 @@ end
 
 local function OnPlayerLogin()
     C_Timer.After(0.5, function()
-        if ns.Tracker   then ns.Tracker:Initialize()   end
-        if ns.TrackerUI then ns.TrackerUI:Initialize() end
-        if ns.Stats     then ns.Stats:Initialize()     end
-        if ns.Game      then ns.Game:Initialize()      end
-        if ns.GameUI    then ns.GameUI:Initialize()    end
-        if ns.StatsUI   then ns.StatsUI:Initialize()   end
-        if ns.Options   then ns.Options:Initialize()   end
+        if ns.Tracker       then ns.Tracker:Initialize()       end
+        if ns.TrackerUI     then ns.TrackerUI:Initialize()     end
+        if ns.Stats         then ns.Stats:Initialize()         end
+        if ns.Game          then ns.Game:Initialize()          end
+        if ns.GameUI        then ns.GameUI:Initialize()        end
+        if ns.StatsUI       then ns.StatsUI:Initialize()       end
+        if ns.Options       then ns.Options:Initialize()       end
+        if ns.Leaderboard   then ns.Leaderboard:Initialize()   end
+        if ns.LeaderboardUI then ns.LeaderboardUI:Initialize() end
+        if ns.ClickBlock   then ns.ClickBlock:Initialize()   end
     end)
 
     C_Timer.After(0.6, function()
@@ -175,13 +223,17 @@ end)
 
 -- Public API
 function BoundToLearn:ToggleTracker()
-    if ns.Tracker then
-        if ns.Tracker:IsTracking() then
-            ns.Tracker:StopSession()
-            self:Print("Tracker stopped.")
-        else
-            ns.Tracker:StartSession()
-            self:Print("Tracker started.")
+    if not ns.Tracker then return end
+    local db = self.db.tracker
+    if db.enabled then
+        db.enabled = false
+        ns.Tracker:StopSession()
+        if ns.TrackerUI then ns.TrackerUI:Hide() end
+    else
+        db.enabled = true
+        ns.Tracker:StartSession()
+        if ns.TrackerUI then
+            ns.TrackerUI:OnSessionStart()
         end
     end
 end
@@ -202,12 +254,19 @@ end
 function BoundToLearn:PrintHelp()
     local lines = {
         "|cFF55CCFFBoundToLearn|r - Keybind training companion",
-        "  /btl track    - Toggle click/keybind tracker",
-        "  /btl game     - Start/stop keybind practice game",
-        "  /btl stats    - Show statistics panel",
-        "  /btl options  - Open settings",
-        "  /btl reset    - Reset current session",
-        "  /btl hide     - Hide all UI",
+        "  /btl track       - Enable/disable keybind tracker",
+        "  /btl game        - Open keybind practice game",
+        "  /btl lb          - Show leaderboard",
+        "  /btl challenge   - Challenge your party to a round",
+        "  /btl accept      - Accept a challenge",
+        "  /btl decline     - Decline a challenge",
+        "  /btl stats       - Show statistics panel",
+        "  /btl options     - Open settings",
+        "  /btl enforce      - Toggle click blocking (keybind-only mode)",
+        "  /btl enforce all  - Block all ability clicks",
+        "  /btl enforce cc   - Block only CC/interrupt clicks",
+        "  /btl reset       - Reset current session",
+        "  /btl hide        - Hide all UI",
         "  /btl help     - Show this help",
     }
     for _, line in ipairs(lines) do
@@ -237,8 +296,7 @@ function BoundToLearn:CreateMinimapButton()
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon:SetSize(18, 18)
     icon:SetPoint("CENTER")
-    icon:SetTexture(134400) -- Interface\\Icons\\INV_Misc_Key_04 (key icon)
-    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    icon:SetTexture("Interface\\MacroFrame\\MacroFrame-Icon")
     btn.icon = icon
 
     -- Border (standard minimap button border)
@@ -312,7 +370,7 @@ local minimapMenu
 function BoundToLearn:ShowMinimapMenu(anchor)
     if not minimapMenu then
         minimapMenu = CreateFrame("Frame", "BoundToLearnMinimapMenu", UIParent, "BackdropTemplate")
-        minimapMenu:SetSize(140, 130)
+        minimapMenu:SetSize(140, 156)
         minimapMenu:SetFrameStrata("FULLSCREEN_DIALOG")
         minimapMenu:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -325,33 +383,42 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:Hide()
 
         local menuItems = {
-            { text = "Toggle Tracker", func = function() self:ToggleTracker() end },
-            { text = "Open Game",      func = function() self:OpenGame() end },
-            { text = "Statistics",     func = function() self:ShowStats() end },
-            { text = "Options",        func = function() self:OpenOptions() end },
+            { getText = function()
+                return self.db.tracker.enabled and "Disable Tracker" or "Enable Tracker"
+            end, func = function() self:ToggleTracker() end },
+            { getText = function() return "Open Game" end, func = function() self:OpenGame() end },
+            { getText = function() return "Leaderboard" end, func = function() if ns.LeaderboardUI then ns.LeaderboardUI:Toggle() end end },
+            { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
+            { getText = function() return "Options" end, func = function() self:OpenOptions() end },
         }
 
+        local menuBtns = {}
         for i, item in ipairs(menuItems) do
             local menuBtn = CreateFrame("Button", nil, minimapMenu)
             menuBtn:SetSize(130, 22)
             menuBtn:SetPoint("TOPLEFT", 5, -5 - (i - 1) * 26)
             menuBtn:SetNormalFontObject("GameFontHighlightSmall")
             menuBtn:SetHighlightFontObject("GameFontNormalSmall")
-            menuBtn:SetText(item.text)
+            menuBtn:SetText(item.getText())
             menuBtn:SetScript("OnClick", function()
+                PlayUISound(SOUND_CLICK)
                 minimapMenu:Hide()
                 item.func()
             end)
+            menuBtns[i] = { btn = menuBtn, getText = item.getText }
         end
 
-        -- Auto-hide when clicking outside
         minimapMenu:SetScript("OnShow", function(self)
+            for _, entry in ipairs(menuBtns) do
+                entry.btn:SetText(entry.getText())
+            end
             self:SetScript("OnUpdate", function(self)
                 if not self:IsMouseOver() and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
                     self:Hide()
                 end
             end)
         end)
+
         minimapMenu:SetScript("OnHide", function(self)
             self:SetScript("OnUpdate", nil)
         end)

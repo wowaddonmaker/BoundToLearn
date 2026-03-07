@@ -8,11 +8,15 @@
 
 Utils.lua
 Core.lua
+SpellData.lua
 Tracker.lua
 TrackerUI.lua
 Stats.lua
 CompetitiveData.lua
 Game.lua
 GameUI.lua
+Leaderboard.lua
+LeaderboardUI.lua
 StatsUI.lua
+ClickBlock.lua
 Options.lua

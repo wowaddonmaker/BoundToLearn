@@ -10,6 +10,9 @@ local mmin, mmax = Utils.mmin, Utils.mmax
 local ipairs     = Utils.ipairs
 local tinsert    = Utils.tinsert
 local CreateFrame = Utils.CreateFrame
+local PlayUISound = Utils.PlayUISound
+local SOUND_TAB   = Utils.SOUND_TAB
+local SOUND_CLICK = Utils.SOUND_CLICK
 
 local UIParent = UIParent
 local GameTooltip = GameTooltip
@@ -29,6 +32,14 @@ local TREND_BAR_COUNT = 20
 local TREND_BAR_WIDTH = 8
 local TREND_BAR_MAX_HEIGHT = 100
 local TREND_BAR_SPACING = 2
+
+local TIME_RANGES = {
+    { label = "All",   seconds = nil },
+    { label = "Today", seconds = 86400 },
+    { label = "Week",  seconds = 604800 },
+    { label = "Month", seconds = 2592000 },
+}
+local activeTimeRange = 1  -- index into TIME_RANGES
 
 function StatsUI:Initialize()
     if isInitialized then return end
@@ -82,6 +93,7 @@ function StatsUI:CreateTabs()
         tab:SetText(label)
         tab.tabKey = i == 1 and "tracker" or "game"
         tab:SetScript("OnClick", function()
+            PlayUISound(SOUND_TAB)
             self:SetTab(tab.tabKey)
         end)
 
@@ -112,13 +124,116 @@ function StatsUI:SetTab(tabKey)
     self:RefreshData()
 end
 
+local Y_AXIS_WIDTH = 30
+local CHART_LEFT = Y_AXIS_WIDTH + 4
+
+local function CreateTrendChart(panel, yOffset)
+    -- Time range buttons
+    local rangeFrame = CreateFrame("Frame", nil, panel)
+    rangeFrame:SetHeight(16)
+    rangeFrame:SetPoint("TOPLEFT", 0, yOffset)
+    rangeFrame:SetPoint("TOPRIGHT", 0, yOffset)
+
+    local trendLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    trendLabel:SetPoint("TOPLEFT", rangeFrame, "TOPLEFT", 0, 0)
+    trendLabel:SetText("Sessions")
+    trendLabel:SetTextColor(0.33, 0.8, 1)
+
+    panel.rangeBtns = {}
+    for i = #TIME_RANGES, 1, -1 do
+        local r = TIME_RANGES[i]
+        local btn = CreateFrame("Button", nil, rangeFrame)
+        btn:SetSize(40, 14)
+        btn:SetNormalFontObject("GameFontDisableSmall")
+        btn:SetHighlightFontObject("GameFontHighlightSmall")
+        btn:SetText(r.label)
+        if i == #TIME_RANGES then
+            btn:SetPoint("TOPRIGHT", rangeFrame, "TOPRIGHT", 0, 0)
+        else
+            btn:SetPoint("RIGHT", panel.rangeBtns[i + 1], "LEFT", -2, 0)
+        end
+        local idx = i
+        btn:SetScript("OnClick", function()
+            PlayUISound(SOUND_CLICK)
+            activeTimeRange = idx
+            StatsUI:RefreshData()
+        end)
+        panel.rangeBtns[i] = btn
+    end
+
+    local chartY = yOffset - 20
+
+    -- Y axis labels
+    local yLabels = { "100%", "50%", "0%" }
+    local yPositions = { 0, 0.5, 1 }
+    panel.yAxisLabels = {}
+    for i, text in ipairs(yLabels) do
+        local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        lbl:SetPoint("TOPRIGHT", panel, "TOPLEFT", Y_AXIS_WIDTH, chartY - yPositions[i] * TREND_BAR_MAX_HEIGHT + 4)
+        lbl:SetText(text)
+        lbl:SetJustifyH("RIGHT")
+        panel.yAxisLabels[i] = lbl
+    end
+
+    -- Grid lines
+    for i = 1, 3 do
+        local line = panel:CreateTexture(nil, "BACKGROUND")
+        line:SetHeight(1)
+        line:SetPoint("TOPLEFT", panel, "TOPLEFT", CHART_LEFT, chartY - yPositions[i] * TREND_BAR_MAX_HEIGHT)
+        line:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, chartY - yPositions[i] * TREND_BAR_MAX_HEIGHT)
+        line:SetColorTexture(0.25, 0.25, 0.25, 0.5)
+    end
+
+    -- Bar container (shifted right to make room for Y axis)
+    local barContainer = CreateFrame("Frame", nil, panel)
+    barContainer:SetSize(TREND_BAR_COUNT * (TREND_BAR_WIDTH + TREND_BAR_SPACING), TREND_BAR_MAX_HEIGHT)
+    barContainer:SetPoint("TOPLEFT", CHART_LEFT, chartY)
+    panel.barContainer = barContainer
+
+    panel.trendBars = {}
+    for i = 1, TREND_BAR_COUNT do
+        local bar = barContainer:CreateTexture(nil, "ARTWORK")
+        bar:SetWidth(TREND_BAR_WIDTH)
+        bar:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
+            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
+        bar:SetHeight(1)
+        bar:SetColorTexture(0.2, 0.8, 0.2, 0.8)
+        bar:Hide()
+
+        local hitArea = CreateFrame("Frame", nil, barContainer)
+        hitArea:SetSize(TREND_BAR_WIDTH + TREND_BAR_SPACING, TREND_BAR_MAX_HEIGHT)
+        hitArea:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
+            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
+        hitArea:SetScript("OnEnter", function(self)
+            if self.tipText then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(self.tipText, 1, 1, 1, 1, true)
+                GameTooltip:Show()
+            end
+        end)
+        hitArea:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+        hitArea.tipText = nil
+
+        panel.trendBars[i] = { bar = bar, hitArea = hitArea }
+    end
+
+    -- X axis: "Oldest" on left, "Latest" on right
+    local xOldest = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    xOldest:SetPoint("TOPLEFT", barContainer, "BOTTOMLEFT", 0, -2)
+    xOldest:SetText("Oldest")
+    local xLatest = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    xLatest:SetPoint("TOPRIGHT", barContainer, "BOTTOMRIGHT", 0, -2)
+    xLatest:SetText("Latest")
+end
+
 function StatsUI:CreateTrackerPanel()
     local panel = CreateFrame("Frame", nil, statsFrame)
     panel:SetPoint("TOPLEFT", 15, -65)
     panel:SetPoint("BOTTOMRIGHT", -15, 15)
     statsFrame.trackerPanel = panel
 
-    -- Lifetime stats
     local y = 0
     local function AddStat(label)
         local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -137,51 +252,8 @@ function StatsUI:CreateTrackerPanel()
     panel.lifetimeClicks = AddStat("Total Clicks")
     panel.bestRatio = AddStat("Best Session Ratio")
 
-    y = y - 15
-
-    -- Trend section header
-    local trendLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    trendLabel:SetPoint("TOPLEFT", 0, y)
-    trendLabel:SetText("Recent Sessions")
-    trendLabel:SetTextColor(0.33, 0.8, 1)
-    y = y - 20
-
-    -- Trend bars: use a container anchored within the panel, bars grow upward
-    local barContainer = CreateFrame("Frame", nil, panel)
-    barContainer:SetSize(TREND_BAR_COUNT * (TREND_BAR_WIDTH + TREND_BAR_SPACING), TREND_BAR_MAX_HEIGHT)
-    barContainer:SetPoint("TOPLEFT", 0, y)
-    panel.barContainer = barContainer
-
-    panel.trendBars = {}
-    for i = 1, TREND_BAR_COUNT do
-        local bar = barContainer:CreateTexture(nil, "ARTWORK")
-        bar:SetWidth(TREND_BAR_WIDTH)
-        bar:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
-            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
-        bar:SetHeight(1)
-        bar:SetColorTexture(0.2, 0.8, 0.2, 0.8)
-        bar:Hide()
-
-        -- Tooltip region
-        local hitArea = CreateFrame("Frame", nil, barContainer)
-        hitArea:SetSize(TREND_BAR_WIDTH + TREND_BAR_SPACING, TREND_BAR_MAX_HEIGHT)
-        hitArea:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
-            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
-        hitArea.barIndex = i
-        hitArea:SetScript("OnEnter", function(self)
-            if self.tipText then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(self.tipText, 1, 1, 1, 1, true)
-                GameTooltip:Show()
-            end
-        end)
-        hitArea:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-        hitArea.tipText = nil
-
-        panel.trendBars[i] = { bar = bar, hitArea = hitArea }
-    end
+    y = y - 12
+    CreateTrendChart(panel, y)
 end
 
 function StatsUI:CreateGamePanel()
@@ -210,47 +282,29 @@ function StatsUI:CreateGamePanel()
     panel.bestCombo = AddStat("Longest Combo")
     panel.bestAccuracy = AddStat("Best Session Accuracy")
 
-    y = y - 15
+    y = y - 12
+    CreateTrendChart(panel, y)
+end
 
-    local trendLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    trendLabel:SetPoint("TOPLEFT", 0, y)
-    trendLabel:SetText("Recent Sessions")
-    trendLabel:SetTextColor(0.33, 0.8, 1)
-    y = y - 20
+local function GetMinTimestamp()
+    local range = TIME_RANGES[activeTimeRange]
+    if not range.seconds then return nil end
+    return time() - range.seconds
+end
 
-    local barContainer = CreateFrame("Frame", nil, panel)
-    barContainer:SetSize(TREND_BAR_COUNT * (TREND_BAR_WIDTH + TREND_BAR_SPACING), TREND_BAR_MAX_HEIGHT)
-    barContainer:SetPoint("TOPLEFT", 0, y)
-    panel.barContainer = barContainer
-
-    panel.trendBars = {}
-    for i = 1, TREND_BAR_COUNT do
-        local bar = barContainer:CreateTexture(nil, "ARTWORK")
-        bar:SetWidth(TREND_BAR_WIDTH)
-        bar:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
-            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
-        bar:SetHeight(1)
-        bar:SetColorTexture(0.2, 0.8, 0.2, 0.8)
-        bar:Hide()
-
-        local hitArea = CreateFrame("Frame", nil, barContainer)
-        hitArea:SetSize(TREND_BAR_WIDTH + TREND_BAR_SPACING, TREND_BAR_MAX_HEIGHT)
-        hitArea:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
-            (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
-        hitArea:SetScript("OnEnter", function(self)
-            if self.tipText then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(self.tipText, 1, 1, 1, 1, true)
-                GameTooltip:Show()
-            end
-        end)
-        hitArea:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-        hitArea.tipText = nil
-
-        panel.trendBars[i] = { bar = bar, hitArea = hitArea }
+local function UpdateRangeButtons(panel)
+    if not panel.rangeBtns then return end
+    for i, btn in ipairs(panel.rangeBtns) do
+        if i == activeTimeRange then
+            btn:SetNormalFontObject("GameFontNormalSmall")
+        else
+            btn:SetNormalFontObject("GameFontDisableSmall")
+        end
     end
+end
+
+local function FormatTimestamp(ts)
+    return date("%m/%d %H:%M", ts)
 end
 
 function StatsUI:RefreshData()
@@ -274,8 +328,10 @@ function StatsUI:RefreshTrackerData()
     panel.lifetimeClicks:SetText(sformat("%d", db.lifetimeClicks))
     panel.bestRatio:SetText(sformat("%.1f%%", db.personalBest.bestKeybindRatio))
 
-    -- Trend bars
-    local sessions = ns.Stats:GetRecentSessions("tracker", TREND_BAR_COUNT)
+    UpdateRangeButtons(panel)
+
+    local minTs = GetMinTimestamp()
+    local sessions = ns.Stats:GetFilteredSessions("tracker", TREND_BAR_COUNT, minTs)
     for i = 1, TREND_BAR_COUNT do
         local entry = panel.trendBars[i]
         local sessionIdx = TREND_BAR_COUNT - i + 1
@@ -287,7 +343,8 @@ function StatsUI:RefreshTrackerData()
             entry.bar:SetColorTexture(r, g, b, 0.8)
             entry.bar:Show()
             entry.hitArea.tipText = sformat(
-                "Ratio: %.1f%%\nKeybinds: %d | Clicks: %d\nDuration: %d:%02d",
+                "%s\nRatio: %.1f%%\nKeybinds: %d | Clicks: %d\nDuration: %d:%02d",
+                FormatTimestamp(session.timestamp),
                 session.ratio, session.keybinds, session.clicks,
                 mfloor(session.duration / 60), session.duration % 60)
         else
@@ -309,7 +366,10 @@ function StatsUI:RefreshGameData()
     panel.bestCombo:SetText(sformat("%d", pb.longestCombo))
     panel.bestAccuracy:SetText(sformat("%.1f%%", pb.bestAccuracy))
 
-    local sessions = ns.Stats:GetRecentSessions("game", TREND_BAR_COUNT)
+    UpdateRangeButtons(panel)
+
+    local minTs = GetMinTimestamp()
+    local sessions = ns.Stats:GetFilteredSessions("game", TREND_BAR_COUNT, minTs)
     for i = 1, TREND_BAR_COUNT do
         local entry = panel.trendBars[i]
         local sessionIdx = TREND_BAR_COUNT - i + 1
@@ -321,7 +381,8 @@ function StatsUI:RefreshGameData()
             entry.bar:SetColorTexture(r, g, b, 0.8)
             entry.bar:Show()
             entry.hitArea.tipText = sformat(
-                "Score: %d\nAccuracy: %.1f%%\nCombo: %d\nP:%d G:%d OK:%d M:%d",
+                "%s\nScore: %d\nAccuracy: %.1f%%\nCombo: %d\nP:%d G:%d OK:%d M:%d",
+                FormatTimestamp(session.timestamp),
                 session.score, session.accuracy, session.combo,
                 session.perfect, session.great, session.good, session.miss)
         else
@@ -344,8 +405,8 @@ function StatsUI:Toggle()
     if statsFrame:IsShown() then
         statsFrame:Hide()
     else
-        self:SetTab(activeTab)
         statsFrame:Show()
+        self:SetTab(activeTab)
     end
 end
 

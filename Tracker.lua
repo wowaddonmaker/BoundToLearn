@@ -10,6 +10,7 @@ local tremove  = Utils.tremove
 local wipe     = Utils.wipe
 local mfloor   = Utils.mfloor
 local sformat  = Utils.sformat
+local sfind    = Utils.sfind
 local pairs    = Utils.pairs
 local ipairs   = Utils.ipairs
 
@@ -21,10 +22,30 @@ local InCombatLockdown = InCombatLockdown
 local C_Spell = C_Spell
 local C_MountJournal = C_MountJournal
 local C_ToyBox = C_ToyBox
+local C_Item = C_Item
+local CONSUMABLE_CLASS_ID = Enum.ItemClass.Consumable
+local GetProfessions = GetProfessions
+local GetProfessionInfo = GetProfessionInfo
+local C_SpellBook = C_SpellBook
+local UnitName = UnitName
+local UnitExists = UnitExists
+
+-- Spells that create consumables (Conjure Refreshment variants)
+local CONSUMABLE_SPELLS = {
+    [190336] = true, -- Conjure Refreshment
+    [42955]  = true, -- Conjure Refreshment (rank 2)
+    [120056] = true, -- Conjure Refreshment (rank 3)
+}
+
+-- Profession spell cache (rebuilt each session from player's professions)
+local professionSpells = {}
 
 local isTracking = false
+local isPaused = false
 local hooksInstalled = false
 local clickFlagSet = false
+local inEncounter = false  -- true during boss encounters (ENCOUNTER_START..END)
+local inCombat = false     -- true during combat (REGEN_DISABLED..ENABLED)
 
 local ACTION_LOG_CAP = 50
 
@@ -83,9 +104,9 @@ local TELEPORT_SPELLS = {
 }
 
 -- Nudge thresholds
-local NUDGE_CLICK_THRESHOLD = 10
-local NUDGE_RATIO_THRESHOLD = 0.6
-local NUDGE_COOLDOWN = 300
+local NUDGE_CLICK_THRESHOLD = 5
+local NUDGE_RATIO_THRESHOLD = 0.5
+local NUDGE_COOLDOWN = 120
 local lastNudgeTime = {}
 
 local sessionData = {
@@ -95,8 +116,65 @@ local sessionData = {
     actionLog = {},
 }
 
+local MAX_STORED_SEGMENTS = 50
+local segments = {}     -- completed segments, most recent first
+local overallData = { clicks = 0, keybinds = 0 }
+local sessionStartTime = 0  -- overall session start (for Stats recording)
+
+local function NewSegment(label)
+    return {
+        label = label or "Current",
+        startTime = GetTime(),
+        endTime = nil,
+        clicks = 0,
+        keybinds = 0,
+        actionLog = {},
+    }
+end
+
+local function FinalizeCurrentSegment()
+    local total = sessionData.clicks + sessionData.keybinds
+    if total == 0 then return end
+
+    -- Accumulate into overall totals
+    overallData.clicks = overallData.clicks + sessionData.clicks
+    overallData.keybinds = overallData.keybinds + sessionData.keybinds
+
+    -- Only store named combat/encounter segments in history, not idle "Current" periods
+    local label = sessionData.label or "Current"
+    if label == "Current" then return end
+
+    local seg = {
+        label = label,
+        startTime = sessionData.startTime,
+        endTime = GetTime(),
+        clicks = sessionData.clicks,
+        keybinds = sessionData.keybinds,
+    }
+    tinsert(segments, 1, seg)
+    while #segments > MAX_STORED_SEGMENTS do
+        tremove(segments)
+    end
+end
+
 -- Cache for toy detection so we don't call C_ToyBox every action
 local toyCache = {}
+
+local function BuildProfessionCache()
+    wipe(professionSpells)
+    local profs = {GetProfessions()}
+    for i = 1, 6 do
+        if profs[i] then
+            local _, _, _, _, numAbilities, spellOffset = GetProfessionInfo(profs[i])
+            for j = 1, numAbilities do
+                local info = C_SpellBook.GetSpellBookItemInfo(spellOffset + j, Enum.SpellBookSpellBank.Player)
+                if info and info.spellID then
+                    professionSpells[info.spellID] = true
+                end
+            end
+        end
+    end
+end
 
 local function IsToyItem(itemID)
     if toyCache[itemID] ~= nil then return toyCache[itemID] end
@@ -123,11 +201,17 @@ local function ShouldIgnoreAction(slot)
     if actionType == "spell" and id then
         if filter.hearthstones and HEARTHSTONE_SPELLS[id] then return true end
         if filter.teleports and TELEPORT_SPELLS[id] then return true end
+        if filter.consumables and CONSUMABLE_SPELLS[id] then return true end
+        if filter.professions and professionSpells[id] then return true end
     end
 
-    -- Items: check for toys and hearthstone items
+    -- Items: check for toys, consumables
     if actionType == "item" and id then
         if filter.toys and IsToyItem(id) then return true end
+        if filter.consumables then
+            local classID = select(6, C_Item.GetItemInfoInstant(id))
+            if classID == CONSUMABLE_CLASS_ID then return true end
+        end
     end
 
     return false
@@ -143,15 +227,18 @@ end
 
 local function GetActionName(slot)
     local actionType, id = GetActionInfo(slot)
-    if actionType == "spell" and id then
+    if actionType == "spell" and id and id ~= 0 then
         local info = C_Spell.GetSpellInfo(id)
         return info and info.name or ("Spell " .. id)
-    elseif actionType == "item" and id then
+    elseif actionType == "item" and id and id ~= 0 then
         local name = C_Item.GetItemInfo(id)
         return name or ("Item " .. id)
-    elseif actionType == "macro" then
-        local name = GetMacroInfo(id)
-        return name or ("Macro " .. id)
+    elseif actionType == "macro" and id then
+        local macroName = GetActionText(slot)
+        if not macroName or macroName == "" then
+            macroName = GetMacroInfo(id)
+        end
+        return macroName or ("Macro " .. id)
     end
     return "Action " .. slot
 end
@@ -177,18 +264,96 @@ local function TrackSpellStats(slot, wasClick)
 end
 
 local CLICK_QUIPS = {
-    "Your mouse button called. It wants a vacation.",
-    "That keybind is feeling lonely.",
-    "Your mouse is filing a workers' comp claim.",
-    "Fun fact: keybinds are faster AND your mouse will thank you.",
-    "Click, click, click... your keyboard is right there, you know.",
-    "Your mouse: 'Why must I suffer?'",
-    "Legend has it there's a keybind for that.",
-    "Click detected. Keyboard gathering dust.",
-    "Your mouse is starting a union.",
-    "Hot take: keys on a keyboard can also be pressed.",
-    "Your mouse is writing a memoir: 'A Life of Clicks.'",
-    "Pro tip: keybinds make you look cooler. Scientifically proven.",
+    "Your clicking has its own Wowhead comments section. Top reply: 'working as intended?'",
+    "Someone posted your keybind stats on the guild Discord. The reaction was just question marks.",
+    "The Ramkahen just discovered your keybinds buried under three feet of Uldum sand.",
+    "Your keybinds have been on standby longer than the Exodar's engines.",
+    "Your clicking has been immortalized in a Bard's tale. It's a tragedy.",
+    "The Tillers would love your dedication. You've been farming clicks since Mists.",
+    "An Innkeeper just offered your keybinds a room. They've been homeless since Cataclysm.",
+    "Somewhere between Boralus and Zuldazar, your keybind usage got lost at sea.",
+    "Somewhere in Dalaran, a mage is teaching a course on keybind archaeology. You're the case study.",
+    "Your keybinds are listed on the Ironforge missing persons board.",
+    "The Tuskarr offered your keybinds a fishing spot. They've got nothing else to do.",
+    "Gamon has been through less abuse than your left mouse button.",
+    "Lor'themar governed Silvermoon alone for years. Still less neglected than your keybinds.",
+    "MOTHER ran a diagnostic on your keybind usage. Output: 'INSUFFICIENT DATA.'",
+    "Your keybinds got exalted with the 'Never Pressed' faction.",
+    "The Sha of Clicking hasn't been discovered yet, but you're the prime suspect.",
+    "You treat your keybinds the way Blizzard treats worgen updates.",
+    "Brann Bronzebeard keeps finding your unused keybinds in dig sites across Azeroth.",
+    "Your mouse has ground more rep than anyone in the Aldor/Scryer war.",
+    "Hemet Nesingwary has hunted less elusive things than your keybind usage.",
+    "The Lorewalkers documented your keybind history. It was the shortest scroll.",
+    "Kil'jaeden spent 10,000 years scheming. Your keybinds have been idle longer.",
+    "Millhouse Manastorm has better impulse control than your clicking habit.",
+    "Your keybinds have been missing so long they got a memorial in the Valley of Heroes.",
+    "The Aspects gave up their power willingly. Your keybinds didn't have a choice.",
+    "Gallywix tried to sell your keybind usage data. Refunded everyone due to lack of content.",
+    "Your keybinds are on the same respawn timer as the Time-Lost Proto Drake.",
+    "Hamuul Runetotem called. Wants to study your keybinds as a new form of hibernation.",
+    "Somewhere in the Emerald Dream, a treant is growing from your unused keybinds.",
+    "Thrall went through an identity crisis shorter than your keybind drought.",
+    "Patch notes: 'Fixed a bug where your keybinds existed but were never used.'",
+    "%s's keybind has been waiting longer than a DPS queue.",
+    "Fun fact: every time you click, Thrall sheds a single tear.",
+    "They say time is money, friend. Keybinds save both.",
+    "Your keybinds are gathering so much dust they qualify as archaeology fragments.",
+    "%s's keybind has been benched longer than most expansion features.",
+    "%s's keybind is lonelier than a healer in a BG.",
+    "Your mouse has clocked more overtime than a goblin in Booty Bay.",
+    "A click a day keeps the glad mount away.",
+    "If your clicks gave you gold, you'd be richer than Gallywix.",
+    "Your clicking could generate enough energy to power Gnomeregan.",
+    "They should add clicking as a boss mechanic. You'd be mythic-ready.",
+    "Blizzard is adding a new achievement: 'Click 10,000 spells.' You're almost there.",
+    "If I had a copper for every click, I'd have bought the Brutosaur by now.",
+    "According to my calculations, you've clicked enough to mine a Khaz Algar node.",
+    "Some say clicking builds character. Those people also keyboard turn.",
+    "I renamed your mouse to 'Raid Leader' because it does all the work.",
+    "Your keybinds are like Garrisons. Everyone has them, nobody visits.",
+    "You click more than a Kobold hoards candles.",
+    "Your keybinds are lonelier than Illidan before Legion.",
+    "Roses are red, Teldrassil burned, your keybinds are there, yet remain unlearned.",
+    "Every time you click a spell, a murloc gets its wings. Wait, that's not right either.",
+    "You click like you're paying per keybind. They're free, by the way.",
+    "Your click rate is higher than Auction House inflation.",
+    "I asked Chromie to check the timeline. You've been clicking in every single one.",
+    "Your keybinds are less used than the Dance Studio feature.",
+    "That click was registered by both the Horde and Alliance seismographs.",
+    "Jaina could've frozen all of Orgrimmar in the time it took you to click that.",
+    "Your clicking has been reported to the Azeroth OSHA. On behalf of your mouse.",
+    "If you clicked any harder, Deathwing would wake up again.",
+    "What's the difference between your keybinds and Mankrik's wife? People actually looked for her.",
+    "Your keybind has been on /afk since Wrath.",
+    "You're clicking like you're still playing on a Commodore 64 in Molten Core.",
+    "Your mouse has taken more hits than the tanks in LFR.",
+    "You click like you're trying to unlock a secret Clicking spec. Spoiler: there isn't one.",
+    "Vol'jin didn't die for this.",
+    "That click was louder than a Kodo stampede through Mulgore.",
+    "Your mouse has spent more time in combat than most Gladiators.",
+    "Even Nozdormu can't find a timeline where you've used keybinds.",
+    "C'Thun saw many things. Your keybind usage was not one of them.",
+    "Magni asked me to tell you: 'Champion, the keybinds, they need ya.'",
+    "Arthas fell to keybinders. Just putting that out there.",
+    "%s's keybind has been missing longer than Turalyon was stuck in the Twisting Nether.",
+    "Your clicking is more repetitive than the Maw intro questline.",
+    "What did Lor'themar say about your keybinds? 'Selama ashal'anore.' It means 'Justice for those who were never pressed.'",
+    "%s's keybind has more abandonment issues than Garrosh.",
+    "You've generated enough clicks to power the Vindicaar's Light crystals.",
+    "Your mouse just earned the title: 'the Insane.'",
+    "Your keybind whispered 'Lok'tar ogar.' That's 'press me or I die' in Orcish.",
+    "Elune wept. Not for Teldrassil this time. For your keybinds.",
+    "What do your keybinds and Titan relics have in common? Both buried and forgotten.",
+    "Yogg-Saron whispers: 'Use... your... keybinds...'",
+    "Your mouse just unlocked the hidden achievement: 'Carpal Tunnel Candidate.'",
+    "Your keybinds haven't been pressed since the last time Bolvar did something useful.",
+    "The Defias Brotherhood plots less than your mouse does to escape your grip.",
+    "Clicking that much should count toward the Insane in the Membrane grind.",
+    "Your keybinds have less screen time than Med'an.",
+    "Your mouse button is more worn down than the path to Ragnaros in Molten Core.",
+    "Vol'jin's loa didn't choose you. Probably because of the clicking.",
+    "%s's keybind is deader than the WoD garrison mission table.",
 }
 local lastQuipIndex = 0
 
@@ -200,6 +365,9 @@ local function GetRandomQuip()
     lastQuipIndex = idx
     return CLICK_QUIPS[idx]
 end
+
+local YELLOW = "|cFFFFFF00"
+local CLOSE = "|r"
 
 local function CheckNudge(stats, slot)
     local total = stats.clicks + stats.keybinds
@@ -213,8 +381,17 @@ local function CheckNudge(stats, slot)
     if lastNudgeTime[key] and (now - lastNudgeTime[key]) < NUDGE_COOLDOWN then return end
     lastNudgeTime[key] = now
 
-    Utils.Print(sformat("|cFFFFFF00%s|r (%d%% clicked): %s",
-        stats.name, mfloor(clickRatio * 100), GetRandomQuip()))
+    local quip = GetRandomQuip()
+    local name = stats.name
+    if not name or name == "" then
+        name = GetActionName(slot)
+    end
+    local coloredName = YELLOW .. name .. CLOSE
+    if sfind(quip, "%%s") then
+        Utils.Print(sformat(quip, coloredName))
+    else
+        Utils.Print(sformat("%s (%d%% clicked): %s", coloredName, mfloor(clickRatio * 100), quip))
+    end
 end
 
 function Tracker:Initialize()
@@ -243,7 +420,7 @@ function Tracker:InstallHooks()
     end
 
     hooksecurefunc("UseAction", function(slot)
-        if not isTracking then return end
+        if not isTracking or isPaused then return end
 
         local wasClick = clickFlagSet
         clickFlagSet = false
@@ -305,12 +482,23 @@ end
 
 function Tracker:StartSession()
     isTracking = true
+    isPaused = false
+    inEncounter = false
+    inCombat = false
+    BuildProfessionCache()
     wipe(sessionData.actionLog)
     wipe(spellClickStats)
     wipe(lastNudgeTime)
+    wipe(segments)
+    overallData.clicks = 0
+    overallData.keybinds = 0
     sessionData.clicks = 0
     sessionData.keybinds = 0
     sessionData.startTime = GetTime()
+    sessionData.label = "Current"
+    sessionStartTime = sessionData.startTime
+
+    self:RegisterEncounterEvents()
 
     if ns.TrackerUI then
         ns.TrackerUI:OnSessionStart()
@@ -320,11 +508,23 @@ end
 function Tracker:StopSession()
     if not isTracking then return end
     isTracking = false
+    inEncounter = false
+    inCombat = false
 
-    local total = sessionData.clicks + sessionData.keybinds
-    if total > 0 and ns.Stats then
-        ns.Stats:RecordTrackerSession(sessionData)
+    FinalizeCurrentSegment()
+
+    -- Record combined session to Stats
+    local totalClicks = overallData.clicks
+    local totalKeybinds = overallData.keybinds
+    if (totalClicks + totalKeybinds) > 0 and ns.Stats then
+        ns.Stats:RecordTrackerSession({
+            startTime = sessionStartTime,
+            clicks = totalClicks,
+            keybinds = totalKeybinds,
+        })
     end
+
+    self:UnregisterEncounterEvents()
 
     if ns.TrackerUI then
         ns.TrackerUI:OnSessionStop()
@@ -340,14 +540,36 @@ function Tracker:ResetSession()
         wipe(sessionData.actionLog)
         wipe(spellClickStats)
         wipe(lastNudgeTime)
+        wipe(segments)
+        overallData.clicks = 0
+        overallData.keybinds = 0
         sessionData.clicks = 0
         sessionData.keybinds = 0
         sessionData.startTime = 0
+        sessionData.label = nil
     end
 end
 
 function Tracker:IsTracking()
     return isTracking
+end
+
+function Tracker:Pause()
+    isPaused = true
+    if ns.TrackerUI then ns.TrackerUI:OnPauseChanged(true) end
+end
+
+function Tracker:Resume()
+    isPaused = false
+    if ns.TrackerUI then ns.TrackerUI:OnPauseChanged(false) end
+end
+
+function Tracker:IsPaused()
+    return isPaused
+end
+
+function Tracker:TogglePause()
+    if isPaused then self:Resume() else self:Pause() end
 end
 
 function Tracker:GetSessionData()
@@ -375,4 +597,94 @@ end
 
 function Tracker:RemoveFromBlocklist(id)
     BoundToLearn.db.tracker.blocklist[id] = nil
+end
+
+-- Combat and encounter-based segment splitting
+local combatFrame = CreateFrame("Frame")
+
+local function GetTargetLabel()
+    if UnitExists("target") then
+        local name = UnitName("target")
+        if name then return name end
+    end
+    return "Combat"
+end
+
+local function StartNewSegment(label)
+    FinalizeCurrentSegment()
+    wipe(sessionData.actionLog)
+    sessionData.clicks = 0
+    sessionData.keybinds = 0
+    sessionData.startTime = GetTime()
+    sessionData.label = label
+    if ns.TrackerUI then ns.TrackerUI:OnSegmentChanged() end
+end
+
+function Tracker:RegisterEncounterEvents()
+    combatFrame:RegisterEvent("ENCOUNTER_START")
+    combatFrame:RegisterEvent("ENCOUNTER_END")
+    combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
+function Tracker:UnregisterEncounterEvents()
+    combatFrame:UnregisterAllEvents()
+end
+
+combatFrame:SetScript("OnEvent", function(self, event, ...)
+    if not isTracking then return end
+
+    if event == "PLAYER_REGEN_DISABLED" then
+        inCombat = true
+        if inEncounter then return end
+        StartNewSegment(GetTargetLabel())
+
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        inCombat = false
+        if inEncounter then return end
+        StartNewSegment("Current")
+
+    elseif event == "ENCOUNTER_START" then
+        local encounterID, encounterName = ...
+        inEncounter = true
+        -- Override the combat segment label with the boss name
+        sessionData.label = encounterName or ("Encounter " .. (encounterID or "?"))
+        if ns.TrackerUI then ns.TrackerUI:OnSegmentChanged() end
+
+    elseif event == "ENCOUNTER_END" then
+        local encounterID, encounterName, difficultyID, groupSize, success = ...
+        inEncounter = false
+        if success == 0 then
+            sessionData.label = (sessionData.label or encounterName) .. " (Wipe)"
+        end
+        -- Don't start a new segment here; PLAYER_REGEN_ENABLED will handle it
+        -- But if combat already ended (rare), finalize now
+        if not inCombat then
+            StartNewSegment("Current")
+        end
+    end
+end)
+
+-- Segment navigation API
+function Tracker:GetSegments()
+    return segments
+end
+
+function Tracker:GetSegmentCount()
+    return #segments
+end
+
+function Tracker:GetSegment(index)
+    return segments[index]
+end
+
+function Tracker:GetOverallData()
+    return {
+        clicks = overallData.clicks + sessionData.clicks,
+        keybinds = overallData.keybinds + sessionData.keybinds,
+    }
+end
+
+function Tracker:GetCurrentLabel()
+    return sessionData.label or "Current"
 end

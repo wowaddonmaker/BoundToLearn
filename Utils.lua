@@ -10,6 +10,8 @@ local sfind, slower, ssub, sformat, smatch = string.find, string.lower, string.s
 local mmin, mmax, mabs, mceil, mfloor = math.min, math.max, math.abs, math.ceil, math.floor
 local pcall, tostring, tonumber = pcall, tostring, tonumber
 local GetTime, CreateFrame = GetTime, CreateFrame
+local PlaySound = PlaySound
+local PlaySoundFile = PlaySoundFile
 local wipe = wipe
 
 Utils.pairs    = pairs
@@ -42,7 +44,17 @@ Utils.tonumber = tonumber
 
 Utils.GetTime     = GetTime
 Utils.CreateFrame = CreateFrame
+Utils.PlaySound   = PlaySound
 Utils.wipe        = wipe
+
+-- UI click sounds (SOUNDKIT IDs - PlaySound works reliably)
+Utils.SOUND_CLICK = 856   -- igMainMenuOptionCheckboxOn
+Utils.SOUND_TAB   = 841   -- igCharacterInfoTab
+Utils.SOUND_CLOSE = 851   -- igMainMenuClose
+
+function Utils.PlayUISound(soundKitID)
+    PlaySound(soundKitID)
+end
 
 function Utils.Print(msg)
     print(sformat("|cFF55CCFF[BoundToLearn]|r %s", msg))

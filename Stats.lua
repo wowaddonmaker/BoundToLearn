@@ -83,6 +83,22 @@ function Stats:RecordGameSession(gameData)
         pb.bestAccuracy = mfloor(accuracy * 10) / 10
         newBest = true
     end
+
+    -- Per-difficulty bests
+    local diff = gameData.difficulty
+    if diff and db.difficultyBest then
+        if not db.difficultyBest[diff] then
+            db.difficultyBest[diff] = { highestScore = 0, longestCombo = 0 }
+        end
+        local db2 = db.difficultyBest[diff]
+        if summary.score > db2.highestScore then
+            db2.highestScore = summary.score
+        end
+        if summary.combo > db2.longestCombo then
+            db2.longestCombo = summary.combo
+        end
+    end
+
     if newBest then
         BoundToLearn:Print("New personal best!")
     end
@@ -102,6 +118,19 @@ function Stats:GetRecentSessions(sessionType, count)
     for i = #sessions, 1, -1 do
         if sessions[i].type == sessionType then
             tinsert(result, sessions[i])
+            if #result >= count then break end
+        end
+    end
+    return result
+end
+
+function Stats:GetFilteredSessions(sessionType, count, minTimestamp)
+    local result = {}
+    local sessions = BoundToLearn.db.stats.sessions
+    for i = #sessions, 1, -1 do
+        local s = sessions[i]
+        if s.type == sessionType and (not minTimestamp or s.timestamp >= minTimestamp) then
+            tinsert(result, s)
             if #result >= count then break end
         end
     end
