@@ -29,6 +29,10 @@ local GetProfessionInfo = GetProfessionInfo
 local C_SpellBook = C_SpellBook
 local UnitName = UnitName
 local UnitExists = UnitExists
+local IsMounted = IsMounted
+local HasOverrideActionBar = HasOverrideActionBar
+local GetMacroBody = GetMacroBody
+local IsSpellHelpful = C_Spell and C_Spell.IsSpellHelpful
 
 -- Spells that create consumables (Conjure Refreshment variants)
 local CONSUMABLE_SPELLS = {
@@ -183,6 +187,22 @@ local function IsToyItem(itemID)
     return isToy
 end
 
+local function IsCombatMacro(macroIndex)
+    local body = GetMacroBody(macroIndex)
+    if not body then return false end
+    body = body:lower()
+    if sfind(body, "/cast", 1, true) then return true end
+    if sfind(body, "/use", 1, true) then return true end
+    if sfind(body, "/castsequence", 1, true) then return true end
+    if sfind(body, "/cancelaura", 1, true) then return true end
+    if sfind(body, "/cancelform", 1, true) then return true end
+    if sfind(body, "/startattack", 1, true) then return true end
+    if sfind(body, "/stopattack", 1, true) then return true end
+    if sfind(body, "/petattack", 1, true) then return true end
+    if sfind(body, "/stopcasting", 1, true) then return true end
+    return false
+end
+
 local function ShouldIgnoreAction(slot)
     local actionType, id = GetActionInfo(slot)
     local filter = BoundToLearn.db.tracker.filter
@@ -193,6 +213,9 @@ local function ShouldIgnoreAction(slot)
 
     -- Flyout menus and companion (battle pet) summons are always filtered
     if actionType == "companion" or actionType == "flyout" then return true end
+
+    -- Skyriding abilities (mounted + override bar = skyriding vigor)
+    if filter.skyriding and IsMounted() and HasOverrideActionBar() then return true end
 
     -- Mounts
     if actionType == "mount" then return filter.mounts end
@@ -212,6 +235,16 @@ local function ShouldIgnoreAction(slot)
             local classID = select(6, C_Item.GetItemInfoInstant(id))
             if classID == CONSUMABLE_CLASS_ID then return true end
         end
+    end
+
+    -- Non-combat macros
+    if filter.nonCombatMacros and actionType == "macro" and id and not IsCombatMacro(id) then
+        return true
+    end
+
+    -- Buffs (helpful spells cast out of combat, e.g. Arcane Intellect, Fortitude)
+    if filter.buffs and actionType == "spell" and id and not inCombat then
+        if IsSpellHelpful and IsSpellHelpful(id) then return true end
     end
 
     return false
@@ -425,6 +458,9 @@ function Tracker:InstallHooks()
         local wasClick = clickFlagSet
         clickFlagSet = false
 
+        -- Skip empty action bar slots
+        if not HasAction(slot) then return end
+
         -- Filter non-combat actions
         if ShouldIgnoreAction(slot) then return end
 
@@ -468,6 +504,9 @@ function Tracker:InstallHooks()
         "MultiBarBottomRightButton",
         "MultiBarRightButton",
         "MultiBarLeftButton",
+        "MultiBar5Button",
+        "MultiBar6Button",
+        "MultiBar7Button",
     }
     for _, prefix in ipairs(buttonPrefixes) do
         for i = 1, 12 do

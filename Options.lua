@@ -329,12 +329,15 @@ function Options:CreateGeneralPanel()
         y = y - 18
 
         local filterNames = {
-            { key = "mounts",       label = "Mounts" },
-            { key = "toys",         label = "Toys" },
-            { key = "hearthstones", label = "Hearthstones" },
-            { key = "teleports",    label = "Teleports" },
-            { key = "consumables",  label = "Consumables" },
-            { key = "professions",  label = "Professions" },
+            { key = "mounts",          label = "Mounts" },
+            { key = "toys",            label = "Toys" },
+            { key = "hearthstones",    label = "Hearthstones" },
+            { key = "teleports",       label = "Teleports" },
+            { key = "consumables",     label = "Consumables" },
+            { key = "professions",     label = "Professions" },
+            { key = "skyriding",       label = "Skyriding" },
+            { key = "nonCombatMacros", label = "Non-combat macros" },
+            { key = "buffs",           label = "Buffs (out of combat)" },
         }
         local FILTERS_PER_ROW = 3
         local FILTER_SPACING = 130
@@ -784,6 +787,9 @@ function Options:CreateResetButtons()
             db.tracker.filter.teleports = true
             db.tracker.filter.consumables = true
             db.tracker.filter.professions = true
+            db.tracker.filter.skyriding = true
+            db.tracker.filter.nonCombatMacros = true
+            db.tracker.filter.buffs = true
             db.clickBlock.enabled = false
             db.clickBlock.mode = "all"
             wipe(db.clickBlock.customBlacklist)
