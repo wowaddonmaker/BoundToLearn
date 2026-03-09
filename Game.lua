@@ -48,6 +48,9 @@ local gameStartTime = 0
 local gameDuration = 0       -- 0 = unlimited (practice)
 local gameElapsed = 0        -- tracks actual play time (excludes pauses)
 local pauseStartTime = 0
+local mirrorFlipped = false
+local nextMirrorFlip = 0
+local gameModifiers = {}
 
 local SCORE_VALUES = { perfect = 300, great = 200, good = 100, miss = 0 }
 local RED_HERRING_PENALTY = -150
@@ -67,23 +70,23 @@ local isPlayingGameMusic = false
 local DIFFICULTY_MUSIC = {
     Easy    = 53474,   -- Silvermoon city walk (relaxed, warm)
     Medium  = 55957,   -- Grizzly Hills (upbeat, pleasant)
-    Hard    = 53755,   -- Karazhan opera (driving, focused)
+    Hard    = 53199,   -- Ulduar Algalon (intense, epic)
     Extreme = 53569,   -- L70ETC concert (intense)
 }
 
 local DIFFICULTY_PRESETS = {
     Easy    = { fallSpeed = 80, fallDistance = 350, maxActiveNotes = 1, spawnInterval = 2.5,
                 timingPerfect = 0.06, timingGreat = 0.20, timingGood = 0.40,
-                redHerringChance = 0, randomAngles = false },
+                redHerringChance = 0, randomAngles = false, doublesChance = 0 },
     Medium  = { fallSpeed = 150, fallDistance = 300, maxActiveNotes = 3, spawnInterval = 1.5,
                 timingPerfect = 0.04, timingGreat = 0.12, timingGood = 0.22,
-                redHerringChance = 0, randomAngles = false },
+                redHerringChance = 0, randomAngles = false, doublesChance = 0 },
     Hard    = { fallSpeed = 200, fallDistance = 280, maxActiveNotes = 4, spawnInterval = 1.2,
                 timingPerfect = 0.03, timingGreat = 0.09, timingGood = 0.18,
-                redHerringChance = 0.18, randomAngles = false },
+                redHerringChance = 0.18, randomAngles = false, doublesChance = 0 },
     Extreme = { fallSpeed = 200, fallDistance = 260, maxActiveNotes = 5, spawnInterval = 0.9,
                 timingPerfect = 0.025, timingGreat = 0.07, timingGood = 0.15,
-                redHerringChance = 0.25, randomAngles = true },
+                redHerringChance = 0.25, randomAngles = true, doublesChance = 0 },
 }
 
 local MODIFIER_KEYS = {
@@ -139,7 +142,7 @@ function Game:Initialize()
     ns.eventFrame:HookScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" and isRunning then
             self:Pause()
-            BoundToLearn:Print("Game paused (combat).")
+            -- Paused by combat; pause overlay shows
         end
     end)
 end
@@ -147,18 +150,37 @@ end
 function Game:GetSettings()
     local db = BoundToLearn.db.game
     local difficulty = db.difficulty
+    local settings
     if difficulty ~= "Custom" and DIFFICULTY_PRESETS[difficulty] then
-        return DIFFICULTY_PRESETS[difficulty]
+        -- Copy so we don't mutate the preset
+        local preset = DIFFICULTY_PRESETS[difficulty]
+        settings = {
+            fallSpeed = preset.fallSpeed,
+            fallDistance = preset.fallDistance,
+            maxActiveNotes = preset.maxActiveNotes,
+            spawnInterval = preset.spawnInterval,
+            timingPerfect = preset.timingPerfect,
+            timingGreat = preset.timingGreat,
+            timingGood = preset.timingGood,
+            redHerringChance = preset.redHerringChance,
+            randomAngles = preset.randomAngles,
+        }
+    else
+        settings = {
+            fallSpeed = db.fallSpeed,
+            fallDistance = db.fallDistance,
+            maxActiveNotes = db.maxActiveNotes,
+            spawnInterval = db.spawnInterval,
+            timingPerfect = db.timingPerfect,
+            timingGreat = db.timingGreat,
+            timingGood = db.timingGood,
+        }
     end
-    return {
-        fallSpeed = db.fallSpeed,
-        fallDistance = db.fallDistance,
-        maxActiveNotes = db.maxActiveNotes,
-        spawnInterval = db.spawnInterval,
-        timingPerfect = db.timingPerfect,
-        timingGreat = db.timingGreat,
-        timingGood = db.timingGood,
-    }
+    -- Competitive has 15 lanes; scale note cap to keep similar density
+    if currentMode == "competitive" then
+        settings.maxActiveNotes = settings.maxActiveNotes * 3
+    end
+    return settings
 end
 
 function Game:GetMode()
@@ -218,10 +240,11 @@ function Game:DiscoverCompetitiveSlots()
     local compBtns = ns.GameUI and ns.GameUI:GetCompBarButtons() or {}
 
     for i, slotDef in ipairs(CD.slots) do
-        local keybind = GetBindingKey("ACTIONBUTTON" .. i)
         local btn = compBtns[i]
+        if btn then
+            local rowDef = CD.rows[slotDef.row]
+            local keybind = rowDef.modifier .. tostring(slotDef.col)
 
-        if keybind and btn then
             local slotInfo = {
                 slot = i,
                 keybind = keybind,
@@ -272,6 +295,9 @@ local function ResetGameState()
     focus = MAX_FOCUS
     focusFailed = false
     lastBooTime = 0
+    mirrorFlipped = false
+    nextMirrorFlip = 0
+    gameModifiers = ns.Modifiers and ns.Modifiers:GetActive() or {}
 end
 
 function Game:Start()
@@ -299,12 +325,7 @@ function Game:Start()
     ResetGameState()
 
     if BoundToLearn.db.game.soundEnabled then
-        local track = DIFFICULTY_MUSIC[db.difficulty]
         MuteGameAudio()
-        if track then
-            PlayMusic(track)
-            isPlayingGameMusic = true
-        end
     end
 
     if ns.GameUI then
@@ -317,13 +338,20 @@ function Game:Start()
             gameStartTime = GetTime()
             gameFrame:Show()
             inputFrame:Show()
+            if BoundToLearn.db.game.soundEnabled then
+                local track = DIFFICULTY_MUSIC[db.difficulty]
+                if track then
+                    PlayMusic(track)
+                    isPlayingGameMusic = true
+                end
+            end
         end)
     else
         gameFrame:Show()
         inputFrame:Show()
     end
 
-    BoundToLearn:Print(sformat("Game started (%s). %d keybinds in play. Press ESC to stop.", currentMode, #availableSlots))
+    -- Game started silently; UI shows everything needed
 end
 
 function Game:StartCompetitive()
@@ -343,7 +371,7 @@ function Game:StartCompetitive()
     self:DiscoverCompetitiveSlots()
 
     if #availableSlots == 0 then
-        BoundToLearn:Print("No keybinds found on keys 1-5. Bind your first 5 action bar slots.")
+        BoundToLearn:Print("No competitive slots available. Check your keybinds.")
         if ns.GameUI then ns.GameUI:HideCompBar() end
         return
     end
@@ -358,18 +386,24 @@ function Game:StartCompetitive()
         ns.GameUI:OnGameStart(availableSlots)
     end
 
+    local difficulty = db.difficulty
     if ns.GameUI then
         ns.GameUI:ShowCountdown(3, function()
             gameStartTime = GetTime()
             gameFrame:Show()
             inputFrame:Show()
+            if BoundToLearn.db.game.soundEnabled then
+                local track = DIFFICULTY_MUSIC[difficulty]
+                if track then
+                    PlayMusic(track)
+                    isPlayingGameMusic = true
+                end
+            end
         end)
     else
         gameFrame:Show()
         inputFrame:Show()
     end
-
-    BoundToLearn:Print(sformat("Competitive game started. %d lanes. %ds timer.", #availableSlots, gameDuration))
 end
 
 function Game:Stop()
@@ -379,10 +413,21 @@ function Game:Stop()
     gameFrame:Hide()
     inputFrame:Hide()
     RestoreGameAudio()
-    if ns.GameUI then ns.GameUI:CancelCountdown() end
+    if ns.GameUI then
+        ns.GameUI:CancelCountdown()
+        if mirrorFlipped then
+            mirrorFlipped = false
+            ns.GameUI:SetMirrorFlipped(false)
+        end
+    end
 
     for i = #activeNotes, 1, -1 do
-        if ns.GameUI then ns.GameUI:ReleaseNote(activeNotes[i]) end
+        local note = activeNotes[i]
+        if note.bombSoundHandle then
+            StopSound(note.bombSoundHandle, 0)
+            note.bombSoundHandle = nil
+        end
+        if ns.GameUI then ns.GameUI:ReleaseNote(note) end
     end
     wipe(activeNotes)
 
@@ -392,7 +437,7 @@ function Game:Stop()
 
     local difficulty = BoundToLearn.db.game.difficulty
 
-    if ns.Stats and totalNotes > 0 then
+    if ns.Stats and totalNotes > 0 and currentMode ~= "practice" then
         ns.Stats:RecordGameSession({
             score = score,
             maxCombo = maxCombo,
@@ -434,7 +479,22 @@ function Game:Stop()
         ns.Leaderboard:OnGameEnd(results)
     end
 
-    BoundToLearn:Print(sformat("Game over. Score: %d | Best combo: %d", score, maxCombo))
+    -- Check achievements (non-practice only)
+    if ns.Achievements and totalNotes > 0 and currentMode ~= "practice" then
+        local newUnlocks = ns.Achievements:CheckRoundAchievements({
+            score = score,
+            maxCombo = maxCombo,
+            hitCounts = hitCounts,
+            difficulty = difficulty,
+            modifiers = gameModifiers,
+            mode = currentMode,
+        })
+        if #newUnlocks > 0 and ns.GameUI then
+            ns.GameUI:ShowAchievementUnlocks(newUnlocks)
+        end
+    end
+
+    -- Game over silently; summary UI shows results
 end
 
 function Game:Pause()
@@ -443,7 +503,7 @@ function Game:Pause()
         score = 0
         combo = 0
         multiplier = 1
-        BoundToLearn:Print("Score reset to 0 (competitive mode).")
+        -- Score reset handled silently; UI updates
         if ns.GameUI then
             ns.GameUI:UpdateScoreDisplay(score, combo, multiplier)
         end
@@ -544,23 +604,41 @@ function Game:OnUpdate(elapsed)
         end
     end
 
+    -- Mirror modifier: flip lane positions periodically
+    local activeMods = ns.Modifiers and ns.Modifiers:GetActive() or {}
+    if activeMods.mirror and now >= nextMirrorFlip then
+        mirrorFlipped = not mirrorFlipped
+        nextMirrorFlip = now + 8 + math.random() * 6  -- flip every 8-14 seconds
+        if ns.GameUI then ns.GameUI:SetMirrorFlipped(mirrorFlipped) end
+    end
+
     spawnAccumulator = spawnAccumulator + elapsed
     if spawnAccumulator >= settings.spawnInterval then
         spawnAccumulator = spawnAccumulator - settings.spawnInterval
         self:SpawnNote(now, settings)
+        -- Doubles: modifier only, not available in competitive (modifier keys conflict)
+        if currentMode ~= "competitive" and activeMods.doubles and math.random() < 0.20 then
+            self:SpawnNote(now, settings)
+        end
     end
+
+    -- Bombs detonate at ~20% overlap (80% of full distance between centers)
+    local bombDetonateThreshold = 48 * 0.8 / settings.fallSpeed
 
     for i = #activeNotes, 1, -1 do
         local note = activeNotes[i]
+        if not note then break end
         if not note.evaluated then
             local timeToTarget = note.targetTime - now
-            if timeToTarget < -settings.timingGood then
+            local missThreshold = (note.isBomb and bombDetonateThreshold) or -settings.timingGood
+            if timeToTarget < missThreshold then
                 if note.isRedHerring then
                     note.evaluated = true
                     note.evaluatedAt = now
                     note.result = "avoided"
                 else
                     self:EvaluateNote(note, "miss")
+                    if not isRunning then return end
                 end
             end
         end
@@ -591,19 +669,14 @@ function Game:SpawnNote(now, settings)
 
     local candidates = {}
     for _, slotInfo in ipairs(availableSlots) do
-        -- Skip destroyed lanes in competitive
-        if destroyedLanes[slotInfo.slot] then
-            -- lane offline, skip
-        else
-            local inUse = false
-            for _, n in ipairs(activeNotes) do
-                if not n.evaluated and n.slotInfo.slot == slotInfo.slot then
-                    inUse = true
-                    break
-                end
+        local inUse = false
+        for _, n in ipairs(activeNotes) do
+            if not n.evaluated and n.slotInfo.slot == slotInfo.slot then
+                inUse = true
+                break
             end
-            if not inUse then tinsert(candidates, slotInfo) end
         end
+        if not inUse then tinsert(candidates, slotInfo) end
     end
     if #candidates == 0 then return end
 
@@ -633,10 +706,18 @@ function Game:SpawnNote(now, settings)
         end
     end
 
-    -- Random approach angle for Extreme (limited range, some straight-down)
+    local mods = ns.Modifiers and ns.Modifiers:GetActive() or {}
+
+    -- Angled: modifier or forced on Extreme
     local spawnAngle = nil
-    if settings.randomAngles and math.random() > 0.3 then
+    if (mods.angled or settings.randomAngles) and math.random() > 0.3 then
         spawnAngle = math.pi / 2 + (math.random() * math.pi / 2 - math.pi / 4)
+    end
+
+    -- Squiggly: random phase offset so notes don't sync
+    local squigglyPhase = nil
+    if mods.squiggly then
+        squigglyPhase = math.random() * math.pi * 2
     end
 
     local note = {
@@ -650,15 +731,23 @@ function Game:SpawnNote(now, settings)
         isRedHerring = isRedHerring,
         displayTexture = displayTexture,
         spawnAngle = spawnAngle,
+        squigglyPhase = squigglyPhase,
         isBomb = isBomb,
+        modifiers = mods,
     }
 
     tinsert(activeNotes, note)
     if ns.GameUI then ns.GameUI:AcquireNote(note) end
+
+    if isBomb and BoundToLearn.db.game.soundEnabled then
+        local willPlay, handle = PlaySound(268433, "SFX", false)
+        if willPlay then note.bombSoundHandle = handle end
+    end
 end
 
 function Game:OnKeybindInput(slot)
     if not isRunning or isPaused then return end
+    if destroyedLanes[slot] then return end
     local now = GetTime()
     local settings = self:GetSettings()
 
@@ -678,6 +767,12 @@ function Game:OnKeybindInput(slot)
     -- Hitting a red herring is always a penalty
     if bestNote.isRedHerring then
         self:EvaluateRedHerring(bestNote)
+        return
+    end
+
+    -- Bombs can be shot down at any time during their fall
+    if bestNote.isBomb then
+        self:EvaluateNote(bestNote, "perfect")
         return
     end
 
@@ -752,9 +847,6 @@ function Game:EvaluateNote(note, result)
             local laneIdx = note.slotInfo.slot
             destroyedLanes[laneIdx] = GetTime() + (CD.laneDestroyDuration or 10)
             if ns.GameUI then ns.GameUI:DestroyLane(laneIdx, CD.laneDestroyDuration) end
-            if BoundToLearn.db.game.soundEnabled then
-                PlaySound(888)  -- combo milestone
-            end
         end
     else
         combo = combo + 1
@@ -787,14 +879,29 @@ function Game:EvaluateNote(note, result)
     end
 
     if BoundToLearn.db.game.soundEnabled then
-        if result == "perfect" then
-            PlaySound(891)   -- igBackPackCoinSelect (coin jingle)
+        if note.isBomb and result == "miss" then
+            PlaySound(44191)  -- bomb explosion
+        elseif note.isBomb then
+            PlaySound(888)    -- bomb shot down
+        elseif result == "perfect" then
+            PlaySound(891)    -- igBackPackCoinSelect (coin jingle)
         elseif result == "great" then
-            PlaySound(891)   -- igBackPackCoinSelect (coin, same but less flashy context)
+            PlaySound(3332)   -- RaidWarning (crisp ding)
         elseif result == "good" then
-            PlaySound(1217)  -- igMiniMapOpen (soft ping)
+            PlaySound(867)    -- igAbilityPageTurn (soft tap)
         else
-            PlaySound(846)   -- igQuestFailed
+            PlaySound(846)    -- igQuestFailed
+        end
+    end
+
+    -- Stop bomb fuse sound; hit bombs stay visible until projectile arrives
+    if note.isBomb then
+        if note.bombSoundHandle then
+            StopSound(note.bombSoundHandle, 0)
+            note.bombSoundHandle = nil
+        end
+        if result == "miss" then
+            if ns.GameUI then ns.GameUI:ReleaseNote(note) end
         end
     end
 
@@ -831,7 +938,7 @@ function Game:EvaluateRedHerring(note)
     end
 
     if BoundToLearn.db.game.soundEnabled then
-        PlaySound(882)  -- igAbilityPageTurn (distinct from miss)
+        PlaySound(23330)  -- goblin male laugh
     end
 
     UpdateFocus(-FOCUS_DRAIN.redHerring * GetFocusDrainScale())
