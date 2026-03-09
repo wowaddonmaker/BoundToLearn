@@ -97,6 +97,20 @@ function Stats:RecordGameSession(gameData)
         if summary.combo > db2.longestCombo then
             db2.longestCombo = summary.combo
         end
+
+        -- Track competitive bests separately for competitive achievements
+        if gameData.mode == "competitive" then
+            if not db.difficultyBest.Competitive then
+                db.difficultyBest.Competitive = { highestScore = 0, longestCombo = 0 }
+            end
+            local compDB = db.difficultyBest.Competitive
+            if summary.score > compDB.highestScore then
+                compDB.highestScore = summary.score
+            end
+            if summary.combo > compDB.longestCombo then
+                compDB.longestCombo = summary.combo
+            end
+        end
     end
 
     if newBest then

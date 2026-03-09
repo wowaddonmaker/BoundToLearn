@@ -25,6 +25,7 @@ local IsMouseButtonDown = IsMouseButtonDown
 local gameOverlay
 local controlBar
 local scoreFrame, scoreText, comboText, multiplierText, difficultyText, timerText
+local modifierRow, modifierBtn, modifierDropdown
 local pauseOverlay, pauseText
 local notePool = {}
 local resultPool = {}
@@ -34,11 +35,14 @@ local compBarFrame
 local compBarButtons = {}
 local dangerOverlay
 local dangerPulseAG
+local projectilePool = {}
 
-local NOTE_POOL_SIZE = 20
+local NOTE_POOL_SIZE = 30
 local RESULT_POOL_SIZE = 10
 local NOTE_SIZE = 40
 local ICON_CROP = 0.07
+local COMP_BTN_SIZE = 48
+local COMP_BTN_GAP = 6
 
 local isInitialized = false
 
@@ -84,6 +88,7 @@ function GameUI:Initialize()
     self:CreatePauseOverlay()
     self:CreateCountdown()
     self:CreateDangerOverlay()
+    self:CreateStreakTitle()
 end
 
 function GameUI:CreateOverlay()
@@ -123,6 +128,45 @@ function GameUI:CreateNotePool()
         label:SetShadowOffset(1, -1)
         label:SetTextColor(1, 1, 1)
         f.label = label
+
+        -- Bomb indicator: skull + fuse spark
+        local bombIcon = f:CreateTexture(nil, "OVERLAY", nil, 2)
+        bombIcon:SetSize(20, 20)
+        bombIcon:SetPoint("TOPLEFT", -6, 6)
+        bombIcon:SetAtlas("Warfronts-BaseMapIcons-Horde-Attacked-Large")
+        bombIcon:Hide()
+        f.bombIcon = bombIcon
+
+        local fuse = f:CreateTexture(nil, "OVERLAY", nil, 3)
+        fuse:SetSize(10, 10)
+        fuse:SetPoint("CENTER", bombIcon, "TOP", 2, 0)
+        fuse:SetAtlas("Spark")
+        fuse:SetBlendMode("ADD")
+        fuse:Hide()
+        f.fuse = fuse
+
+        -- Bomb blink animation (alpha pulse on the whole frame)
+        local blinkAG = f:CreateAnimationGroup()
+        blinkAG:SetLooping("BOUNCE")
+        local blink = blinkAG:CreateAnimation("Alpha")
+        blink:SetFromAlpha(1)
+        blink:SetToAlpha(0.4)
+        blink:SetDuration(0.25)
+        blink:SetSmoothing("IN_OUT")
+        f.blinkAG = blinkAG
+
+        -- Fuse spark shimmer
+        local fuseAG = fuse:CreateAnimationGroup()
+        fuseAG:SetLooping("BOUNCE")
+        local fuseAlpha = fuseAG:CreateAnimation("Alpha")
+        fuseAlpha:SetFromAlpha(1)
+        fuseAlpha:SetToAlpha(0.2)
+        fuseAlpha:SetDuration(0.15)
+        local fuseScale = fuseAG:CreateAnimation("Scale")
+        fuseScale:SetScaleFrom(1, 1)
+        fuseScale:SetScaleTo(1.4, 1.4)
+        fuseScale:SetDuration(0.15)
+        f.fuseAG = fuseAG
 
         f.inUse = false
         notePool[i] = f
@@ -253,6 +297,33 @@ function GameUI:CreateScoreDisplay()
     bestText:SetText("")
     scoreFrame.bestText = bestText
 
+    -- Rank icon (tinted achievement symbol next to best score, with tooltip)
+    local rankBtn = CreateFrame("Frame", nil, scoreFrame)
+    rankBtn:SetSize(18, 18)
+    rankBtn:SetPoint("LEFT", bestText, "RIGHT", 3, 0)
+    rankBtn:EnableMouse(true)
+    rankBtn:Hide()
+
+    local rankTex = rankBtn:CreateTexture(nil, "OVERLAY")
+    rankTex:SetAllPoints()
+    rankTex:SetAtlas("UI-HUD-MicroMenu-Achievements-Mouseover")
+    rankBtn.tex = rankTex
+
+    rankBtn:SetScript("OnEnter", function(self)
+        if not self.rankData then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(sformat("|cFF%s%s|r", self.rankData.color, self.rankData.name))
+        local next = self.nextRank
+        if next then
+            GameTooltip:AddLine(sformat("Next: %s (%d pts)", next.name, next.threshold), 0.7, 0.7, 0.7)
+        else
+            GameTooltip:AddLine("Highest rank achieved", 0.7, 0.7, 0.7)
+        end
+        GameTooltip:Show()
+    end)
+    rankBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    scoreFrame.rankBtn = rankBtn
+
     -- Divider above difficulty row
     local divider2 = scoreFrame:CreateTexture(nil, "ARTWORK")
     divider2:SetPoint("LEFT", 14, 0)
@@ -291,6 +362,99 @@ function GameUI:CreateScoreDisplay()
 
         difficultyText[i] = btn
     end
+
+    -- Modifier selector row
+    modifierRow = CreateFrame("Frame", nil, scoreFrame)
+    modifierRow:SetSize(220, 20)
+    modifierRow:SetPoint("TOP", diffRow, "BOTTOM", 0, -2)
+    scoreFrame.modifierRow = modifierRow
+
+    modifierBtn = CreateFrame("Button", nil, modifierRow)
+    modifierBtn:SetSize(220, 18)
+    modifierBtn:SetPoint("CENTER")
+    modifierBtn:SetNormalFontObject("GameFontNormalSmall")
+    modifierBtn:SetHighlightFontObject("GameFontHighlightSmall")
+
+    local modBg = modifierBtn:CreateTexture(nil, "BACKGROUND")
+    modBg:SetAllPoints()
+    modBg:SetColorTexture(0.12, 0.12, 0.18, 0.6)
+    modifierBtn.bg = modBg
+
+    modifierBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:ToggleModifierDropdown()
+    end)
+    GameUI:UpdateModifierButton()
+
+    -- Sidebar tab anchored flush to the right edge of scoreFrame, centered vertically
+    local sideTab = CreateFrame("Button", nil, scoreFrame, "BackdropTemplate")
+    sideTab:SetSize(18, 80)
+    sideTab:SetPoint("LEFT", scoreFrame, "RIGHT", -3, 0)
+    sideTab:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    sideTab:SetBackdropColor(0.06, 0.05, 0.02, 0.95)
+    sideTab:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
+
+    local tabIcon = sideTab:CreateTexture(nil, "ARTWORK")
+    tabIcon:SetSize(12, 12)
+    tabIcon:SetPoint("CENTER")
+    tabIcon:SetAtlas("UI-HUD-MicroMenu-Achievements-Mouseover")
+    sideTab.icon = tabIcon
+
+    sideTab:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:ToggleAchievementPanel()
+    end)
+    sideTab:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.6, 0.5, 0.2, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Achievements")
+        GameTooltip:Show()
+    end)
+    sideTab:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
+        GameTooltip:Hide()
+    end)
+    scoreFrame.sideTab = sideTab
+
+    -- Leaderboard tab anchored flush to the left edge of scoreFrame
+    local lbTab = CreateFrame("Button", nil, scoreFrame, "BackdropTemplate")
+    lbTab:SetSize(18, 80)
+    lbTab:SetPoint("RIGHT", scoreFrame, "LEFT", 3, 0)
+    lbTab:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    lbTab:SetBackdropColor(0.02, 0.05, 0.06, 0.95)
+    lbTab:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
+
+    local lbIcon = lbTab:CreateTexture(nil, "ARTWORK")
+    lbIcon:SetSize(12, 12)
+    lbIcon:SetPoint("CENTER")
+    lbIcon:SetAtlas("UI-HUD-MicroMenu-GuildCommunities-Mouseover")
+    lbTab.icon = lbIcon
+
+    lbTab:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        if ns.LeaderboardUI then ns.LeaderboardUI:Toggle() end
+    end)
+    lbTab:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.2, 0.5, 0.6, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("Leaderboard")
+        GameTooltip:Show()
+    end)
+    lbTab:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
+        GameTooltip:Hide()
+    end)
+    scoreFrame.lbTab = lbTab
 end
 
 function GameUI:UpdateDifficultyButtons()
@@ -313,11 +477,121 @@ function GameUI:UpdateBestText()
     local diff = BoundToLearn.db.game.difficulty
     local db = BoundToLearn.db.stats.difficultyBest
     local best = db and db[diff]
+    local rb = scoreFrame.rankBtn
     if best and best.highestScore > 0 then
+        local Ach = ns.Achievements
+        local rank = Ach and Ach:GetRank(best.highestScore)
         scoreFrame.bestText:SetText(sformat("Best: |cFFFFCC00%d|r", best.highestScore))
+        if rank and rank.threshold > 0 and rb then
+            local c = rank.rgb
+            rb.tex:SetVertexColor(c[1], c[2], c[3], 1)
+            rb.rankData = rank
+            rb.nextRank = Ach:GetNextRank(best.highestScore)
+            rb:Show()
+        elseif rb then
+            rb:Hide()
+        end
     else
         scoreFrame.bestText:SetText("")
+        if rb then rb:Hide() end
     end
+end
+
+function GameUI:UpdateModifierButton()
+    if not modifierBtn then return end
+    local Mods = ns.Modifiers
+    if not Mods then return end
+    modifierBtn:SetText("Modifiers")
+    local count = Mods:GetActiveCount()
+    local fs = modifierBtn:GetFontString()
+    if fs then
+        fs:SetTextColor(count > 0 and 0.4 or 0.7, count > 0 and 0.8 or 0.7, count > 0 and 1.0 or 0.7)
+    end
+end
+
+function GameUI:ToggleModifierDropdown()
+    if modifierDropdown and modifierDropdown:IsShown() then
+        modifierDropdown:Hide()
+        return
+    end
+    self:BuildModifierDropdown()
+end
+
+function GameUI:BuildModifierDropdown()
+    local Mods = ns.Modifiers
+    if not Mods then return end
+
+    if not modifierDropdown then
+        modifierDropdown = CreateFrame("Frame", nil, modifierBtn, "BackdropTemplate")
+        modifierDropdown:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 10,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        modifierDropdown:SetBackdropColor(0.06, 0.05, 0.08, 0.95)
+        modifierDropdown:SetBackdropBorderColor(0.3, 0.3, 0.4, 0.9)
+        modifierDropdown:SetFrameStrata("FULLSCREEN_DIALOG")
+        modifierDropdown:SetFrameLevel(100)
+    end
+
+    -- Clear old children
+    for _, child in ipairs({modifierDropdown:GetChildren()}) do
+        child:Hide()
+        child:SetParent(nil)
+    end
+
+    local list = Mods.MODIFIER_LIST
+    local rowH = 20
+    local pad = 4
+    modifierDropdown:SetSize(220, #list * rowH + pad * 2)
+    modifierDropdown:ClearAllPoints()
+    modifierDropdown:SetPoint("TOPLEFT", modifierBtn, "BOTTOMLEFT", 0, -2)
+
+    local active = Mods:GetActive()
+    for i, m in ipairs(list) do
+        local row = CreateFrame("Button", nil, modifierDropdown)
+        row:SetSize(216, rowH)
+        row:SetPoint("TOPLEFT", pad, -(pad + (i - 1) * rowH))
+        row:SetNormalFontObject("GameFontNormalSmall")
+        row:SetHighlightFontObject("GameFontHighlightSmall")
+
+        local unlocked = Mods:IsUnlocked(m.id)
+        local isActive = active[m.id]
+
+        if unlocked then
+            local prefix = isActive and "|cFF44CC44[x]|r " or "|cFF666666[ ]|r "
+            row:SetText(prefix .. m.name)
+            local fs = row:GetFontString()
+            fs:SetTextColor(isActive and 0.4 or 0.85, isActive and 0.8 or 0.85, isActive and 1.0 or 0.85)
+            row:SetScript("OnClick", function()
+                PlayUISound(SOUND_CLICK)
+                Mods:Toggle(m.id)
+                GameUI:BuildModifierDropdown()
+                GameUI:UpdateModifierButton()
+            end)
+        else
+            row:SetText("|cFF555555[ ] " .. m.name .. "|r")
+            row:SetScript("OnClick", function() end)
+        end
+
+        row:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(m.name)
+            GameTooltip:AddLine(m.desc, 1, 1, 1, true)
+            if m.descExtra then
+                GameTooltip:AddLine(m.descExtra, 0.6, 0.8, 1.0, true)
+            end
+            if not unlocked and m.unlockHint then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Unlock: " .. m.unlockHint, 1, 0.5, 0.2, true)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    modifierDropdown:Show()
 end
 
 function GameUI:UpdateTimer(remaining)
@@ -341,13 +615,13 @@ end
 
 function GameUI:CreateControlBar()
     controlBar = CreateFrame("Frame", nil, scoreFrame)
-    controlBar:SetPoint("TOPLEFT", scoreFrame.diffRow, "BOTTOMLEFT", 0, -4)
-    controlBar:SetPoint("TOPRIGHT", scoreFrame.diffRow, "BOTTOMRIGHT", 0, -4)
+    controlBar:SetPoint("TOPLEFT", scoreFrame.modifierRow, "BOTTOMLEFT", 0, -4)
+    controlBar:SetPoint("TOPRIGHT", scoreFrame.modifierRow, "BOTTOMRIGHT", 0, -4)
     controlBar:EnableMouse(true)
 
     local pauseBtn = CreateFrame("Button", nil, controlBar, "UIPanelButtonTemplate")
     pauseBtn:SetSize(105, 22)
-    pauseBtn:SetPoint("TOPLEFT", scoreFrame.diffRow, "BOTTOMLEFT", -1, -4)
+    pauseBtn:SetPoint("TOPLEFT", scoreFrame.modifierRow, "BOTTOMLEFT", -1, -4)
     pauseBtn:SetText("Pause")
     pauseBtn:SetScript("OnClick", function()
         if ns.Game then
@@ -362,7 +636,7 @@ function GameUI:CreateControlBar()
 
     local stopBtn = CreateFrame("Button", nil, controlBar, "UIPanelButtonTemplate")
     stopBtn:SetSize(105, 22)
-    stopBtn:SetPoint("TOPRIGHT", scoreFrame.diffRow, "BOTTOMRIGHT", 1, -4)
+    stopBtn:SetPoint("TOPRIGHT", scoreFrame.modifierRow, "BOTTOMRIGHT", 1, -4)
     stopBtn:SetText("Stop")
     stopBtn:SetScript("OnClick", function()
         if ns.Game then ns.Game:Stop() end
@@ -412,14 +686,16 @@ function GameUI:CreateControlBar()
     compBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Competitive Mode")
-        GameTooltip:AddLine("5 fixed lanes, same for everyone.", 1, 1, 1, true)
+        GameTooltip:AddLine("15 fixed lanes (1-5, Shift, Ctrl), same for everyone.", 1, 1, 1, true)
         GameTooltip:AddLine("Bomb notes destroy your lane if missed.", 1, 0.8, 0.3, true)
+        GameTooltip:AddLine("Extreme forces angled notes.", 0.6, 0.8, 1.0, true)
         GameTooltip:AddLine("Pausing resets your score to zero.", 1, 0.5, 0.5, true)
         GameTooltip:Show()
     end)
     compBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     compBtn:Hide()
     controlBar.compBtn = compBtn
+
 end
 
 function GameUI:CreatePauseOverlay()
@@ -529,6 +805,59 @@ function GameUI:UpdateFocusBar(current, max)
     end
 end
 
+local streakText
+local streakFadeAG
+local lastStreakCombo = 0
+
+function GameUI:CreateStreakTitle()
+    streakText = gameOverlay:CreateFontString(nil, "OVERLAY")
+    streakText:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
+    streakText:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    streakText:SetAlpha(0)
+
+    streakFadeAG = streakText:CreateAnimationGroup()
+    local fadeIn = streakFadeAG:CreateAnimation("Alpha")
+    fadeIn:SetFromAlpha(0)
+    fadeIn:SetToAlpha(1)
+    fadeIn:SetDuration(0.2)
+    fadeIn:SetOrder(1)
+    local hold = streakFadeAG:CreateAnimation("Alpha")
+    hold:SetFromAlpha(1)
+    hold:SetToAlpha(1)
+    hold:SetDuration(1.2)
+    hold:SetOrder(2)
+    local fadeOut = streakFadeAG:CreateAnimation("Alpha")
+    fadeOut:SetFromAlpha(1)
+    fadeOut:SetToAlpha(0)
+    fadeOut:SetDuration(0.5)
+    fadeOut:SetOrder(3)
+    streakFadeAG:SetScript("OnFinished", function() streakText:SetAlpha(0) end)
+end
+
+function GameUI:ShowStreakTitle(combo)
+    if not streakText then return end
+    local Ach = ns.Achievements
+    if not Ach then return end
+    local title = Ach:GetStreakTitle(combo)
+    if not title then return end
+    -- Only show when crossing a new threshold
+    local prev = Ach:GetStreakTitle(lastStreakCombo)
+    if prev and prev.combo == title.combo then return end
+    lastStreakCombo = combo
+
+    streakText:SetText(title.text)
+    streakText:SetTextColor(title.color[1], title.color[2], title.color[3])
+    streakFadeAG:Stop()
+    streakText:SetAlpha(0)
+    streakFadeAG:Play()
+end
+
+function GameUI:ResetStreakTitle()
+    lastStreakCombo = 0
+    if streakFadeAG then streakFadeAG:Stop() end
+    if streakText then streakText:SetAlpha(0) end
+end
+
 function GameUI:CreateCountdown()
     countdownFrame = CreateFrame("Frame", nil, UIParent)
     countdownFrame:SetAllPoints()
@@ -543,7 +872,7 @@ end
 
 -- Public methods called by Game.lua
 
-local DIFFROW_BOTTOM = 103 -- fixed layout above diffRow: accent+score+dividers+best+diffRow
+local DIFFROW_BOTTOM = 125 -- fixed layout: accent+score+dividers+best+diffRow+modifierRow
 
 function GameUI:ResizeScoreFrame()
     if not scoreFrame or not controlBar then return end
@@ -559,6 +888,8 @@ function GameUI:ShowReadyState()
         timerText:SetText("")
         self:UpdateDifficultyButtons()
         if scoreFrame.diffRow then scoreFrame.diffRow:Show() end
+        if modifierRow then modifierRow:Show() end
+        self:UpdateModifierButton()
         self:UpdateBestText()
     end
     if controlBar then
@@ -569,10 +900,12 @@ function GameUI:ShowReadyState()
         controlBar.compBtn:Show()
         controlBar:SetHeight(46)
     end
+    if modifierDropdown then modifierDropdown:Hide() end
     self:ResizeScoreFrame()
 end
 
 function GameUI:OnGameStart(slots)
+    self:ResetStreakTitle()
     if self.summaryFrame and self.summaryFrame:IsShown() then
         self.summaryFrame:Hide()
     end
@@ -590,11 +923,13 @@ function GameUI:OnGameStart(slots)
     end
     self:ResizeScoreFrame()
 
-    -- Show/hide difficulty row based on mode
+    -- Hide difficulty and modifier rows during gameplay
     local mode = ns.Game and ns.Game:GetMode() or "timed"
     if scoreFrame and scoreFrame.diffRow then
         scoreFrame.diffRow:SetShown(mode ~= "competitive")
     end
+    if modifierRow then modifierRow:Hide() end
+    if modifierDropdown then modifierDropdown:Hide() end
     self:UpdateDifficultyButtons()
 
     -- Set initial timer
@@ -645,8 +980,9 @@ function GameUI:CreateHitZones(slots)
     for _, slotInfo in ipairs(slots) do
         local btn = slotInfo.button
         if btn then
+            local hzSize = (slotInfo.competitive and COMP_BTN_SIZE or NOTE_SIZE) + 8
             local glow = CreateFrame("Frame", nil, gameOverlay)
-            glow:SetSize(NOTE_SIZE + 8, NOTE_SIZE + 8)
+            glow:SetSize(hzSize, hzSize)
             glow:SetFrameStrata("FULLSCREEN")
             glow:SetFrameLevel(55)
             glow:SetPoint("CENTER", btn, "CENTER")
@@ -682,27 +1018,33 @@ function GameUI:AcquireNote(note)
     for _, f in ipairs(notePool) do
         if not f.inUse then
             f.inUse = true
-            f.icon:SetTexture(note.displayTexture or note.slotInfo.texture)
-            f.label:SetText(GameUI:FormatKeybind(note.slotInfo.keybind))
             f.isBomb = note.isBomb
 
+            -- Match comp bar button size in competitive mode
+            local size = note.slotInfo.competitive and COMP_BTN_SIZE or NOTE_SIZE
+            f:SetSize(size, size)
+
             if note.isBomb then
+                f.icon:SetTexture("Interface\\Icons\\inv_wildfirebomb")
                 f.border:SetVertexColor(1, 0.15, 0.1, 1)
-                if not f.bombAG then
-                    f.bombAG = f:CreateAnimationGroup()
-                    f.bombAG:SetLooping("BOUNCE")
-                    local scale = f.bombAG:CreateAnimation("Scale")
-                    scale:SetScaleFrom(1, 1)
-                    scale:SetScaleTo(1.15, 1.15)
-                    scale:SetDuration(0.3)
-                    scale:SetSmoothing("IN_OUT")
+                f.bombIcon:Show()
+                f.fuse:Show()
+                f.blinkAG:Play()
+                f.fuseAG:Play()
+                if note.slotInfo.competitive then
+                    self:SetLaneBombTarget(note.slotInfo.laneIndex, true)
                 end
-                f.bombAG:Play()
             else
+                f.icon:SetTexture(note.displayTexture or note.slotInfo.texture)
                 f.border:SetVertexColor(1, 1, 1, 0.8)
-                if f.bombAG then f.bombAG:Stop() end
+                f.bombIcon:Hide()
+                f.fuse:Hide()
+                f.blinkAG:Stop()
+                f.fuseAG:Stop()
+                f:SetAlpha(1)
             end
 
+            f.label:SetText(GameUI:FormatKeybind(note.slotInfo.keybind))
             f:Show()
             note.noteFrame = f
             return
@@ -713,10 +1055,18 @@ end
 function GameUI:ReleaseNote(note)
     local f = note.noteFrame
     if f then
-        if f.bombAG then f.bombAG:Stop() end
+        f.blinkAG:Stop()
+        f.fuseAG:Stop()
+        f:SetAlpha(1)
+        f:SetSize(NOTE_SIZE, NOTE_SIZE)
+        f.bombIcon:Hide()
+        f.fuse:Hide()
         f:Hide()
         f.inUse = false
         note.noteFrame = nil
+    end
+    if note.isBomb and note.slotInfo.competitive then
+        self:SetLaneBombTarget(note.slotInfo.laneIndex, false)
     end
 end
 
@@ -751,29 +1101,162 @@ function GameUI:UpdateNotePosition(note, progress)
     local yTarget = (by * bScale) / fScale
     local fallDist = BoundToLearn.db.game.fallDistance / fScale
 
+    local mods = note.modifiers or {}
+
+    -- Accelerate: remap progress so notes speed up as they fall
+    local effectiveProgress = progress
+    if mods.accelerate then
+        effectiveProgress = progress * progress  -- quadratic ease-in
+    end
+
     local x, y
     if note.spawnAngle then
-        -- Random angle approach: converge to target then continue past
-        local remaining = 1.0 - progress
+        local remaining = 1.0 - effectiveProgress
         x = xTarget + math.cos(note.spawnAngle) * fallDist * remaining
         y = yTarget + math.sin(note.spawnAngle) * fallDist * remaining
     else
-        -- Standard: fall straight down
         x = xTarget
-        y = yTarget + fallDist * (1.0 - progress)
+        y = yTarget + fallDist * (1.0 - effectiveProgress)
+    end
+
+    -- Squiggly: sinusoidal horizontal oscillation
+    if mods.squiggly and note.squigglyPhase then
+        local amplitude = 40 / fScale
+        local freq = 4
+        x = x + math.sin(effectiveProgress * freq * math.pi + note.squigglyPhase) * amplitude * (1.0 - effectiveProgress)
     end
 
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
 
-    local proximity = mmax(0, 1.0 - mabs(1.0 - progress) * 3)
-    local r = 1.0 - proximity * 0.8
-    local g = 1.0
-    local b = 1.0 - proximity * 0.8
-    f.border:SetVertexColor(r, g, b, 0.6 + proximity * 0.4)
+    -- Fade: notes become transparent as they approach
+    if mods.fade then
+        local alpha = mmax(0.08, 1.0 - effectiveProgress * 0.95)
+        f:SetAlpha(alpha)
+    else
+        f:SetAlpha(1)
+    end
+
+    if not f.isBomb then
+        local proximity = mmax(0, 1.0 - mabs(1.0 - effectiveProgress) * 3)
+        local r = 1.0 - proximity * 0.8
+        local g = 1.0
+        local b = 1.0 - proximity * 0.8
+        f.border:SetVertexColor(r, g, b, 0.6 + proximity * 0.4)
+    end
+end
+
+function GameUI:FlashNote(note, result)
+    local nf = note.noteFrame
+    if not nf then return end
+
+    local color = RESULT_COLORS[result]
+    if color and result ~= "miss" then
+        nf.border:SetVertexColor(color[1], color[2], color[3], 1)
+        nf.icon:SetAlpha(1)
+    end
+
+    -- Quick scale pop
+    if not nf.hitAG then
+        nf.hitAG = nf:CreateAnimationGroup()
+        local up = nf.hitAG:CreateAnimation("Scale")
+        up:SetScaleFrom(1, 1)
+        up:SetScaleTo(1.3, 1.3)
+        up:SetDuration(0.08)
+        up:SetSmoothing("OUT")
+        up:SetOrder(1)
+        local down = nf.hitAG:CreateAnimation("Scale")
+        down:SetScaleFrom(1.3, 1.3)
+        down:SetScaleTo(1, 1)
+        down:SetDuration(0.12)
+        down:SetSmoothing("IN")
+        down:SetOrder(2)
+    end
+    nf.hitAG:Stop()
+    nf.hitAG:Play()
+end
+
+function GameUI:FireProjectile(fromBtn, toFrame, note)
+    if not fromBtn or not toFrame then return end
+    local bx, by = fromBtn:GetCenter()
+    local tx, ty = toFrame:GetCenter()
+    if not bx or not tx then return end
+
+    local f
+    for i = 1, #projectilePool do
+        if not projectilePool[i].inUse then
+            f = projectilePool[i]
+            break
+        end
+    end
+    if not f then
+        f = CreateFrame("Frame", nil, gameOverlay)
+        f:SetSize(24, 24)
+        f:SetFrameStrata("FULLSCREEN")
+        f:SetFrameLevel(70)
+        local tex = f:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\Icons\\Spell_Fire_FlameBolt")
+        tex:SetTexCoord(ICON_CROP, 1 - ICON_CROP, ICON_CROP, 1 - ICON_CROP)
+        tex:SetBlendMode("ADD")
+        f.tex = tex
+        local glow = f:CreateTexture(nil, "BACKGROUND")
+        glow:SetSize(36, 36)
+        glow:SetPoint("CENTER")
+        glow:SetAtlas("Spark")
+        glow:SetBlendMode("ADD")
+        glow:SetVertexColor(1, 0.5, 0.1, 0.6)
+        f.glow = glow
+        tinsert(projectilePool, f)
+    end
+
+    f.inUse = true
+    f.elapsed = 0
+    f.duration = 0.25
+    f.targetNote = note
+    local fScale = f:GetEffectiveScale()
+    local bScale = fromBtn:GetEffectiveScale()
+    local tScale = toFrame:GetEffectiveScale()
+    f.sx = (bx * bScale) / fScale
+    f.sy = (by * bScale) / fScale
+    f.tx = (tx * tScale) / fScale
+    f.ty = (ty * tScale) / fScale
+
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", f.sx, f.sy)
+    f:SetAlpha(1)
+    f:Show()
+
+    f:SetScript("OnUpdate", function(self, dt)
+        self.elapsed = self.elapsed + dt
+        local p = self.elapsed / self.duration
+        if p >= 1 then
+            self:Hide()
+            self:SetScript("OnUpdate", nil)
+            self.inUse = false
+            if self.targetNote then
+                PlaySound(44191)  -- bomb explosion on impact
+                GameUI:ReleaseNote(self.targetNote)
+                self.targetNote = nil
+            end
+            return
+        end
+        local x = self.sx + (self.tx - self.sx) * p
+        local y = self.sy + (self.ty - self.sy) * p
+        self:ClearAllPoints()
+        self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+        self:SetAlpha(1 - p * 0.3)
+    end)
 end
 
 function GameUI:ShowHitResult(note, result, points)
+    -- Fire projectile from cannon to bomb
+    if note.isBomb and result ~= "miss" and note.slotInfo.competitive and note.noteFrame then
+        local btn = compBarButtons[note.slotInfo.laneIndex]
+        self:FireProjectile(btn, note.noteFrame, note)
+    end
+    self:FlashNote(note, result)
+
     local f = self:AcquireResultText()
     if not f then return end
 
@@ -885,6 +1368,10 @@ function GameUI:UpdateScoreDisplay(currentScore, currentCombo, currentMultiplier
         else
             multiplierText:SetTextColor(0.7, 0.7, 0.7)
         end
+    end
+
+    if currentCombo > 0 then
+        self:ShowStreakTitle(currentCombo)
     end
 end
 
@@ -1098,7 +1585,7 @@ end
 
 function GameUI:CreateSummaryFrame()
     local sf = CreateFrame("Frame", "BoundToLearnSummary", UIParent, "BackdropTemplate")
-    sf:SetSize(320, 380)
+    sf:SetSize(280, 310)
     sf:SetFrameStrata("FULLSCREEN_DIALOG")
     sf:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -1111,48 +1598,47 @@ function GameUI:CreateSummaryFrame()
     sf:EnableMouse(true)
 
     local title = sf:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
-    title:SetPoint("TOP", 0, -12)
+    title:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    title:SetPoint("TOP", 0, -10)
     title:SetText("|cFF55CCFFRound Complete|r")
     sf.title = title
 
-    local y = -45
+    local y = -34
     local function AddRow(label, valueColor)
         local lbl = sf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", 20, y)
+        lbl:SetPoint("TOPLEFT", 15, y)
         lbl:SetText(label)
         lbl:SetJustifyH("LEFT")
 
-        local val = sf:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-        val:SetPoint("TOPRIGHT", -20, y)
+        local val = sf:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        val:SetPoint("TOPRIGHT", -15, y)
         val:SetJustifyH("RIGHT")
         if valueColor then
             val:SetTextColor(valueColor[1], valueColor[2], valueColor[3])
         end
 
-        y = y - 28
+        y = y - 22
         return lbl, val
     end
 
     sf.scoreLabel, sf.scoreValue = AddRow("Score", {1, 0.84, 0})
     sf.comboLabel, sf.comboValue = AddRow("Best Combo", {1, 1, 1})
     sf.accuracyLabel, sf.accuracyValue = AddRow("Accuracy", {0.2, 1, 0.2})
-    y = y - 10
+    y = y - 4
 
     local divider = sf:CreateTexture(nil, "ARTWORK")
-    divider:SetPoint("LEFT", 15, 0)
-    divider:SetPoint("RIGHT", -15, 0)
+    divider:SetPoint("LEFT", 12, 0)
+    divider:SetPoint("RIGHT", -12, 0)
     divider:SetPoint("TOP", 0, y)
     divider:SetHeight(1)
     divider:SetColorTexture(0.4, 0.4, 0.4, 0.5)
-    y = y - 15
+    y = y - 10
 
     sf.perfectLabel, sf.perfectValue = AddRow("Perfect", RESULT_COLORS.perfect)
     sf.greatLabel, sf.greatValue = AddRow("Great", RESULT_COLORS.great)
     sf.goodLabel, sf.goodValue = AddRow("Good", RESULT_COLORS.good)
     sf.missLabel, sf.missValue = AddRow("Miss", RESULT_COLORS.miss)
     sf.fakeLabel, sf.fakeValue = AddRow("Fakes Hit", RESULT_COLORS.redHerring)
-    y = y - 5
     sf.durationLabel, sf.durationValue = AddRow("Duration", {0.7, 0.7, 0.7})
 
     -- Share button
@@ -1185,7 +1671,7 @@ function GameUI:FormatShareMessage(results)
     local mode = results.mode or "timed"
     local modeLabel = mode == "practice" and "Practice" or mode == "competitive" and "Competitive" or "Timed"
     return sformat(
-        "[BoundToLearn] %s %s: Score %d | Accuracy %.1f | Combo %d | P:%d G:%d OK:%d M:%d",
+        "[BoundToLearn] %s %s - Score %d, Accuracy %.1f, Combo %d (P:%d G:%d OK:%d M:%d)",
         modeLabel, diff, results.score, accuracy, results.maxCombo,
         results.hitCounts.perfect or 0, results.hitCounts.great or 0,
         results.hitCounts.good or 0, results.hitCounts.miss or 0
@@ -1268,104 +1754,99 @@ function GameUI:Hide()
     self:ReleaseAllNotes()
 end
 
--- Competitive bar: 5 universal buttons
-local COMP_BTN_SIZE = 48
-local COMP_BTN_GAP = 6
+local COMP_ROW_GAP = 4
 
 function GameUI:CreateCompBar()
     local CD = ns.CompetitiveData
     if not CD then return end
 
     if not compBarFrame then
-        compBarFrame = CreateFrame("Frame", "BoundToLearnCompBar", UIParent, "BackdropTemplate")
+        compBarFrame = CreateFrame("Frame", "BoundToLearnCompBar", UIParent)
         compBarFrame:SetFrameStrata("FULLSCREEN")
         compBarFrame:SetFrameLevel(55)
-        local totalW = 5 * (COMP_BTN_SIZE + COMP_BTN_GAP) - COMP_BTN_GAP + 24
-        local totalH = COMP_BTN_SIZE + 24
-        compBarFrame:SetSize(totalW, totalH)
-        compBarFrame:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 100)
-        compBarFrame:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        compBarFrame:SetBackdropColor(0.03, 0.03, 0.03, 0.85)
-        compBarFrame:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.8)
     end
 
-    -- Clear old buttons
-    for _, btn in ipairs(compBarButtons) do
+    local cols = CD.COLS
+    local rows = #CD.rows
+    local totalW = cols * (COMP_BTN_SIZE + COMP_BTN_GAP) - COMP_BTN_GAP
+    local totalH = rows * COMP_BTN_SIZE + (rows - 1) * COMP_ROW_GAP
+    compBarFrame:ClearAllPoints()
+    compBarFrame:SetSize(totalW, totalH)
+    -- Anchor so the top row (base keys) stays at the same position as the old single row
+    compBarFrame:SetPoint("TOP", UIParent, "BOTTOM", 0, 220 + COMP_BTN_SIZE)
+
+    -- Clear old buttons and labels
+    for _, btn in pairs(compBarButtons) do
         btn:Hide()
     end
     wipe(compBarButtons)
+    if compBarFrame.rowLabels then
+        for _, lbl in ipairs(compBarFrame.rowLabels) do
+            lbl:Hide()
+        end
+        wipe(compBarFrame.rowLabels)
+    end
 
     for i, slotDef in ipairs(CD.slots) do
         local c = slotDef.color
+        local col = slotDef.col
+        local row = slotDef.row
+
         local btn = CreateFrame("Frame", nil, compBarFrame)
         btn:SetSize(COMP_BTN_SIZE, COMP_BTN_SIZE)
         btn:SetPoint("TOPLEFT", compBarFrame, "TOPLEFT",
-            12 + (i - 1) * (COMP_BTN_SIZE + COMP_BTN_GAP), -12)
+            (col - 1) * (COMP_BTN_SIZE + COMP_BTN_GAP),
+            -(row - 1) * (COMP_BTN_SIZE + COMP_ROW_GAP))
 
         local icon = btn:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(COMP_BTN_SIZE - 4, COMP_BTN_SIZE - 4)
-        icon:SetPoint("CENTER")
+        icon:SetPoint("TOPLEFT", 2, -2)
+        icon:SetPoint("BOTTOMRIGHT", -2, 2)
         icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         icon:SetTexture(slotDef.texture)
         btn.icon = icon
 
-        -- Colored border
-        local bSize = 2
-        local edgeDefs = {
-            { "TOPLEFT", "TOPRIGHT", bSize, nil },
-            { "BOTTOMLEFT", "BOTTOMRIGHT", bSize, nil },
-            { "TOPLEFT", "BOTTOMLEFT", nil, bSize },
-            { "TOPRIGHT", "BOTTOMRIGHT", nil, bSize },
-        }
-        for _, e in ipairs(edgeDefs) do
-            local t = btn:CreateTexture(nil, "OVERLAY")
-            t:SetPoint(e[1])
-            t:SetPoint(e[2])
-            if e[3] then t:SetHeight(e[3]) end
-            if e[4] then t:SetWidth(e[4]) end
-            t:SetColorTexture(c[1], c[2], c[3], 0.7)
-        end
+        -- Atlas border (colored per element)
+        local border = btn:CreateTexture(nil, "OVERLAY")
+        border:SetPoint("TOPLEFT", -1, 1)
+        border:SetPoint("BOTTOMRIGHT", 1, -1)
+        border:SetAtlas("UI-HUD-ActionBar-IconFrame-Mouseover")
+        border:SetVertexColor(c[1], c[2], c[3], 0.8)
+        btn.border = border
 
         -- Keybind label
-        local keybind = GetBindingKey("ACTIONBUTTON" .. i)
-        if keybind then
-            local lbl = btn:CreateFontString(nil, "OVERLAY")
-            lbl:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
-            lbl:SetPoint("BOTTOMRIGHT", -2, 2)
-            lbl:SetText(keybind)
-            lbl:SetTextColor(0.9, 0.9, 0.9)
-        end
-
-        -- Destroyed overlay (hidden by default)
-        local destroyOverlay = btn:CreateTexture(nil, "ARTWORK", nil, 2)
-        destroyOverlay:SetAllPoints(icon)
-        destroyOverlay:SetColorTexture(0.8, 0.1, 0.05, 0.6)
-        destroyOverlay:Hide()
-        btn.destroyOverlay = destroyOverlay
-
-        local destroyX = btn:CreateFontString(nil, "OVERLAY")
-        destroyX:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-        destroyX:SetPoint("CENTER")
-        destroyX:SetText("X")
-        destroyX:SetTextColor(1, 0.2, 0.1)
-        destroyX:Hide()
-        btn.destroyX = destroyX
+        local rowDef = CD.rows[row]
+        local keybind = rowDef.modifier .. tostring(col)
+        local lbl = btn:CreateFontString(nil, "OVERLAY")
+        lbl:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        lbl:SetPoint("BOTTOMRIGHT", -2, 2)
+        lbl:SetTextColor(0.9, 0.9, 0.9)
+        lbl:SetText(self:FormatKeybind(keybind))
+        btn.keybindLabel = lbl
 
         -- Timer text for destruction countdown
         local timerLabel = btn:CreateFontString(nil, "OVERLAY")
-        timerLabel:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        timerLabel:SetPoint("TOP", 0, -2)
+        timerLabel:SetFont("Fonts\\FRIZQT__.TTF", 28, "OUTLINE")
+        timerLabel:SetPoint("CENTER")
         timerLabel:SetTextColor(1, 0.4, 0.3)
         timerLabel:Hide()
         btn.timerLabel = timerLabel
 
         btn:Show()
         compBarButtons[i] = btn
+    end
+
+    -- Row labels (Shift, Ctrl) to the left
+    compBarFrame.rowLabels = {}
+    for r, rowDef in ipairs(CD.rows) do
+        if rowDef.label then
+            local lbl = compBarFrame:CreateFontString(nil, "OVERLAY")
+            lbl:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            lbl:SetPoint("RIGHT", compBarFrame, "TOPLEFT",
+                -6, -(r - 1) * (COMP_BTN_SIZE + COMP_ROW_GAP) - COMP_BTN_SIZE / 2)
+            lbl:SetTextColor(0.7, 0.7, 0.7)
+            lbl:SetText(rowDef.label)
+            tinsert(compBarFrame.rowLabels, lbl)
+        end
     end
 
     compBarFrame:Show()
@@ -1379,15 +1860,52 @@ function GameUI:HideCompBar()
     if compBarFrame then compBarFrame:Hide() end
 end
 
+function GameUI:SetMirrorFlipped(flipped)
+    if not compBarFrame then return end
+    local CD = ns.CompetitiveData
+    if not CD or #CD.slots == 0 then return end
+    local cols = CD.COLS
+    for i, btn in pairs(compBarButtons) do
+        local slotDef = CD.slots[i]
+        if slotDef then
+            local col = flipped and (cols + 1 - slotDef.col) or slotDef.col
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", compBarFrame, "TOPLEFT",
+                (col - 1) * (COMP_BTN_SIZE + COMP_BTN_GAP),
+                -(slotDef.row - 1) * (COMP_BTN_SIZE + COMP_ROW_GAP))
+        end
+    end
+end
+
+function GameUI:SetLaneBombTarget(laneIdx, active)
+    local btn = compBarButtons[laneIdx]
+    if not btn then return end
+    if active then
+        btn.savedTexture = btn.icon:GetTexture()
+        btn.icon:SetTexture("Interface\\Icons\\Ability_Vehicle_SiegeEngineRam")
+        btn.border:SetVertexColor(1, 0.3, 0.1, 1)
+    else
+        if btn.savedTexture then
+            btn.icon:SetTexture(btn.savedTexture)
+            btn.savedTexture = nil
+        end
+        local CD = ns.CompetitiveData
+        if CD and CD.slots[laneIdx] then
+            local c = CD.slots[laneIdx].color
+            btn.border:SetVertexColor(c[1], c[2], c[3], 0.8)
+        end
+    end
+end
+
 function GameUI:DestroyLane(laneIdx, duration)
     local btn = compBarButtons[laneIdx]
     if not btn then return end
-    btn.destroyOverlay:Show()
-    btn.destroyX:Show()
+    btn.icon:Hide()
+    btn.border:Hide()
+    if btn.keybindLabel then btn.keybindLabel:Hide() end
     btn.timerLabel:Show()
     btn.destroyExpire = GetTime() + duration
 
-    -- Tick the countdown
     if not btn.destroyTicker then
         btn:SetScript("OnUpdate", function(self, dt)
             if not self.destroyExpire then
@@ -1408,10 +1926,235 @@ end
 function GameUI:RestoreLane(laneIdx)
     local btn = compBarButtons[laneIdx]
     if not btn then return end
-    btn.destroyOverlay:Hide()
-    btn.destroyX:Hide()
+    btn.icon:Show()
+    btn.border:Show()
+    if btn.keybindLabel then btn.keybindLabel:Show() end
     btn.timerLabel:Hide()
     btn.destroyExpire = nil
     btn:SetScript("OnUpdate", nil)
     btn.destroyTicker = nil
+end
+
+-- Achievement Panel
+
+function GameUI:GetScoreFrame()
+    return scoreFrame
+end
+
+local achievementPanel
+
+function GameUI:ToggleAchievementPanel()
+    if achievementPanel and achievementPanel:IsShown() then
+        achievementPanel:Hide()
+        return
+    end
+    if not achievementPanel then
+        self:CreateAchievementPanel()
+    end
+    self:RefreshAchievementPanel()
+    achievementPanel:Show()
+end
+
+function GameUI:CreateAchievementPanel()
+    if not scoreFrame then return end
+
+    local panel = CreateFrame("Frame", "BoundToLearnAchievements", scoreFrame, "BackdropTemplate")
+    panel:SetSize(260, 380)
+    panel:SetPoint("TOPLEFT", scoreFrame, "TOPRIGHT", 14, 0)
+    panel:SetFrameStrata(scoreFrame:GetFrameStrata())
+    panel:SetFrameLevel(scoreFrame:GetFrameLevel() + 1)
+    panel:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    panel:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+    panel:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    panel:EnableMouse(true)
+    panel:Hide()
+
+    local title = panel:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    title:SetPoint("TOP", 0, -10)
+    title:SetText("|cFFFFCC00Achievements|r")
+
+    local countText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    countText:SetPoint("TOP", title, "BOTTOM", 0, -3)
+    countText:SetTextColor(0.7, 0.7, 0.7)
+    panel.countText = countText
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 8, -38)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 8)
+
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetWidth(scrollFrame:GetWidth())
+    scrollFrame:SetScrollChild(content)
+    panel.content = content
+
+    panel.rows = {}
+    achievementPanel = panel
+end
+
+function GameUI:RefreshAchievementPanel()
+    if not achievementPanel then return end
+    local Ach = ns.Achievements
+    if not Ach then return end
+
+    local content = achievementPanel.content
+    local list = Ach.ACHIEVEMENT_LIST
+
+    -- Update count
+    local unlocked, total = Ach:GetUnlockedCount()
+    achievementPanel.countText:SetText(sformat("%d / %d Unlocked", unlocked, total))
+
+    local ROW_H = 36
+    local PAD = 2
+
+    for i, achDef in ipairs(list) do
+        local row = achievementPanel.rows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+            row:SetHeight(ROW_H)
+            row:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 10,
+                insets = { left = 2, right = 2, top = 2, bottom = 2 },
+            })
+
+            local name = row:CreateFontString(nil, "OVERLAY")
+            name:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+            name:SetPoint("TOPLEFT", 8, -4)
+            name:SetPoint("RIGHT", -8, 0)
+            name:SetJustifyH("LEFT")
+            row.name = name
+
+            local desc = row:CreateFontString(nil, "OVERLAY")
+            desc:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            desc:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -1)
+            desc:SetPoint("RIGHT", -8, 0)
+            desc:SetJustifyH("LEFT")
+            row.desc = desc
+
+            achievementPanel.rows[i] = row
+        end
+
+        row:SetPoint("TOPLEFT", 0, -((i - 1) * (ROW_H + PAD)))
+        row:SetPoint("RIGHT")
+
+        local isUnlocked = Ach:IsUnlocked(achDef.id)
+
+        if isUnlocked then
+            row.name:SetText(sformat("|cFFFFD700%s|r", achDef.name))
+        else
+            row.name:SetText(sformat("|cFF888888%s|r", achDef.name))
+        end
+
+        -- Description
+        row.desc:SetText(achDef.desc)
+        row.desc:SetTextColor(isUnlocked and 0.8 or 0.5, isUnlocked and 0.8 or 0.5, isUnlocked and 0.8 or 0.5)
+
+        -- Background tint
+        if isUnlocked then
+            row:SetBackdropColor(0.15, 0.12, 0.02, 0.8)
+            row:SetBackdropBorderColor(0.6, 0.5, 0.2, 0.8)
+        else
+            row:SetBackdropColor(0.05, 0.05, 0.05, 0.6)
+            row:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.5)
+        end
+
+        row:Show()
+    end
+
+    -- Hide excess rows
+    for i = #list + 1, #achievementPanel.rows do
+        achievementPanel.rows[i]:Hide()
+    end
+
+    content:SetHeight(#list * (ROW_H + PAD))
+end
+
+-- Achievement unlock toast notifications
+function GameUI:ShowAchievementUnlocks(unlockIDs)
+    local Ach = ns.Achievements
+    if not Ach then return end
+
+    for i, id in ipairs(unlockIDs) do
+        local def = Ach.achievementByID[id]
+        if def then
+            C_Timer.After((i - 1) * 1.8, function()
+                self:ShowAchievementToast(def)
+            end)
+        end
+    end
+end
+
+local toastFrame
+
+function GameUI:ShowAchievementToast(def)
+    if not toastFrame then
+        local f = CreateFrame("Frame", "BoundToLearnAchToast", UIParent, "BackdropTemplate")
+        f:SetSize(300, 50)
+        f:SetPoint("TOP", UIParent, "TOP", 0, -80)
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 12,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        f:SetBackdropColor(0.1, 0.08, 0.02, 0.95)
+        f:SetBackdropBorderColor(0.8, 0.65, 0.2, 1)
+        f:Hide()
+
+        local icon = f:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(30, 30)
+        icon:SetPoint("LEFT", 10, 0)
+        f.icon = icon
+
+        local header = f:CreateFontString(nil, "OVERLAY")
+        header:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        header:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -2)
+        header:SetText("|cFFFFCC00Achievement Unlocked|r")
+        f.header = header
+
+        local name = f:CreateFontString(nil, "OVERLAY")
+        name:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+        name:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 8, 2)
+        name:SetTextColor(1, 1, 1)
+        f.name = name
+
+        -- Fade animation
+        local ag = f:CreateAnimationGroup()
+        local fadeIn = ag:CreateAnimation("Alpha")
+        fadeIn:SetFromAlpha(0)
+        fadeIn:SetToAlpha(1)
+        fadeIn:SetDuration(0.3)
+        fadeIn:SetOrder(1)
+        local hold = ag:CreateAnimation("Alpha")
+        hold:SetFromAlpha(1)
+        hold:SetToAlpha(1)
+        hold:SetDuration(2.5)
+        hold:SetOrder(2)
+        local fadeOut = ag:CreateAnimation("Alpha")
+        fadeOut:SetFromAlpha(1)
+        fadeOut:SetToAlpha(0)
+        fadeOut:SetDuration(0.5)
+        fadeOut:SetOrder(3)
+        ag:SetScript("OnFinished", function() f:Hide() end)
+        f.fadeAG = ag
+
+        toastFrame = f
+    end
+
+    toastFrame.icon:SetAtlas(def.icon)
+    toastFrame.name:SetText(def.name)
+    toastFrame:Show()
+    toastFrame:SetAlpha(0)
+    toastFrame.fadeAG:Stop()
+    toastFrame.fadeAG:Play()
+
+    PlaySound(888)  -- achievement sound
 end
