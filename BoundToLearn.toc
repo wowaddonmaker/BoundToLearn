@@ -12,11 +12,15 @@ SpellData.lua
 Tracker.lua
 TrackerUI.lua
 Stats.lua
+Achievements.lua
 CompetitiveData.lua
+Modifiers.lua
 Game.lua
 GameUI.lua
 Leaderboard.lua
 LeaderboardUI.lua
 StatsUI.lua
 ClickBlock.lua
+KeybindAudit.lua
+KeybindAuditUI.lua
 Options.lua

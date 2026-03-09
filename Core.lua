@@ -31,10 +31,14 @@ local DB_DEFAULTS = {
             teleports = true,
             consumables = true,
             professions = true,
+            skyriding = true,
+            nonCombatMacros = true,
+            buffs = true,
         },
     },
     game = {
         difficulty = "Medium",
+        modifiers = {},
         mode = "timed",            -- "timed", "practice", "competitive"
         duration = 90,             -- seconds (timed/competitive)
         fallSpeed = 150,
@@ -90,6 +94,24 @@ local DB_DEFAULTS = {
         enabled = false,
         mode = "all",   -- "all", "cc", "interrupt", "custom"
         customBlacklist = {},  -- { [spellID] = spellName }
+    },
+    audit = {
+        bars = {
+            main = true,
+            bottomLeft = true,
+            bottomRight = true,
+            right = true,
+            left = true,
+            bar6 = true,
+            bar7 = true,
+            bar8 = true,
+        },
+        skipNonCombat = true,
+        skipBarSelection = false,
+        mmoMouse = false,
+    },
+    achievements = {
+        unlocked = {},  -- [achievementID] = timestamp
     },
     minimap = {
         angle = 220,
@@ -153,6 +175,8 @@ local function OnInitialize()
             if ns.ClickBlock then ns.ClickBlock:SetMode("cc"); ns.ClickBlock:Enable() end
         elseif msg == "enforce interrupt" or msg == "block interrupt" then
             if ns.ClickBlock then ns.ClickBlock:SetMode("interrupt"); ns.ClickBlock:Enable() end
+        elseif msg == "audit" or msg == "keybinds" then
+            if ns.KeybindAuditUI then ns.KeybindAuditUI:Toggle() end
         elseif msg == "hide" then
             if ns.TrackerUI then ns.TrackerUI:Hide() end
             if ns.GameUI then ns.GameUI:Hide() end
@@ -260,6 +284,7 @@ function BoundToLearn:PrintHelp()
         "  /btl challenge   - Challenge your party to a round",
         "  /btl accept      - Accept a challenge",
         "  /btl decline     - Decline a challenge",
+        "  /btl audit       - Show keybind audit",
         "  /btl stats       - Show statistics panel",
         "  /btl options     - Open settings",
         "  /btl enforce      - Toggle click blocking (keybind-only mode)",
@@ -383,13 +408,13 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:Hide()
 
         local menuItems = {
+            { getText = function() return "Options" end, func = function() self:OpenOptions() end },
+            { getText = function() return "Open Game" end, func = function() self:OpenGame() end },
+            { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
+            { getText = function() return "Keybind Audit" end, func = function() if ns.KeybindAuditUI then ns.KeybindAuditUI:Toggle() end end },
             { getText = function()
                 return self.db.tracker.enabled and "Disable Tracker" or "Enable Tracker"
             end, func = function() self:ToggleTracker() end },
-            { getText = function() return "Open Game" end, func = function() self:OpenGame() end },
-            { getText = function() return "Leaderboard" end, func = function() if ns.LeaderboardUI then ns.LeaderboardUI:Toggle() end end },
-            { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
-            { getText = function() return "Options" end, func = function() self:OpenOptions() end },
         }
 
         local menuBtns = {}
