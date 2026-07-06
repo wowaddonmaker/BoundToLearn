@@ -176,6 +176,12 @@ local function OnInitialize()
         end
     end
 
+    -- Competitive mode is removed from main for now (kept on the experimental
+    -- branch); fall back to timed if an old saved value still selects it.
+    if BoundToLearnDB.game.mode == "competitive" then
+        BoundToLearnDB.game.mode = "timed"
+    end
+
     -- Migrate: filter moved from tracker.filter to top-level filter
     if BoundToLearnDB.tracker and BoundToLearnDB.tracker.filter then
         for k, v in pairs(BoundToLearnDB.tracker.filter) do

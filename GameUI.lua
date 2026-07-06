@@ -1175,7 +1175,7 @@ function GameUI:CreateSongSelect()
         GameUI:StartFromSongSelect()
     end)
 
-    local practiceBtn = MakeBubbleButton(f, "Practice", 87, 22)
+    local practiceBtn = MakeBubbleButton(f, "Practice", 133, 22)
     practiceBtn:SetPoint("TOPLEFT", startBtn, "BOTTOMLEFT", 0, -4)
     practiceBtn:SetScript("OnClick", function()
         BoundToLearn.db.game.mode = "practice"
@@ -1186,19 +1186,8 @@ function GameUI:CreateSongSelect()
         GameTooltip:AddLine("No time limit. Play until you stop.", 1, 1, 1, true)
     end)
 
-    local compBtn = MakeBubbleButton(f, "Competitive", 92, 22)
-    compBtn:SetPoint("LEFT", practiceBtn, "RIGHT", 4, 0)
-    compBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        GameUI:ShowCompetitiveSetup()
-    end)
-    Theme.DelayedTooltip(compBtn, function()
-        GameTooltip:SetText("Competitive Mode")
-        GameTooltip:AddLine("15 fixed lanes, same chart for everyone.", 1, 1, 1, true)
-    end)
-
-    local modBtn = MakeBubbleButton(f, "Modifiers", 79, 22)
-    modBtn:SetPoint("LEFT", compBtn, "RIGHT", 4, 0)
+    local modBtn = MakeBubbleButton(f, "Modifiers", 133, 22)
+    modBtn:SetPoint("LEFT", practiceBtn, "RIGHT", 4, 0)
     modBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI.modifierOpener = modBtn
@@ -1208,7 +1197,7 @@ function GameUI:CreateSongSelect()
     -- The whole left column is a single group so round-over results can swap it
     -- out for the results panel and back.
     f.mainTitle = title
-    f.leftControls = { f.radar, f.bestText, startBtn, practiceBtn, compBtn, modBtn }
+    f.leftControls = { f.radar, f.bestText, startBtn, practiceBtn, modBtn }
     for _, drow in ipairs(f.diffRows) do
         f.leftControls[#f.leftControls + 1] = drow
     end
@@ -2835,96 +2824,6 @@ end
 
 function GameUI:HideCompBar()
     if compBarFrame then compBarFrame:Hide() end
-end
-
--- Competitive drag-to-place: show the lane bar and let the player position it
--- before the round starts, so the fixed lanes land where their muscle memory
--- expects. Start commits the position and begins; Cancel returns to selection.
-function GameUI:ShowCompetitiveSetup()
-    self:CreateCompBar()
-    if not compBarFrame then
-        BoundToLearn.db.game.mode = "competitive"
-        self:StartFromSongSelect()
-        return
-    end
-    self:HideSongSelect()
-
-    if not self.compSetup then
-        local ov = CreateFrame("Frame", nil, UIParent)
-        ov:SetAllPoints(UIParent)
-        ov:SetFrameStrata("FULLSCREEN")
-        ov:SetFrameLevel(50)
-        ov:EnableMouse(true)
-
-        local dim = ov:CreateTexture(nil, "BACKGROUND")
-        dim:SetAllPoints()
-        dim:SetColorTexture(0, 0, 0, 0.5)
-
-        local tip = ov:CreateFontString(nil, "OVERLAY")
-        tip:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
-        tip:SetPoint("TOP", 0, -140)
-        tip:SetText("Drag the lanes where you want them, then Start")
-        tip:SetTextColor(Theme.RGB(Theme.C.TEXT_PRIMARY))
-
-        local panel = CreateFrame("Frame", nil, ov)
-        panel:SetSize(244, 44)
-        panel:SetPoint("TOP", 0, -178)
-        Theme.StylePanel(panel, 0.95)
-
-        local startBtn = Theme.CreateAccentButton(panel, "Start", 112, 26)
-        startBtn:SetPoint("LEFT", 8, 0)
-        startBtn:SetScript("OnClick", function()
-            GameUI:SaveCompBarPos()
-            GameUI:HideCompetitiveSetup()
-            BoundToLearn.db.game.mode = "competitive"
-            GameUI:StartFromSongSelect()
-        end)
-
-        local cancelBtn = Theme.CreateButton(panel, "Cancel", 104, 26)
-        cancelBtn:SetPoint("RIGHT", -8, 0)
-        cancelBtn:SetScript("OnClick", function()
-            GameUI:HideCompetitiveSetup()
-            GameUI:ShowSongSelect()
-        end)
-
-        self.compSetup = ov
-    end
-
-    compBarFrame:SetMovable(true)
-    compBarFrame:EnableMouse(true)
-    compBarFrame:RegisterForDrag("LeftButton")
-    compBarFrame:SetScript("OnDragStart", compBarFrame.StartMoving)
-    compBarFrame:SetScript("OnDragStop", compBarFrame.StopMovingOrSizing)
-    compBarFrame:SetFrameStrata("FULLSCREEN")
-    compBarFrame:SetFrameLevel(60)
-
-    if not compBarFrame.dragHint then
-        local hint = compBarFrame:CreateTexture(nil, "BACKGROUND")
-        hint:SetPoint("TOPLEFT", -8, 8)
-        hint:SetPoint("BOTTOMRIGHT", 8, -8)
-        hint:SetColorTexture(Theme.RGB(Theme.C.ACCENT_BRIGHT, 0.16))
-        compBarFrame.dragHint = hint
-    end
-    compBarFrame.dragHint:Show()
-
-    self.compSetup:Show()
-    compBarFrame:Show()
-end
-
-function GameUI:SaveCompBarPos()
-    if not compBarFrame then return end
-    local point, _, relPoint, x, y = compBarFrame:GetPoint()
-    BoundToLearn.db.game.compBarPos = { point = point, relPoint = relPoint, x = x, y = y }
-end
-
-function GameUI:HideCompetitiveSetup()
-    if self.compSetup then self.compSetup:Hide() end
-    if compBarFrame then
-        compBarFrame:SetScript("OnDragStart", nil)
-        compBarFrame:SetScript("OnDragStop", nil)
-        compBarFrame:SetMovable(false)
-        if compBarFrame.dragHint then compBarFrame.dragHint:Hide() end
-    end
 end
 
 function GameUI:SetMirrorFlipped(flipped)
