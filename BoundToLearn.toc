@@ -3,10 +3,13 @@
 ## Notes: Click-vs-keybind tracking and keybind practice game
 ## Author: justawower
 ## Version: 1.0.0
+## IconTexture: Interface\MacroFrame\MacroFrame-Icon
+## AddonCompartmentFunc: BoundToLearn_OnAddonCompartmentClick
 ## SavedVariables: BoundToLearnDB
 ## DefaultState: enabled
 
 Utils.lua
+Theme.lua
 Core.lua
 SpellData.lua
 Tracker.lua
@@ -15,6 +18,7 @@ Stats.lua
 Achievements.lua
 CompetitiveData.lua
 Modifiers.lua
+SongData.lua
 Game.lua
 GameUI.lua
 Leaderboard.lua
@@ -23,4 +27,7 @@ StatsUI.lua
 ClickBlock.lua
 KeybindAudit.lua
 KeybindAuditUI.lua
+KeybindQuiz.lua
+PingGame.lua
+PingGameUI.lua
 Options.lua

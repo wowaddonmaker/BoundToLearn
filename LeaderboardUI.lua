@@ -15,8 +15,14 @@ local SOUND_TAB   = Utils.SOUND_TAB
 local SOUND_CLICK = Utils.SOUND_CLICK
 
 local DIFFICULTIES = { "Easy", "Medium", "Hard", "Extreme" }
-local GUILD_MAX_ROWS = 12
-local PARTY_MAX_ROWS = 8
+local DIFF_COLORS = {
+    Easy    = { 0.30, 0.85, 0.30 },
+    Medium  = { 1.00, 0.82, 0.00 },
+    Hard    = { 1.00, 0.50, 0.10 },
+    Extreme = { 0.90, 0.15, 0.15 },
+}
+local GUILD_MAX_ROWS = 15
+local PARTY_MAX_ROWS = 13
 local ROW_HEIGHT = 18
 
 local CLASS_COLORS = {
@@ -35,11 +41,29 @@ local CLASS_COLORS = {
     EVOKER      = { 0.20, 0.58, 0.50 },
 }
 
+-- Guild column layout
+local GUILD_COLS = {
+    { key = "rank",  x = 0,   w = 22,  header = "#",      justify = "CENTER" },
+    { key = "name",  x = 24,  w = 105, header = "Player",  justify = "LEFT" },
+    { key = "score", x = 131, w = 50,  header = "Score",   justify = "LEFT" },
+    { key = "combo", x = 183, w = 40,  header = "Combo",   justify = "LEFT" },
+    { key = "acc",   x = 225, w = 35,  header = "Acc",     justify = "LEFT" },
+}
+
+-- Party column layout
+local PARTY_COLS = {
+    { key = "name",  x = 0,   w = 105, header = "Player",  justify = "LEFT" },
+    { key = "score", x = 107, w = 50,  header = "Score",   justify = "LEFT" },
+    { key = "combo", x = 159, w = 45,  header = "Combo",   justify = "LEFT" },
+    { key = "acc",   x = 206, w = 50,  header = "Acc",     justify = "LEFT" },
+}
+
 local leaderboardPanel
 local tabButtons
-local guildPanel, partyPanel
+local guildPage, partyPage
 local guildRows = {}
 local partyRows = {}
+local confirmDialog
 local currentDifficulty = "Medium"
 local currentTab = "guild"
 local isInitialized = false
@@ -73,80 +97,74 @@ function LeaderboardUI:Hide()
     if leaderboardPanel then leaderboardPanel:Hide() end
 end
 
+local function CreateColumnDividers(parent, cols, topY, bottomY)
+    for i = 2, #cols do
+        local divX = cols[i].x - 2
+        local vline = parent:CreateTexture(nil, "ARTWORK")
+        -- Anchor both ends to the parent TOPLEFT so topY/bottomY read as
+        -- top-relative offsets. Anchoring the bottom to "BOTTOMLEFT" (the
+        -- SetPoint default relativePoint) measured bottomY up from the page
+        -- bottom, driving the line hundreds of pixels below the panel edge.
+        vline:SetPoint("TOPLEFT", parent, "TOPLEFT", divX, topY)
+        vline:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", divX, bottomY)
+        vline:SetWidth(1)
+        vline:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
+    end
+end
+
+local function CreateRowBG(parent, y)
+    local bg = parent:CreateTexture(nil, "BACKGROUND")
+    bg:SetPoint("TOPLEFT", 0, y)
+    bg:SetPoint("RIGHT")
+    bg:SetHeight(ROW_HEIGHT)
+    return bg
+end
+
 function LeaderboardUI:CreatePanel()
     local scoreFrame = ns.GameUI and ns.GameUI:GetScoreFrame()
     if not scoreFrame then return end
 
-    local panel = CreateFrame("Frame", "BoundToLearnLeaderboard", scoreFrame, "BackdropTemplate")
+    local panel = CreateFrame("Frame", "BoundToLearnLeaderboard", scoreFrame)
     panel:SetSize(280, 380)
     panel:SetPoint("TOPRIGHT", scoreFrame, "TOPLEFT", -14, 0)
     panel:SetFrameStrata(scoreFrame:GetFrameStrata())
     panel:SetFrameLevel(scoreFrame:GetFrameLevel() + 1)
-    panel:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    panel:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    panel:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    ns.Theme.StylePanel(panel)
     panel:EnableMouse(true)
     panel:Hide()
 
-    -- Title
-    local title = panel:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
-    title:SetPoint("TOP", 0, -10)
-    title:SetText("|cFF55CCFFLeaderboard|r")
-
-    -- Tab buttons: Guild / Party
-    local tabY = -28
+    -- Tab buttons: Guild / Party (underline style)
     tabButtons = {}
-    local tabNames = { "Guild", "Party" }
-    for i, name in ipairs(tabNames) do
-        local btn = CreateFrame("Button", nil, panel)
-        btn:SetSize(60, 18)
-        btn:SetPoint("TOPLEFT", 10 + (i - 1) * 65, tabY)
-        btn:SetNormalFontObject("GameFontNormalSmall")
-        btn:SetHighlightFontObject("GameFontHighlightSmall")
-        btn:SetText(name)
-        btn.tabName = name:lower()
+    local tabDefs = {
+        { label = "Guild", key = "guild" },
+        { label = "Party", key = "party" },
+    }
+    for i, def in ipairs(tabDefs) do
+        local tab = ns.Theme.CreateTab(panel, def.label, "GameFontNormalSmall")
+        tab:SetSize(120, 18)
+        tab:SetPoint("TOPLEFT", 8 + (i - 1) * 124, -8)
+        tab.tabKey = def.key
 
-        local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
-        btn.bg = bg
-
-        btn:SetScript("OnClick", function()
-            PlayUISound(SOUND_TAB)
-            currentTab = btn.tabName
+        tab:SetScript("OnClick", function()
+            PlayUISound(SOUND_CLICK)
+            currentTab = def.key
             LeaderboardUI:UpdateTabs()
             LeaderboardUI:Refresh()
         end)
 
-        tabButtons[i] = btn
+        tabButtons[i] = tab
     end
 
-    -- Difficulty buttons (guild tab only)
-    local diffRow = CreateFrame("Frame", nil, panel)
-    diffRow:SetSize(260, 18)
-    diffRow:SetPoint("TOP", 0, tabY - 22)
-    panel.diffRow = diffRow
-
+    -- Difficulty sub-tabs (on panel, shared by both pages)
     panel.diffBtns = {}
     for i, name in ipairs(DIFFICULTIES) do
-        local btn = CreateFrame("Button", nil, diffRow)
-        btn:SetSize(48, 16)
-        btn:SetPoint("LEFT", 15 + (i - 1) * 60, 0)
-        btn:SetNormalFontObject("GameFontNormalSmall")
+        local btn = CreateFrame("Button", nil, panel)
+        btn:SetSize(55, 16)
+        btn:SetPoint("TOPLEFT", 16 + (i - 1) * 58, -30)
+        btn:SetNormalFontObject("GameFontDisableSmall")
         btn:SetHighlightFontObject("GameFontHighlightSmall")
         btn:SetText(name)
         btn.diffName = name
-
-        local bg = btn:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
-        btn.bg = bg
 
         btn:SetScript("OnClick", function()
             PlayUISound(SOUND_CLICK)
@@ -158,126 +176,114 @@ function LeaderboardUI:CreatePanel()
         panel.diffBtns[i] = btn
     end
 
-    -- Guild panel
-    guildPanel = CreateFrame("Frame", nil, panel)
-    guildPanel:SetPoint("TOPLEFT", 8, tabY - 44)
-    guildPanel:SetPoint("BOTTOMRIGHT", -8, 30)
+    -- Content area starts below tabs + difficulty row
+    local contentY = -50
 
-    local headers = {
-        { text = "#", x = 0, w = 18 },
-        { text = "Player", x = 20, w = 100 },
-        { text = "Score", x = 125, w = 50 },
-        { text = "Combo", x = 178, w = 40 },
-        { text = "Acc", x = 222, w = 35 },
-    }
-    for _, h in ipairs(headers) do
-        local ht = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        ht:SetPoint("TOPLEFT", h.x, 0)
-        ht:SetText(h.text)
-        ht:SetTextColor(0.55, 0.55, 0.55)
+    -- Guild page
+    guildPage = CreateFrame("Frame", nil, panel)
+    guildPage:SetPoint("TOPLEFT", 8, contentY)
+    guildPage:SetPoint("BOTTOMRIGHT", -8, 30)
+    panel.guildPage = guildPage
+
+    for _, col in ipairs(GUILD_COLS) do
+        local ht = guildPage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        ht:SetPoint("TOPLEFT", col.x, 0)
+        ht:SetWidth(col.w)
+        ht:SetJustifyH(col.justify)
+        ht:SetText(col.header)
+        ht:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_DIM))
     end
 
-    local divider = guildPanel:CreateTexture(nil, "ARTWORK")
+    local divider = guildPage:CreateTexture(nil, "ARTWORK")
     divider:SetPoint("TOPLEFT", 0, -14)
     divider:SetPoint("TOPRIGHT", 0, -14)
     divider:SetHeight(1)
-    divider:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+    divider:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.5))
+
+    -- Column separators run from the header rule down to the last data row,
+    -- both offsets measured down from the page top so they stay inside it.
+    CreateColumnDividers(guildPage, GUILD_COLS, -14, -14 - GUILD_MAX_ROWS * ROW_HEIGHT)
 
     for i = 1, GUILD_MAX_ROWS do
         local y = -16 - (i - 1) * ROW_HEIGHT
         local row = {}
 
-        row.rank = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.rank:SetPoint("TOPLEFT", 0, y)
-        row.rank:SetWidth(18)
-        row.rank:SetJustifyH("CENTER")
+        row.bg = CreateRowBG(guildPage, y)
+        if i % 2 == 0 then
+            row.bg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.SECTION_FILL, 0.4))
+        else
+            row.bg:SetColorTexture(0, 0, 0, 0)
+        end
 
-        row.name = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.name:SetPoint("TOPLEFT", 20, y)
-        row.name:SetWidth(100)
-        row.name:SetJustifyH("LEFT")
-
-        row.score = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.score:SetPoint("TOPLEFT", 125, y)
-        row.score:SetWidth(50)
-        row.score:SetJustifyH("RIGHT")
-
-        row.combo = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.combo:SetPoint("TOPLEFT", 178, y)
-        row.combo:SetWidth(40)
-        row.combo:SetJustifyH("RIGHT")
-
-        row.acc = guildPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.acc:SetPoint("TOPLEFT", 222, y)
-        row.acc:SetWidth(35)
-        row.acc:SetJustifyH("RIGHT")
+        for _, col in ipairs(GUILD_COLS) do
+            local fs = guildPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("TOPLEFT", col.x, y)
+            fs:SetWidth(col.w)
+            fs:SetJustifyH(col.justify)
+            row[col.key] = fs
+        end
 
         guildRows[i] = row
     end
 
-    -- Party panel
-    partyPanel = CreateFrame("Frame", nil, panel)
-    partyPanel:SetPoint("TOPLEFT", 8, tabY - 44)
-    partyPanel:SetPoint("BOTTOMRIGHT", -8, 30)
-    partyPanel:Hide()
+    -- Party page
+    partyPage = CreateFrame("Frame", nil, panel)
+    partyPage:SetPoint("TOPLEFT", 8, contentY)
+    partyPage:SetPoint("BOTTOMRIGHT", -8, 30)
+    partyPage:Hide()
+    panel.partyPage = partyPage
 
-    local partyNote = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    partyNote:SetPoint("TOP", 0, 0)
+    local partyNote = partyPage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    partyNote:SetPoint("TOPLEFT", 0, 0)
+    partyNote:SetPoint("RIGHT")
+    partyNote:SetJustifyH("CENTER")
+    partyNote:SetWordWrap(true)
     partyNote:SetText("Recent scores from party/raid members")
-    partyNote:SetTextColor(0.55, 0.55, 0.55)
-    partyPanel.note = partyNote
+    partyNote:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_DIM))
+    panel.partyNote = partyNote
 
-    local pHeaders = {
-        { text = "Player", x = 0, w = 100 },
-        { text = "Diff", x = 105, w = 50 },
-        { text = "Score", x = 160, w = 50 },
-        { text = "Combo", x = 215, w = 40 },
-    }
-    for _, h in ipairs(pHeaders) do
-        local ht = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        ht:SetPoint("TOPLEFT", h.x, -20)
-        ht:SetText(h.text)
-        ht:SetTextColor(0.55, 0.55, 0.55)
+    for _, col in ipairs(PARTY_COLS) do
+        local ht = partyPage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        ht:SetPoint("TOPLEFT", col.x, -20)
+        ht:SetWidth(col.w)
+        ht:SetJustifyH(col.justify)
+        ht:SetText(col.header)
+        ht:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_DIM))
     end
 
-    local pdiv = partyPanel:CreateTexture(nil, "ARTWORK")
+    local pdiv = partyPage:CreateTexture(nil, "ARTWORK")
     pdiv:SetPoint("TOPLEFT", 0, -34)
     pdiv:SetPoint("TOPRIGHT", 0, -34)
     pdiv:SetHeight(1)
-    pdiv:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+    pdiv:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.5))
+
+    CreateColumnDividers(partyPage, PARTY_COLS, -34, -34 - PARTY_MAX_ROWS * ROW_HEIGHT)
 
     for i = 1, PARTY_MAX_ROWS do
         local y = -36 - (i - 1) * ROW_HEIGHT
         local row = {}
 
-        row.name = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.name:SetPoint("TOPLEFT", 0, y)
-        row.name:SetWidth(100)
-        row.name:SetJustifyH("LEFT")
+        row.bg = CreateRowBG(partyPage, y)
+        if i % 2 == 0 then
+            row.bg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.SECTION_FILL, 0.4))
+        else
+            row.bg:SetColorTexture(0, 0, 0, 0)
+        end
 
-        row.diff = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.diff:SetPoint("TOPLEFT", 105, y)
-        row.diff:SetWidth(50)
-        row.diff:SetJustifyH("LEFT")
-
-        row.score = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.score:SetPoint("TOPLEFT", 160, y)
-        row.score:SetWidth(50)
-        row.score:SetJustifyH("RIGHT")
-
-        row.combo = partyPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.combo:SetPoint("TOPLEFT", 215, y)
-        row.combo:SetWidth(40)
-        row.combo:SetJustifyH("RIGHT")
+        for _, col in ipairs(PARTY_COLS) do
+            local fs = partyPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("TOPLEFT", col.x, y)
+            fs:SetWidth(col.w)
+            fs:SetJustifyH(col.justify)
+            row[col.key] = fs
+        end
 
         partyRows[i] = row
     end
 
-    -- Challenge button (bottom)
-    local challengeBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    challengeBtn:SetSize(120, 22)
-    challengeBtn:SetPoint("BOTTOM", 0, 6)
-    challengeBtn:SetText("Challenge Party")
+    -- Bottom buttons
+    local challengeBtn = ns.Theme.CreateAccentButton(partyPage, "Challenge Party", 120, 22)
+    challengeBtn:SetPoint("BOTTOMLEFT", 0, -24)
     challengeBtn:SetScript("OnClick", function()
         if not IsInGroup() then
             BoundToLearn:Print("You need to be in a group to challenge someone.")
@@ -287,51 +293,97 @@ function LeaderboardUI:CreatePanel()
             ns.Leaderboard:SendChallenge("party")
         end
     end)
-    challengeBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Theme.DelayedTooltip(challengeBtn, function(self)
         GameTooltip:SetText("Challenge")
         GameTooltip:AddLine("Challenge your party to a round. Both sides play the same difficulty and compare scores.", 1, 1, 1, true)
-        GameTooltip:Show()
     end)
-    challengeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     panel.challengeBtn = challengeBtn
+
+    local resetBtn = ns.Theme.CreateButton(panel, "Reset", 70, 22)
+    resetBtn:SetPoint("BOTTOMRIGHT", -8, 6)
+    resetBtn:SetScript("OnClick", function()
+        LeaderboardUI:ShowResetConfirm()
+    end)
+    ns.Theme.DelayedTooltip(resetBtn, function(self)
+        GameTooltip:SetText("Reset Leaderboard")
+        GameTooltip:AddLine("Clear all leaderboard data. This cannot be undone.", 1, 0.5, 0.5, true)
+    end)
+    panel.resetBtn = resetBtn
 
     leaderboardPanel = panel
     self:UpdateTabs()
     self:UpdateDiffButtons()
 end
 
+function LeaderboardUI:ShowResetConfirm()
+    if confirmDialog then
+        confirmDialog:Show()
+        return
+    end
+
+    local dialog = CreateFrame("Frame", nil, leaderboardPanel)
+    dialog:SetSize(240, 100)
+    dialog:SetPoint("CENTER", leaderboardPanel, "CENTER")
+    dialog:SetFrameLevel(leaderboardPanel:GetFrameLevel() + 10)
+    ns.Theme.StylePanel(dialog)
+    dialog:EnableMouse(true)
+
+    local warningText = dialog:CreateFontString(nil, "OVERLAY")
+    warningText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    warningText:SetPoint("TOP", 0, -14)
+    warningText:SetWidth(210)
+    warningText:SetJustifyH("CENTER")
+    warningText:SetText("|cFFFF6666Reset all leaderboard data?|r")
+
+    local detailText = dialog:CreateFontString(nil, "OVERLAY")
+    detailText:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+    detailText:SetPoint("TOP", warningText, "BOTTOM", 0, -4)
+    detailText:SetWidth(210)
+    detailText:SetJustifyH("CENTER")
+    detailText:SetText("All scores for every difficulty will be permanently deleted.")
+    detailText:SetTextColor(0.7, 0.7, 0.7)
+
+    local confirmBtn = ns.Theme.CreateAccentButton(dialog, "Reset", 90, 22)
+    confirmBtn:SetPoint("BOTTOMLEFT", 18, 10)
+    confirmBtn:SetScript("OnClick", function()
+        local db = BoundToLearn.db.leaderboard
+        for _, diff in ipairs(DIFFICULTIES) do
+            db[diff] = {}
+        end
+        BoundToLearn:Print("Leaderboard data has been reset.")
+        dialog:Hide()
+        LeaderboardUI:Refresh()
+    end)
+
+    local cancelBtn = ns.Theme.CreateButton(dialog, "Cancel", 90, 22)
+    cancelBtn:SetPoint("BOTTOMRIGHT", -18, 10)
+    cancelBtn:SetScript("OnClick", function()
+        dialog:Hide()
+    end)
+
+    confirmDialog = dialog
+end
+
 function LeaderboardUI:UpdateTabs()
     if not tabButtons then return end
     for _, btn in ipairs(tabButtons) do
-        if btn.tabName == currentTab then
-            btn.bg:SetColorTexture(0.33, 0.8, 1, 0.3)
-            btn:GetFontString():SetTextColor(1, 1, 1)
-        else
-            btn.bg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
-            btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
-        end
+        btn:SetActive(btn.tabKey == currentTab)
     end
 
-    if guildPanel then guildPanel:SetShown(currentTab == "guild") end
-    if partyPanel then partyPanel:SetShown(currentTab == "party") end
-    if leaderboardPanel and leaderboardPanel.diffRow then
-        leaderboardPanel.diffRow:SetShown(currentTab == "guild")
-    end
-    if leaderboardPanel and leaderboardPanel.challengeBtn then
-        leaderboardPanel.challengeBtn:SetShown(currentTab == "party")
-    end
+    if guildPage then guildPage:SetShown(currentTab == "guild") end
+    if partyPage then partyPage:SetShown(currentTab == "party") end
 end
 
 function LeaderboardUI:UpdateDiffButtons()
     if not leaderboardPanel or not leaderboardPanel.diffBtns then return end
     for _, btn in ipairs(leaderboardPanel.diffBtns) do
+        local c = DIFF_COLORS[btn.diffName]
         if btn.diffName == currentDifficulty then
-            btn.bg:SetColorTexture(0.33, 0.8, 1, 0.3)
-            btn:GetFontString():SetTextColor(1, 1, 1)
+            btn:SetNormalFontObject("GameFontNormalSmall")
+            btn:GetFontString():SetTextColor(c[1], c[2], c[3])
         else
-            btn.bg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
-            btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
+            btn:SetNormalFontObject("GameFontDisableSmall")
+            btn:GetFontString():SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_DIM))
         end
     end
 end
@@ -380,6 +432,7 @@ function LeaderboardUI:RefreshGuild()
             row.score:Show()
             row.combo:Show()
             row.acc:Show()
+            row.bg:Show()
         else
             row.rank:Hide()
             row.name:Hide()
@@ -394,9 +447,11 @@ function LeaderboardUI:RefreshParty()
     local scores = ns.Leaderboard and ns.Leaderboard:GetPartyScores() or {}
 
     local sorted = {}
-    for name, data in pairs(scores) do
-        data.name = name
-        tinsert(sorted, data)
+    for playerName, data in pairs(scores) do
+        if data.difficulty == currentDifficulty then
+            data.name = playerName
+            tinsert(sorted, data)
+        end
     end
     table.sort(sorted, function(a, b) return a.score > b.score end)
 
@@ -407,28 +462,29 @@ function LeaderboardUI:RefreshParty()
         if entry then
             local cc = CLASS_COLORS[entry.class] or {0.7, 0.7, 0.7}
             row.name:SetText(sformat("|cFF%02x%02x%02x%s|r", cc[1]*255, cc[2]*255, cc[3]*255, entry.name))
-            row.diff:SetText(entry.difficulty or "?")
-            row.diff:SetTextColor(0.7, 0.7, 0.7)
             row.score:SetText(sformat("%d", entry.score))
             row.score:SetTextColor(1, 0.84, 0)
             row.combo:SetText(sformat("%d", entry.combo or 0))
             row.combo:SetTextColor(0.8, 0.8, 0.8)
+            row.acc:SetText(sformat("%d%%", entry.accuracy or 0))
+            row.acc:SetTextColor(0.6, 0.9, 0.6)
 
             row.name:Show()
-            row.diff:Show()
             row.score:Show()
             row.combo:Show()
+            row.acc:Show()
+            row.bg:Show()
         else
             row.name:Hide()
-            row.diff:Hide()
             row.score:Hide()
             row.combo:Hide()
+            row.acc:Hide()
         end
     end
 
     if #sorted == 0 then
-        partyPanel.note:SetText("No party scores yet. Play a round while in a group.")
+        leaderboardPanel.partyNote:SetText("No party scores yet. Play a round while in a group.")
     else
-        partyPanel.note:SetText("Recent scores from party/raid members")
+        leaderboardPanel.partyNote:SetText("Recent scores from party/raid members")
     end
 end

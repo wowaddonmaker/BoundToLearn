@@ -21,13 +21,6 @@ local statsFrame
 local isInitialized = false
 local activeTab = "tracker"
 
-local PANEL_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-}
-
 local TREND_BAR_COUNT = 20
 local TREND_BAR_WIDTH = 8
 local TREND_BAR_MAX_HEIGHT = 100
@@ -49,13 +42,11 @@ end
 function StatsUI:CreateFrame()
     if statsFrame then return end
 
-    statsFrame = CreateFrame("Frame", "BoundToLearnStatsFrame", UIParent, "BackdropTemplate")
+    statsFrame = CreateFrame("Frame", "BoundToLearnStatsFrame", UIParent)
     statsFrame:SetSize(450, 400)
     statsFrame:SetPoint("CENTER")
     statsFrame:SetFrameStrata("DIALOG")
-    statsFrame:SetBackdrop(PANEL_BACKDROP)
-    statsFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    statsFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    ns.Theme.StylePanel(statsFrame)
     statsFrame:EnableMouse(true)
     statsFrame:SetMovable(true)
     statsFrame:RegisterForDrag("LeftButton")
@@ -63,13 +54,11 @@ function StatsUI:CreateFrame()
     statsFrame:SetScript("OnDragStart", statsFrame.StartMoving)
     statsFrame:SetScript("OnDragStop", statsFrame.StopMovingOrSizing)
 
-    local close = CreateFrame("Button", nil, statsFrame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
+    local close = ns.Theme.CreateCloseButton(statsFrame, function() statsFrame:Hide() end)
+    close:SetPoint("TOPRIGHT", -8, -8)
 
-    local title = statsFrame:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    local title = ns.Theme.CreateTitle(statsFrame, "BoundToLearn Stats", 16)
     title:SetPoint("TOP", 0, -12)
-    title:SetText("|cFF55CCFFBoundToLearn Stats|r")
 
     -- Tab buttons
     self:CreateTabs()
@@ -77,34 +66,27 @@ function StatsUI:CreateFrame()
     -- Content panels
     self:CreateTrackerPanel()
     self:CreateGamePanel()
+    self:CreateQuizPanel()
 
     statsFrame:Hide()
 end
 
 function StatsUI:CreateTabs()
-    local tabs = { "Tracking", "Game" }
+    local tabDefs = {
+        { label = "Tracking", key = "tracker" },
+        { label = "Game",     key = "game" },
+        { label = "Quiz",     key = "quiz" },
+    }
     statsFrame.tabs = {}
-    for i, label in ipairs(tabs) do
-        local tab = CreateFrame("Button", nil, statsFrame)
+    for i, def in ipairs(tabDefs) do
+        local tab = ns.Theme.CreateTab(statsFrame, def.label, "GameFontNormal")
         tab:SetSize(100, 24)
         tab:SetPoint("TOPLEFT", 15 + (i - 1) * 110, -35)
-        tab:SetNormalFontObject("GameFontNormal")
-        tab:SetHighlightFontObject("GameFontHighlight")
-        tab:SetText(label)
-        tab.tabKey = i == 1 and "tracker" or "game"
+        tab.tabKey = def.key
         tab:SetScript("OnClick", function()
             PlayUISound(SOUND_TAB)
             self:SetTab(tab.tabKey)
         end)
-
-        -- Underline for active tab
-        local underline = tab:CreateTexture(nil, "OVERLAY")
-        underline:SetPoint("BOTTOMLEFT", 0, -2)
-        underline:SetPoint("BOTTOMRIGHT", 0, -2)
-        underline:SetHeight(2)
-        underline:SetColorTexture(0.33, 0.8, 1, 1)
-        underline:Hide()
-        tab.underline = underline
 
         statsFrame.tabs[i] = tab
     end
@@ -118,8 +100,11 @@ function StatsUI:SetTab(tabKey)
     if statsFrame.gamePanel then
         statsFrame.gamePanel:SetShown(tabKey == "game")
     end
+    if statsFrame.quizPanel then
+        statsFrame.quizPanel:SetShown(tabKey == "quiz")
+    end
     for _, tab in ipairs(statsFrame.tabs) do
-        tab.underline:SetShown(tab.tabKey == tabKey)
+        tab:SetActive(tab.tabKey == tabKey)
     end
     self:RefreshData()
 end
@@ -137,7 +122,7 @@ local function CreateTrendChart(panel, yOffset)
     local trendLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     trendLabel:SetPoint("TOPLEFT", rangeFrame, "TOPLEFT", 0, 0)
     trendLabel:SetText("Sessions")
-    trendLabel:SetTextColor(0.33, 0.8, 1)
+    trendLabel:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
 
     panel.rangeBtns = {}
     for i = #TIME_RANGES, 1, -1 do
@@ -181,7 +166,7 @@ local function CreateTrendChart(panel, yOffset)
         line:SetHeight(1)
         line:SetPoint("TOPLEFT", panel, "TOPLEFT", CHART_LEFT, chartY - yPositions[i] * TREND_BAR_MAX_HEIGHT)
         line:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, chartY - yPositions[i] * TREND_BAR_MAX_HEIGHT)
-        line:SetColorTexture(0.25, 0.25, 0.25, 0.5)
+        line:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
     end
 
     -- Bar container (shifted right to make room for Y axis)
@@ -204,15 +189,10 @@ local function CreateTrendChart(panel, yOffset)
         hitArea:SetSize(TREND_BAR_WIDTH + TREND_BAR_SPACING, TREND_BAR_MAX_HEIGHT)
         hitArea:SetPoint("BOTTOMLEFT", barContainer, "BOTTOMLEFT",
             (i - 1) * (TREND_BAR_WIDTH + TREND_BAR_SPACING), 0)
-        hitArea:SetScript("OnEnter", function(self)
+        ns.Theme.DelayedTooltip(hitArea, function(self)
             if self.tipText then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(self.tipText, 1, 1, 1, 1, true)
-                GameTooltip:Show()
             end
-        end)
-        hitArea:SetScript("OnLeave", function()
-            GameTooltip:Hide()
         end)
         hitArea.tipText = nil
 
@@ -286,6 +266,102 @@ function StatsUI:CreateGamePanel()
     CreateTrendChart(panel, y)
 end
 
+function StatsUI:CreateQuizPanel()
+    local panel = CreateFrame("Frame", nil, statsFrame)
+    panel:SetPoint("TOPLEFT", 15, -65)
+    panel:SetPoint("BOTTOMRIGHT", -15, 15)
+    panel:Hide()
+    statsFrame.quizPanel = panel
+
+    local y = 0
+    local function AddStat(label)
+        local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        lbl:SetPoint("TOPLEFT", 0, y)
+        lbl:SetText(label)
+        local val = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        val:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, y)
+        val:SetJustifyH("RIGHT")
+        y = y - 22
+        return val
+    end
+
+    panel.fastestTime = AddStat("Fastest Time")
+    panel.quizzesCompleted = AddStat("Quizzes Completed")
+    panel.abilitiesQuizzed = AddStat("Abilities Quizzed")
+
+    y = y - 12
+    local histLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    histLabel:SetPoint("TOPLEFT", 0, y)
+    histLabel:SetText("Recent Sessions")
+    histLabel:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
+    y = y - 20
+
+    panel.historyRows = {}
+    for i = 1, 10 do
+        local row = CreateFrame("Frame", nil, panel)
+        row:SetHeight(18)
+        row:SetPoint("TOPLEFT", 0, y)
+        row:SetPoint("TOPRIGHT", 0, y)
+
+        local dateText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        dateText:SetPoint("LEFT")
+        row.dateText = dateText
+
+        local detailText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        detailText:SetPoint("RIGHT")
+        detailText:SetJustifyH("RIGHT")
+        row.detailText = detailText
+
+        row:Hide()
+        panel.historyRows[i] = row
+        y = y - 18
+    end
+end
+
+function StatsUI:RefreshQuizData()
+    local panel = statsFrame.quizPanel
+    local db = BoundToLearn.db.stats
+    local pb = db.personalBest
+
+    if pb.fastestQuiz > 0 then
+        local mins = mfloor(pb.fastestQuiz / 60)
+        local secs = mfloor(pb.fastestQuiz % 60)
+        local tenths = mfloor((pb.fastestQuiz * 10) % 10)
+        if mins > 0 then
+            panel.fastestTime:SetText(sformat("%d:%02d.%d", mins, secs, tenths))
+        else
+            panel.fastestTime:SetText(sformat("%d.%ds", secs, tenths))
+        end
+    else
+        panel.fastestTime:SetText("--")
+    end
+
+    panel.quizzesCompleted:SetText(sformat("%d", db.lifetimeQuizzes))
+    panel.abilitiesQuizzed:SetText(sformat("%d", db.lifetimeQuizAbilities))
+
+    local sessions = ns.Stats:GetRecentSessions("quiz", 10)
+    for i, row in ipairs(panel.historyRows) do
+        local session = sessions[i]
+        if session then
+            row.dateText:SetText(date("%m/%d %H:%M", session.timestamp))
+            local mins = mfloor(session.elapsed / 60)
+            local secs = mfloor(session.elapsed % 60)
+            local tenths = mfloor((session.elapsed * 10) % 10)
+            local timeStr
+            if mins > 0 then
+                timeStr = sformat("%d:%02d.%d", mins, secs, tenths)
+            else
+                timeStr = sformat("%d.%ds", secs, tenths)
+            end
+            local roundStr = session.rounds == 1 and "perfect" or sformat("%d rounds", session.rounds)
+            row.detailText:SetText(sformat("%s  |cFF888888(%s, %d abilities)|r", timeStr, roundStr, session.totalAbilities))
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+end
+
 local function GetMinTimestamp()
     local range = TIME_RANGES[activeTimeRange]
     if not range.seconds then return nil end
@@ -312,8 +388,10 @@ function StatsUI:RefreshData()
 
     if activeTab == "tracker" then
         self:RefreshTrackerData()
-    else
+    elseif activeTab == "game" then
         self:RefreshGameData()
+    elseif activeTab == "quiz" then
+        self:RefreshQuizData()
     end
 end
 

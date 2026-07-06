@@ -15,13 +15,14 @@ local wipe    = Utils.wipe
 local slower  = Utils.slower
 local sfind   = Utils.sfind
 
+local msqrt  = Utils.msqrt or math.sqrt
+
 local HasAction        = HasAction
 local GetActionInfo    = GetActionInfo
 local GetActionTexture = GetActionTexture
 local GetActionText    = GetActionText
 local GetBindingKey    = GetBindingKey
 local GetBindingAction = GetBindingAction
-local GetMacroBody     = GetMacroBody
 local C_Spell          = C_Spell
 
 -- Key reachability tiers (base key only, modifiers stripped)
@@ -85,6 +86,111 @@ function KeybindAudit.ResolveBarLabel(buttonPrefix, fallback)
     return fallback
 end
 
+-- Keyboard layout coordinate maps: key → {x, y}
+-- Row positions use QWERTY-style stagger offsets
+local KEYBOARD_LAYOUTS = {
+    QWERTY = {
+        ["`"]={0,0},["1"]={1,0},["2"]={2,0},["3"]={3,0},["4"]={4,0},["5"]={5,0},
+        ["6"]={6,0},["7"]={7,0},["8"]={8,0},["9"]={9,0},["0"]={10,0},["-"]={11,0},["="]={12,0},
+        ["TAB"]={0.5,1},["Q"]={1.5,1},["W"]={2.5,1},["E"]={3.5,1},["R"]={4.5,1},["T"]={5.5,1},
+        ["Y"]={6.5,1},["U"]={7.5,1},["I"]={8.5,1},["O"]={9.5,1},["P"]={10.5,1},
+        ["CAPSLOCK"]={0.75,2},["A"]={1.75,2},["S"]={2.75,2},["D"]={3.75,2},["F"]={4.75,2},
+        ["G"]={5.75,2},["H"]={6.75,2},["J"]={7.75,2},["K"]={8.75,2},["L"]={9.75,2},
+        ["Z"]={2.25,3},["X"]={3.25,3},["C"]={4.25,3},["V"]={5.25,3},["B"]={6.25,3},
+        ["N"]={7.25,3},["M"]={8.25,3},
+        ["F1"]={1,-1},["F2"]={2,-1},["F3"]={3,-1},["F4"]={4,-1},
+        ["F5"]={5.5,-1},["F6"]={6.5,-1},["F7"]={7.5,-1},["F8"]={8.5,-1},
+        ["F9"]={10,-1},["F10"]={11,-1},["F11"]={12,-1},["F12"]={13,-1},
+    },
+    AZERTY = {
+        ["`"]={0,0},["1"]={1,0},["2"]={2,0},["3"]={3,0},["4"]={4,0},["5"]={5,0},
+        ["6"]={6,0},["7"]={7,0},["8"]={8,0},["9"]={9,0},["0"]={10,0},["-"]={11,0},["="]={12,0},
+        ["TAB"]={0.5,1},["A"]={1.5,1},["Z"]={2.5,1},["E"]={3.5,1},["R"]={4.5,1},["T"]={5.5,1},
+        ["Y"]={6.5,1},["U"]={7.5,1},["I"]={8.5,1},["O"]={9.5,1},["P"]={10.5,1},
+        ["CAPSLOCK"]={0.75,2},["Q"]={1.75,2},["S"]={2.75,2},["D"]={3.75,2},["F"]={4.75,2},
+        ["G"]={5.75,2},["H"]={6.75,2},["J"]={7.75,2},["K"]={8.75,2},["L"]={9.75,2},
+        ["W"]={2.25,3},["X"]={3.25,3},["C"]={4.25,3},["V"]={5.25,3},["B"]={6.25,3},
+        ["N"]={7.25,3},["M"]={8.25,3},
+        ["F1"]={1,-1},["F2"]={2,-1},["F3"]={3,-1},["F4"]={4,-1},
+        ["F5"]={5.5,-1},["F6"]={6.5,-1},["F7"]={7.5,-1},["F8"]={8.5,-1},
+        ["F9"]={10,-1},["F10"]={11,-1},["F11"]={12,-1},["F12"]={13,-1},
+    },
+    QWERTZ = {
+        ["`"]={0,0},["1"]={1,0},["2"]={2,0},["3"]={3,0},["4"]={4,0},["5"]={5,0},
+        ["6"]={6,0},["7"]={7,0},["8"]={8,0},["9"]={9,0},["0"]={10,0},["-"]={11,0},["="]={12,0},
+        ["TAB"]={0.5,1},["Q"]={1.5,1},["W"]={2.5,1},["E"]={3.5,1},["R"]={4.5,1},["T"]={5.5,1},
+        ["Z"]={6.5,1},["U"]={7.5,1},["I"]={8.5,1},["O"]={9.5,1},["P"]={10.5,1},
+        ["CAPSLOCK"]={0.75,2},["A"]={1.75,2},["S"]={2.75,2},["D"]={3.75,2},["F"]={4.75,2},
+        ["G"]={5.75,2},["H"]={6.75,2},["J"]={7.75,2},["K"]={8.75,2},["L"]={9.75,2},
+        ["Y"]={2.25,3},["X"]={3.25,3},["C"]={4.25,3},["V"]={5.25,3},["B"]={6.25,3},
+        ["N"]={7.25,3},["M"]={8.25,3},
+        ["F1"]={1,-1},["F2"]={2,-1},["F3"]={3,-1},["F4"]={4,-1},
+        ["F5"]={5.5,-1},["F6"]={6.5,-1},["F7"]={7.5,-1},["F8"]={8.5,-1},
+        ["F9"]={10,-1},["F10"]={11,-1},["F11"]={12,-1},["F12"]={13,-1},
+    },
+    DVORAK = {
+        ["`"]={0,0},["1"]={1,0},["2"]={2,0},["3"]={3,0},["4"]={4,0},["5"]={5,0},
+        ["6"]={6,0},["7"]={7,0},["8"]={8,0},["9"]={9,0},["0"]={10,0},["-"]={11,0},["="]={12,0},
+        ["TAB"]={0.5,1},["'"]={1.5,1},[","]={2.5,1},["."]={3.5,1},["P"]={4.5,1},["Y"]={5.5,1},
+        ["F"]={6.5,1},["G"]={7.5,1},["C"]={8.5,1},["R"]={9.5,1},["L"]={10.5,1},
+        ["CAPSLOCK"]={0.75,2},["A"]={1.75,2},["O"]={2.75,2},["E"]={3.75,2},["U"]={4.75,2},
+        ["I"]={5.75,2},["D"]={6.75,2},["H"]={7.75,2},["T"]={8.75,2},["N"]={9.75,2},
+        [";"]={2.25,3},["Q"]={3.25,3},["J"]={4.25,3},["K"]={5.25,3},["X"]={6.25,3},
+        ["B"]={7.25,3},["M"]={8.25,3},["W"]={9.25,3},["V"]={10.25,3},["Z"]={11.25,3},
+        ["F1"]={1,-1},["F2"]={2,-1},["F3"]={3,-1},["F4"]={4,-1},
+        ["F5"]={5.5,-1},["F6"]={6.5,-1},["F7"]={7.5,-1},["F8"]={8.5,-1},
+        ["F9"]={10,-1},["F10"]={11,-1},["F11"]={12,-1},["F12"]={13,-1},
+    },
+}
+
+KeybindAudit.KEYBOARD_LAYOUTS = KEYBOARD_LAYOUTS
+
+local ROLE_LABELS = {
+    defensive    = "Defensives",
+    offensive_cd = "Offensive CDs",
+    cc           = "Crowd Control",
+    interrupt    = "Interrupts",
+}
+
+KeybindAudit.ROLE_LABELS = ROLE_LABELS
+
+local function KeyDistance(layout, key1, key2)
+    local pos1 = layout[key1]
+    local pos2 = layout[key2]
+    if not pos1 or not pos2 then return nil end
+    local dx = pos1[1] - pos2[1]
+    local dy = pos1[2] - pos2[2]
+    return msqrt(dx * dx + dy * dy)
+end
+
+-- Average pairwise distance for a list of base keys
+local function AveragePairwiseDistance(layout, baseKeys)
+    local n = #baseKeys
+    if n < 2 then return 0 end
+    local totalDist = 0
+    local pairCount = 0
+    for i = 1, n - 1 do
+        for j = i + 1, n do
+            local d = KeyDistance(layout, baseKeys[i], baseKeys[j])
+            if d then
+                totalDist = totalDist + d
+                pairCount = pairCount + 1
+            end
+        end
+    end
+    return pairCount > 0 and (totalDist / pairCount) or 0
+end
+
+-- Score a role group's average pairwise distance (0-100)
+local function ScoreGroupDistance(avgDist)
+    if avgDist <= 0.5 then return 100 end  -- same key (modifier variants)
+    if avgDist <= 1.5 then return 90 end   -- adjacent keys
+    if avgDist <= 2.5 then return 75 end   -- nearby
+    if avgDist <= 3.5 then return 60 end   -- moderate
+    if avgDist <= 5.0 then return 40 end   -- spread out
+    return 20                               -- scattered
+end
+
 local GRADES = {
     { min = 95, grade = "A+", color = { 0.2, 0.8, 0.2 } },
     { min = 90, grade = "A",  color = { 0.2, 0.8, 0.2 } },
@@ -133,21 +239,6 @@ local function ClassifyKey(bind, mmoMouse)
     return tier, hasModifier, base
 end
 
-local function IsCombatMacro(macroIndex)
-    local body = GetMacroBody(macroIndex)
-    if not body then return false end
-    body = slower(body)
-    if sfind(body, "/cast", 1, true) then return true end
-    if sfind(body, "/use", 1, true) then return true end
-    if sfind(body, "/castsequence", 1, true) then return true end
-    if sfind(body, "/cancelaura", 1, true) then return true end
-    if sfind(body, "/cancelform", 1, true) then return true end
-    if sfind(body, "/startattack", 1, true) then return true end
-    if sfind(body, "/stopattack", 1, true) then return true end
-    if sfind(body, "/petattack", 1, true) then return true end
-    if sfind(body, "/stopcasting", 1, true) then return true end
-    return false
-end
 
 local function GetActionName(slot)
     local actionType, id = GetActionInfo(slot)
@@ -192,8 +283,8 @@ end
 function KeybindAudit:Scan(options)
     options = options or {}
     local barFilter = options.barFilter
-    local skipNonCombat = options.skipNonCombat
     local mmoMouse = options.mmoMouse
+    local ShouldIgnoreAction = ns.Tracker and ns.Tracker.ShouldIgnoreAction
 
     local bars = {}
     local allSlots = {}
@@ -234,13 +325,8 @@ function KeybindAudit:Scan(options)
                     local actualSlot = btn.action or (btn.GetAction and btn:GetAction())
                     if actualSlot then slot = actualSlot end
                 end
-                if HasAction(slot) then
-                    local actionType, actionId = GetActionInfo(slot)
-
-                    -- Skip non-combat macros
-                    if skipNonCombat and actionType == "macro" and actionId and not IsCombatMacro(actionId) then
-                        skippedMacros = skippedMacros + 1
-                    else
+                if HasAction(slot) and not (ShouldIgnoreAction and ShouldIgnoreAction(slot)) then
+                        local actionType, actionId = GetActionInfo(slot)
                         local keybind = GetBindingKey(barDef.bindPrefix .. i)
                         local icon = GetActionTexture(slot)
                         local name = GetActionName(slot) or sformat("Slot %d", slot)
@@ -248,6 +334,16 @@ function KeybindAudit:Scan(options)
                         local tier, hasModifier, base
                         if keybind then
                             tier, hasModifier, base = ClassifyKey(keybind, mmoMouse)
+                        end
+
+                        -- Resolve spell role for grouping
+                        local spellID
+                        if actionType == "spell" and actionId and actionId > 0 then
+                            spellID = actionId
+                        end
+                        local role
+                        if spellID and ns.SpellData then
+                            role = ns.SpellData:GetSpellRole(spellID)
                         end
 
                         local slotData = {
@@ -260,6 +356,8 @@ function KeybindAudit:Scan(options)
                             tier = tier,
                             hasModifier = hasModifier,
                             baseKey = base,
+                            spellID = spellID,
+                            role = role,
                         }
 
                         tinsert(barData.slots, slotData)
@@ -281,7 +379,6 @@ function KeybindAudit:Scan(options)
                                 poorCount = poorCount + 1
                             end
                         end
-                    end
                 end
             end
 
@@ -369,12 +466,71 @@ function KeybindAudit:Scan(options)
         end
     end
 
+    -- Grouping score (experimental, opt-in)
+    -- Measures physical key proximity of abilities in the same role group
+    -- (defensives near each other, CCs near each other, etc.)
+    local includeGrouping = options.includeGrouping
+    local keyboardLayout = options.keyboardLayout or "QWERTY"
+    local layout = KEYBOARD_LAYOUTS[keyboardLayout] or KEYBOARD_LAYOUTS.QWERTY
+    local groupingScore = 0
+    local roleGroups = {}  -- role → { baseKeys = {}, slots = {} }
+
+    for _, slotData in ipairs(allSlots) do
+        if slotData.keybind and slotData.baseKey and slotData.role then
+            if not roleGroups[slotData.role] then
+                roleGroups[slotData.role] = { baseKeys = {}, slots = {} }
+            end
+            tinsert(roleGroups[slotData.role].baseKeys, slotData.baseKey)
+            tinsert(roleGroups[slotData.role].slots, slotData)
+        end
+    end
+
+    -- Score each role group with 2+ abilities, then average
+    local scoredGroups = 0
+    local groupScoreSum = 0
+    local roleScores = {}  -- role → { score, avgDist, count }
+
+    for role, group in pairs(roleGroups) do
+        if #group.baseKeys >= 2 then
+            local avgDist = AveragePairwiseDistance(layout, group.baseKeys)
+            local roleScore = ScoreGroupDistance(avgDist)
+            roleScores[role] = { score = roleScore, avgDist = avgDist, count = #group.baseKeys }
+            groupScoreSum = groupScoreSum + roleScore
+            scoredGroups = scoredGroups + 1
+        end
+    end
+
+    groupingScore = scoredGroups > 0 and (groupScoreSum / scoredGroups) or 0
+
+    -- Generate issues for scattered role groups
+    if includeGrouping then
+        for role, info in pairs(roleScores) do
+            if info.score <= 40 then
+                local label = ROLE_LABELS[role] or role
+                tinsert(issues, {
+                    severity = "low",
+                    icon = nil,
+                    text = sformat("%s are spread across distant keys", label),
+                    detail = sformat("Group your %d %s on nearby keys or modifier variants of the same key.",
+                        info.count, slower(label)),
+                })
+            end
+        end
+    end
+
     local sevOrder = { high = 1, medium = 2, low = 3 }
     table.sort(issues, function(a, b)
         return (sevOrder[a.severity] or 9) < (sevOrder[b.severity] or 9)
     end)
 
-    local overall = coverageScore * 0.40 + reachScore * 0.30 + modScore * 0.15 + antiScore * 0.15
+    -- Overall score: when grouping is included, redistribute weights
+    local overall
+    if includeGrouping then
+        -- Coverage 35%, Reachability 25%, Modifiers 12%, Anti-patterns 13%, Grouping 15%
+        overall = coverageScore * 0.35 + reachScore * 0.25 + modScore * 0.12 + antiScore * 0.13 + groupingScore * 0.15
+    else
+        overall = coverageScore * 0.40 + reachScore * 0.30 + modScore * 0.15 + antiScore * 0.15
+    end
     overall = mmin(mmax(mfloor(overall + 0.5), 0), 100)
 
     local grade, gradeColor = self:GetGrade(overall)
@@ -388,6 +544,7 @@ function KeybindAudit:Scan(options)
             reachability = mfloor(reachScore + 0.5),
             modifiers = modScore,
             antiPatterns = antiScore,
+            grouping = mfloor(groupingScore + 0.5),
             overall = overall,
         },
         issues = issues,
@@ -398,6 +555,10 @@ function KeybindAudit:Scan(options)
         totalFilled = totalFilled,
         totalBound = totalBound,
         skippedMacros = skippedMacros,
+        includeGrouping = includeGrouping,
+        roleGroups = roleGroups,
+        roleScores = roleScores,
+        keyboardLayout = keyboardLayout,
     }
 
     return auditResults

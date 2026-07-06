@@ -114,6 +114,7 @@ local ACHIEVEMENT_LIST = {
     { id = "comp_mythic",     name = "Grandmaster",      desc = "Earn Mythic rank in Competitive mode",                   category = "competitive", icon = "PVPCurrency-Honor-HordeUnit" },
 
     -- Modifiers
+    { id = "mod_fake",        name = "Spot the Phony",   desc = "Complete a round with Fake active",                      category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
     { id = "mod_angled",      name = "Off-Angle",        desc = "Complete a round with Angled active",                    category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
     { id = "mod_squiggly",    name = "Noodle Arms",      desc = "Complete a round with Squiggly active",                  category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
     { id = "mod_fade",        name = "Ghost Reader",     desc = "Complete a round with Fade active",                      category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
@@ -121,7 +122,7 @@ local ACHIEVEMENT_LIST = {
     { id = "mod_doubles",     name = "Two-Fisted",       desc = "Complete a round with Doubles active",                   category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
     { id = "mod_mirror",      name = "Looking Glass",    desc = "Complete a round with Mirror active",                    category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
     { id = "mod_3",           name = "Triple Threat",    desc = "Complete a round with 3+ modifiers active",              category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
-    { id = "mod_all",         name = "Total Chaos",      desc = "Complete a round with all 6 modifiers active",           category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
+    { id = "mod_all",         name = "Total Chaos",      desc = "Complete a round with all 7 modifiers active",           category = "modifier", icon = "Vehicle-SilvershardMines-Arrow" },
 }
 Achievements.ACHIEVEMENT_LIST = ACHIEVEMENT_LIST
 
@@ -211,14 +212,11 @@ function Achievements:CheckRoundAchievements(results)
     end
 
     -- Modifier achievements
-    -- Extreme forces angled notes via randomAngles preset, count as angled modifier
+    -- Required modifiers are already included via Modifiers:GetActive(), but ensure they count
     local mods = results.modifiers or {}
-    if results.difficulty == "Extreme" then
-        mods.angled = true
-    end
     local modCount = 0
     local MOD_ACHIEV = {
-        angled = "mod_angled", squiggly = "mod_squiggly", fade = "mod_fade",
+        fake = "mod_fake", angled = "mod_angled", squiggly = "mod_squiggly", fade = "mod_fade",
         accelerate = "mod_accelerate", doubles = "mod_doubles", mirror = "mod_mirror",
     }
     for id in pairs(mods) do
@@ -230,7 +228,7 @@ function Achievements:CheckRoundAchievements(results)
     if modCount >= 3 then
         if self:Unlock("mod_3") then tinsert(newUnlocks, "mod_3") end
     end
-    if modCount >= 6 then
+    if modCount >= 7 then
         if self:Unlock("mod_all") then tinsert(newUnlocks, "mod_all") end
     end
 

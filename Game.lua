@@ -75,24 +75,36 @@ local DIFFICULTY_MUSIC = {
 }
 
 local DIFFICULTY_PRESETS = {
-    Easy    = { fallSpeed = 80, fallDistance = 350, maxActiveNotes = 1, spawnInterval = 2.5,
+    Easy    = { fallSpeed = 96, fallDistance = 350, maxActiveNotes = 1, spawnInterval = 2.1,
                 timingPerfect = 0.06, timingGreat = 0.20, timingGood = 0.40,
                 redHerringChance = 0, randomAngles = false, doublesChance = 0 },
-    Medium  = { fallSpeed = 150, fallDistance = 300, maxActiveNotes = 3, spawnInterval = 1.5,
+    Medium  = { fallSpeed = 180, fallDistance = 300, maxActiveNotes = 3, spawnInterval = 1.25,
                 timingPerfect = 0.04, timingGreat = 0.12, timingGood = 0.22,
                 redHerringChance = 0, randomAngles = false, doublesChance = 0 },
-    Hard    = { fallSpeed = 200, fallDistance = 280, maxActiveNotes = 4, spawnInterval = 1.2,
+    Hard    = { fallSpeed = 240, fallDistance = 280, maxActiveNotes = 4, spawnInterval = 1.0,
                 timingPerfect = 0.03, timingGreat = 0.09, timingGood = 0.18,
-                redHerringChance = 0.18, randomAngles = false, doublesChance = 0 },
-    Extreme = { fallSpeed = 200, fallDistance = 260, maxActiveNotes = 5, spawnInterval = 0.9,
+                redHerringChance = 0, randomAngles = false, doublesChance = 0 },
+    Extreme = { fallSpeed = 240, fallDistance = 260, maxActiveNotes = 5, spawnInterval = 0.75,
                 timingPerfect = 0.025, timingGreat = 0.07, timingGood = 0.15,
-                redHerringChance = 0.25, randomAngles = true, doublesChance = 0 },
+                redHerringChance = 0, randomAngles = false, doublesChance = 0 },
 }
 
 local MODIFIER_KEYS = {
     LSHIFT = true, RSHIFT = true,
     LCTRL = true, RCTRL = true,
     LALT = true, RALT = true,
+}
+
+-- All action bar binding prefixes to neutralize during gameplay
+local ALL_BAR_PREFIXES = {
+    "ACTIONBUTTON",
+    "MULTIACTIONBAR1BUTTON",
+    "MULTIACTIONBAR2BUTTON",
+    "MULTIACTIONBAR3BUTTON",
+    "MULTIACTIONBAR4BUTTON",
+    "MULTIACTIONBAR5BUTTON",
+    "MULTIACTIONBAR6BUTTON",
+    "MULTIACTIONBAR7BUTTON",
 }
 
 local gameFrame
@@ -145,6 +157,29 @@ function Game:Initialize()
             -- Paused by combat; pause overlay shows
         end
     end)
+end
+
+function Game:BlockActionBars()
+    -- Bind each action bar key to a nonexistent action so it does nothing
+    for _, prefix in ipairs(ALL_BAR_PREFIXES) do
+        for i = 1, 12 do
+            local key1, key2 = GetBindingKey(prefix .. i)
+            if key1 then
+                SetOverrideBinding(inputFrame, true, key1, "BTLNOOP")
+            end
+            if key2 then
+                SetOverrideBinding(inputFrame, true, key2, "BTLNOOP")
+            end
+        end
+    end
+    -- Block ping keybind
+    local pingKey1, pingKey2 = GetBindingKey("PING")
+    if pingKey1 then SetOverrideBinding(inputFrame, true, pingKey1, "BTLNOOP") end
+    if pingKey2 then SetOverrideBinding(inputFrame, true, pingKey2, "BTLNOOP") end
+end
+
+function Game:UnblockActionBars()
+    ClearOverrideBindings(inputFrame)
 end
 
 function Game:GetSettings()
@@ -203,24 +238,38 @@ function Game:DiscoverSlots()
         { key = "bottomRight", bindPrefix = "MULTIACTIONBAR2BUTTON",  btnPrefix = "MultiBarBottomRightButton", startSlot = 49 },
         { key = "right",       bindPrefix = "MULTIACTIONBAR3BUTTON",  btnPrefix = "MultiBarRightButton",       startSlot = 25 },
         { key = "left",        bindPrefix = "MULTIACTIONBAR4BUTTON",  btnPrefix = "MultiBarLeftButton",        startSlot = 37 },
+        { key = "bar6",        bindPrefix = "MULTIACTIONBAR5BUTTON",  btnPrefix = "MultiBar5Button",           startSlot = 145 },
+        { key = "bar7",        bindPrefix = "MULTIACTIONBAR6BUTTON",  btnPrefix = "MultiBar6Button",           startSlot = 157 },
+        { key = "bar8",        bindPrefix = "MULTIACTIONBAR7BUTTON",  btnPrefix = "MultiBar7Button",           startSlot = 169 },
     }
+    local seenTextures = {}
     for _, bar in ipairs(barMappings) do
         if bars[bar.key] then
             for i = 1, 12 do
                 local slot = bar.startSlot + (i - 1)
-                if HasAction(slot) then
-                    local keybind = GetBindingKey(bar.bindPrefix .. i)
-                    if keybind then
-                        local btn = _G[bar.btnPrefix .. i]
-                        if btn and btn:IsShown() then
-                            local slotInfo = {
-                                slot = slot,
-                                keybind = keybind,
-                                texture = GetActionTexture(slot),
-                                button = btn,
-                            }
-                            tinsert(availableSlots, slotInfo)
-                            keybindToSlot[keybind] = slotInfo
+                local btn = _G[bar.btnPrefix .. i]
+                if btn and btn:IsShown() then
+                    -- Read the button's CURRENT action, not the raw page slot.
+                    -- Druid forms (and stance/bonus bars) remap the main bar,
+                    -- so GetActionTexture(slot) returns a hidden other-form
+                    -- icon. btn.action is what the player actually sees now.
+                    local action = btn.action or slot
+                    if HasAction(action) then
+                        local keybind = GetBindingKey(bar.bindPrefix .. i)
+                        if keybind then
+                            local texture = GetActionTexture(action)
+                            -- Skip duplicate textures (same ability on 2 bars)
+                            if texture and not seenTextures[texture] then
+                                seenTextures[texture] = true
+                                local slotInfo = {
+                                    slot = slot,
+                                    keybind = keybind,
+                                    texture = texture,
+                                    button = btn,
+                                }
+                                tinsert(availableSlots, slotInfo)
+                                keybindToSlot[keybind] = slotInfo
+                            end
                         end
                     end
                 end
@@ -259,17 +308,64 @@ function Game:DiscoverCompetitiveSlots()
     end
 end
 
+local musicFadeTicker
+local gameMusicTarget
+
+local function CancelMusicFade()
+    if musicFadeTicker then
+        musicFadeTicker:Cancel()
+        musicFadeTicker = nil
+    end
+end
+
+-- Ramp Sound_MusicVolume from `from` to `to` over `dur` seconds, then call onDone.
+-- Used to fade the round's track in from silence so a cut track is not abrupt.
+local function FadeMusicVolume(from, to, dur, onDone)
+    CancelMusicFade()
+    local steps = mmax(1, mfloor(dur / 0.05))
+    local i = 0
+    musicFadeTicker = C_Timer.NewTicker(0.05, function(self)
+        i = i + 1
+        if i >= steps then
+            SetCVar("Sound_MusicVolume", to)
+            self:Cancel()
+            musicFadeTicker = nil
+            if onDone then onDone() end
+        else
+            SetCVar("Sound_MusicVolume", from + (to - from) * (i / steps))
+        end
+    end, steps)
+end
+
 local function MuteGameAudio()
     savedAmbienceVol = tonumber(GetCVar("Sound_AmbienceVolume")) or 0.5
     SetCVar("Sound_AmbienceVolume", 0)
 end
 
+-- Play the round's track, fading up from silence so the start is not abrupt. The
+-- target volume is persisted so a crash mid-fade still restores it on next load
+-- (Core clears pendingMusicRestore once applied).
+local function BeginGameMusic(track)
+    local target = tonumber(GetCVar("Sound_MusicVolume")) or 0.4
+    if target < 0.05 then target = 0.4 end
+    gameMusicTarget = target
+    BoundToLearn.db.pendingMusicRestore = target
+    SetCVar("Sound_MusicVolume", 0)
+    PlayMusic(track)
+    isPlayingGameMusic = true
+    FadeMusicVolume(0, target, 1.2)
+end
+
 local function RestoreGameAudio()
     if savedAmbienceVol then SetCVar("Sound_AmbienceVolume", savedAmbienceVol) end
     savedAmbienceVol = nil
+    CancelMusicFade()
     if isPlayingGameMusic then
-        StopMusic()
         isPlayingGameMusic = false
+        -- Do not stop the track: the round-over screen keeps it playing. Just
+        -- make sure the volume is back at the player's level and clear the guard.
+        SetCVar("Sound_MusicVolume", gameMusicTarget or 0.4)
+        BoundToLearn.db.pendingMusicRestore = nil
     end
 end
 
@@ -288,7 +384,7 @@ local function ResetGameState()
     hitCounts.redHerring = 0
     wipe(activeNotes)
     wipe(destroyedLanes)
-    spawnAccumulator = 0
+    spawnAccumulator = 999  -- trigger immediate first spawn
     gameStartTime = GetTime()
     gameElapsed = 0
     pauseStartTime = 0
@@ -306,9 +402,17 @@ function Game:Start()
         BoundToLearn:Print("Cannot start game during combat.")
         return
     end
+    -- Skyriding/dragonriding swaps the main action bar for the mount ability bar
+    -- (a bonus bar), which breaks keybind discovery. A grounded normal mount
+    -- leaves the bonus bar at 0, so only skyriding is blocked.
+    if IsMounted() and (GetBonusBarOffset and GetBonusBarOffset() or 0) > 0 then
+        BoundToLearn:Print("Dismount first. Skyriding swaps your action bars, which breaks keybind tracking.")
+        return
+    end
 
     local db = BoundToLearn.db.game
     currentMode = db.mode or "timed"
+    self:SeedChart(db.songKey, db.difficulty)
 
     if currentMode == "competitive" then
         return self:StartCompetitive()
@@ -320,9 +424,10 @@ function Game:Start()
         return
     end
 
-    gameDuration = (currentMode == "practice") and 0 or (db.duration or 60)
+    gameDuration = (currentMode == "practice") and 0 or ns.SongData.PlayLength(ns.SongData.Get(db.songKey))
 
     ResetGameState()
+    self:BlockActionBars()
 
     if BoundToLearn.db.game.soundEnabled then
         MuteGameAudio()
@@ -339,10 +444,10 @@ function Game:Start()
             gameFrame:Show()
             inputFrame:Show()
             if BoundToLearn.db.game.soundEnabled then
-                local track = DIFFICULTY_MUSIC[db.difficulty]
+                local song = ns.SongData and ns.SongData.Get(db.songKey)
+                local track = (song and song.id) or DIFFICULTY_MUSIC[db.difficulty]
                 if track then
-                    PlayMusic(track)
-                    isPlayingGameMusic = true
+                    BeginGameMusic(track)
                 end
             end
         end)
@@ -363,7 +468,7 @@ function Game:StartCompetitive()
 
     local db = BoundToLearn.db.game
     currentMode = "competitive"
-    gameDuration = db.duration or 90
+    gameDuration = ns.SongData.PlayLength(ns.SongData.Get(db.songKey))
 
     if ns.GameUI then
         ns.GameUI:CreateCompBar()
@@ -377,6 +482,7 @@ function Game:StartCompetitive()
     end
 
     ResetGameState()
+    self:BlockActionBars()
 
     if BoundToLearn.db.game.soundEnabled then
         MuteGameAudio()
@@ -393,10 +499,10 @@ function Game:StartCompetitive()
             gameFrame:Show()
             inputFrame:Show()
             if BoundToLearn.db.game.soundEnabled then
-                local track = DIFFICULTY_MUSIC[difficulty]
+                local song = ns.SongData and ns.SongData.Get(db.songKey)
+                local track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
                 if track then
-                    PlayMusic(track)
-                    isPlayingGameMusic = true
+                    BeginGameMusic(track)
                 end
             end
         end)
@@ -412,6 +518,7 @@ function Game:Stop()
     isPaused = false
     gameFrame:Hide()
     inputFrame:Hide()
+    self:UnblockActionBars()
     RestoreGameAudio()
     if ns.GameUI then
         ns.GameUI:CancelCountdown()
@@ -446,6 +553,16 @@ function Game:Stop()
             mode = currentMode,
             difficulty = difficulty,
         })
+    end
+
+    if ns.GameUI and totalNotes > 0 and currentMode ~= "practice" then
+        ns.GameUI:RecordSongScore(score)
+        local key = BoundToLearn.db.game.songKey
+        local song = ns.SongData and ns.SongData.Get(key)
+        local songLen = song and ns.SongData.PlayLength(song) or 0
+        if songLen > 0 then
+            ns.GameUI:RecordSongProgress(key, mmin(1, duration / songLen))
+        end
     end
 
     if ns.GameUI then
@@ -614,7 +731,7 @@ function Game:OnUpdate(elapsed)
 
     spawnAccumulator = spawnAccumulator + elapsed
     if spawnAccumulator >= settings.spawnInterval then
-        spawnAccumulator = spawnAccumulator - settings.spawnInterval
+        spawnAccumulator = spawnAccumulator % settings.spawnInterval
         self:SpawnNote(now, settings)
         -- Doubles: modifier only, not available in competitive (modifier keys conflict)
         if currentMode ~= "competitive" and activeMods.doubles and math.random() < 0.20 then
@@ -659,6 +776,25 @@ function Game:OnUpdate(elapsed)
     end
 end
 
+-- Deterministic per-song, per-difficulty note pathing. Seeding from the song
+-- key + difficulty means a given chart draws the same lane sequence every play,
+-- so scores are comparable and a run is worth boasting about. Park-Miller keeps
+-- the global math.random (used for score-bonus reinforcement) untouched.
+local CHART_PRIME = 2147483647
+function Game:SeedChart(key, diff)
+    local str = (key or "?") .. ":" .. (diff or "Medium")
+    local h = 7
+    for i = 1, #str do h = (h * 31 + str:byte(i)) % CHART_PRIME end
+    if h < 1 then h = h + 1 end
+    self.chartState = h
+end
+
+function Game:ChartRandInt(n)
+    if not self.chartState or n <= 1 then return 1 end
+    self.chartState = (16807 * self.chartState) % CHART_PRIME
+    return 1 + (self.chartState % n)
+end
+
 function Game:SpawnNote(now, settings)
     local activeCount = 0
     for _, n in ipairs(activeNotes) do
@@ -680,13 +816,17 @@ function Game:SpawnNote(now, settings)
     end
     if #candidates == 0 then return end
 
-    local chosen = candidates[math.random(#candidates)]
+    local chosen = candidates[self:ChartRandInt(#candidates)]
     local fallTime = settings.fallDistance / settings.fallSpeed
+
+    local mods = ns.Modifiers and ns.Modifiers:GetActive() or {}
 
     -- Red herring: show a wrong icon, hitting it docks points (non-competitive)
     local isRedHerring = false
     local displayTexture = nil
-    if currentMode ~= "competitive" and settings.redHerringChance > 0 and #availableSlots >= 2 and math.random() < settings.redHerringChance then
+    local fakeChance = settings.redHerringChance
+    if fakeChance == 0 and mods.fake then fakeChance = 0.18 end
+    if currentMode ~= "competitive" and fakeChance > 0 and #availableSlots >= 2 and math.random() < fakeChance then
         isRedHerring = true
         local wrongSlot
         repeat
@@ -706,9 +846,7 @@ function Game:SpawnNote(now, settings)
         end
     end
 
-    local mods = ns.Modifiers and ns.Modifiers:GetActive() or {}
-
-    -- Angled: modifier or forced on Extreme
+    -- Angled: optional modifier, or the always-random-angles game setting
     local spawnAngle = nil
     if (mods.angled or settings.randomAngles) and math.random() > 0.3 then
         spawnAngle = math.pi / 2 + (math.random() * math.pi / 2 - math.pi / 4)

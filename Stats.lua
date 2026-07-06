@@ -118,6 +118,28 @@ function Stats:RecordGameSession(gameData)
     end
 end
 
+function Stats:RecordQuizSession(quizData)
+    local summary = {
+        timestamp = time(),
+        type = "quiz",
+        elapsed = mfloor(quizData.elapsed * 10) / 10,
+        totalAbilities = quizData.totalAbilities,
+        rounds = quizData.rounds,
+        wrongAnswers = quizData.wrongAnswers or 0,
+    }
+    self:AddSession(summary)
+
+    local db = BoundToLearn.db.stats
+    db.lifetimeQuizzes = db.lifetimeQuizzes + 1
+    db.lifetimeQuizAbilities = db.lifetimeQuizAbilities + quizData.totalAbilities
+
+    local pb = db.personalBest
+    if pb.fastestQuiz == 0 or quizData.elapsed < pb.fastestQuiz then
+        pb.fastestQuiz = mfloor(quizData.elapsed * 10) / 10
+        BoundToLearn:Print("New personal best quiz time: " .. pb.fastestQuiz .. "s")
+    end
+end
+
 function Stats:AddSession(summary)
     local sessions = BoundToLearn.db.stats.sessions
     tinsert(sessions, summary)

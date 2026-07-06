@@ -13,7 +13,6 @@ local GetTime    = Utils.GetTime
 local ipairs     = Utils.ipairs
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK
-local SOUND_CLOSE = Utils.SOUND_CLOSE
 
 local UIParent = UIParent
 local GameTooltip = GameTooltip
@@ -29,13 +28,6 @@ local isInitialized = false
 
 -- viewIndex: 0 = current, -1 = overall, 1+ = segment history index
 local viewIndex = 0
-
-local WIDGET_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 12,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-}
 
 -- Color thresholds for the ratio bar (keybind %)
 -- Green at 90%+, yellow at 70-89%, red below 70%
@@ -79,13 +71,11 @@ function TrackerUI:Initialize()
 end
 
 function TrackerUI:CreateWidget()
-    widget = CreateFrame("Frame", "BoundToLearnTrackerWidget", UIParent, "BackdropTemplate")
+    widget = CreateFrame("Frame", "BoundToLearnTrackerWidget", UIParent)
     widget:SetSize(180, 102)
     widget:SetFrameStrata("MEDIUM")
     widget:SetFrameLevel(100)
-    widget:SetBackdrop(WIDGET_BACKDROP)
-    widget:SetBackdropColor(0.05, 0.05, 0.05, 0.85)
-    widget:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    ns.Theme.StylePanel(widget, 0.9)
     widget:SetClampedToScreen(true)
     widget:EnableMouse(true)
     widget:SetMovable(true)
@@ -117,31 +107,16 @@ function TrackerUI:CreateWidget()
     -- Row 1: Title + reset button
     local title = widget:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     title:SetPoint("TOPLEFT", 8, -6)
-    title:SetText("|cFF55CCFFKeybind Tracker|r")
+    title:SetText("|cFFFF8A33Keybind Tracker|r")
     title:SetJustifyH("LEFT")
 
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, widget)
-    closeBtn:SetSize(14, 14)
-    closeBtn:SetPoint("TOPRIGHT", widget, "TOPRIGHT", -6, -5)
-    local closeLabel = closeBtn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    closeLabel:SetPoint("CENTER")
-    closeLabel:SetText("x")
-    closeBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLOSE)
+    local closeBtn = ns.Theme.CreateCloseButton(widget, function()
         if BoundToLearn then BoundToLearn:ToggleTracker() end
     end)
-    closeBtn:SetScript("OnEnter", function(self)
-        closeLabel:SetFontObject("GameFontHighlightSmall")
-        closeLabel:SetTextColor(1, 0.3, 0.3)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Close Tracker")
-        GameTooltip:Show()
-    end)
-    closeBtn:SetScript("OnLeave", function()
-        closeLabel:SetFontObject("GameFontDisableSmall")
-        GameTooltip:Hide()
-    end)
+    closeBtn:SetSize(16, 16)
+    closeBtn:SetPoint("TOPRIGHT", widget, "TOPRIGHT", -6, -5)
+    ns.Theme.AttachTooltip(closeBtn, "Close Tracker")
 
     local resetBtn = CreateFrame("Button", nil, widget)
     resetBtn:SetSize(14, 14)
@@ -158,15 +133,14 @@ function TrackerUI:CreateWidget()
             TrackerUI:ResetDisplay()
         end
     end)
-    resetBtn:SetScript("OnEnter", function(self)
+    resetBtn:HookScript("OnEnter", function()
         resetLabel:SetFontObject("GameFontHighlightSmall")
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Reset Session")
-        GameTooltip:Show()
     end)
-    resetBtn:SetScript("OnLeave", function()
+    resetBtn:HookScript("OnLeave", function()
         resetLabel:SetFontObject("GameFontDisableSmall")
-        GameTooltip:Hide()
+    end)
+    ns.Theme.DelayedTooltip(resetBtn, function()
+        GameTooltip:SetText("Reset Session")
     end)
 
     -- Pause/resume button
@@ -180,16 +154,15 @@ function TrackerUI:CreateWidget()
         PlayUISound(SOUND_CLICK)
         if ns.Tracker then ns.Tracker:TogglePause() end
     end)
-    pauseBtn:SetScript("OnEnter", function(self)
+    pauseBtn:HookScript("OnEnter", function()
         pauseLabel:SetFontObject("GameFontHighlightSmall")
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    end)
+    pauseBtn:HookScript("OnLeave", function()
+        pauseLabel:SetFontObject("GameFontDisableSmall")
+    end)
+    ns.Theme.DelayedTooltip(pauseBtn, function()
         local paused = ns.Tracker and ns.Tracker:IsPaused()
         GameTooltip:SetText(paused and "Resume Tracking" or "Pause Tracking")
-        GameTooltip:Show()
-    end)
-    pauseBtn:SetScript("OnLeave", function()
-        pauseLabel:SetFontObject("GameFontDisableSmall")
-        GameTooltip:Hide()
     end)
     self.pauseLabel = pauseLabel
 
@@ -204,15 +177,14 @@ function TrackerUI:CreateWidget()
         PlayUISound(SOUND_CLICK)
         if ns.Options then ns.Options:ShowTrackerSection() end
     end)
-    optBtn:SetScript("OnEnter", function(self)
+    optBtn:HookScript("OnEnter", function()
         optLabel:SetFontObject("GameFontHighlightSmall")
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Options")
-        GameTooltip:Show()
     end)
-    optBtn:SetScript("OnLeave", function()
+    optBtn:HookScript("OnLeave", function()
         optLabel:SetFontObject("GameFontDisableSmall")
-        GameTooltip:Hide()
+    end)
+    ns.Theme.DelayedTooltip(optBtn, function()
+        GameTooltip:SetText("Options")
     end)
 
     -- Row 2: Ratio % on left, count on right
@@ -288,21 +260,17 @@ function TrackerUI:CreateWidget()
     segLeftBtn = CreateFrame("Button", nil, widget)
     segLeftBtn:SetSize(14, 14)
     segLeftBtn:SetPoint("BOTTOMLEFT", widget, "BOTTOMLEFT", 6, 4)
-    local segLeftLabel = segLeftBtn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    segLeftLabel:SetPoint("CENTER")
-    segLeftLabel:SetText("<")
-    segLeftBtn:SetScript("OnEnter", function() segLeftLabel:SetFontObject("GameFontHighlightSmall") end)
-    segLeftBtn:SetScript("OnLeave", function() segLeftLabel:SetFontObject("GameFontDisableSmall") end)
+    local segLeftArrow = ns.Theme.CreateArrow(segLeftBtn, 9)
+    segLeftArrow:SetPoint("CENTER")
+    segLeftArrow:SetDirection("left")
     segLeftBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); TrackerUI:NavigateSegment(-1) end)
 
     segRightBtn = CreateFrame("Button", nil, widget)
     segRightBtn:SetSize(14, 14)
     segRightBtn:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", -6, 4)
-    local segRightLabel = segRightBtn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    segRightLabel:SetPoint("CENTER")
-    segRightLabel:SetText(">")
-    segRightBtn:SetScript("OnEnter", function() segRightLabel:SetFontObject("GameFontHighlightSmall") end)
-    segRightBtn:SetScript("OnLeave", function() segRightLabel:SetFontObject("GameFontDisableSmall") end)
+    local segRightArrow = ns.Theme.CreateArrow(segRightBtn, 9)
+    segRightArrow:SetPoint("CENTER")
+    segRightArrow:SetDirection("right")
     segRightBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); TrackerUI:NavigateSegment(1) end)
 
     local segLabelBtn = CreateFrame("Button", nil, widget)
@@ -484,13 +452,6 @@ end
 -- Segment dropdown menu
 local segDropdown
 
-local DROPDOWN_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 12,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-}
-
 function TrackerUI:ToggleSegmentDropdown()
     if segDropdown and segDropdown:IsShown() then
         segDropdown:Hide()
@@ -507,25 +468,27 @@ local function CreateSegmentButton(parent)
     btn:SetSize(MENU_WIDTH - 8, ROW_HEIGHT)
     btn:SetNormalFontObject("GameFontHighlightSmall")
     btn:SetHighlightFontObject("GameFontNormalSmall")
-    btn:SetScript("OnEnter", function(self)
+    local hl = CreateFrame("Frame", nil, btn)
+    hl:SetPoint("TOPLEFT", -1, 1)
+    hl:SetPoint("BOTTOMRIGHT", 1, -1)
+    ns.Theme.Round(hl)
+    ns.Theme.SetBarHeight(hl, 10)
+    ns.Theme.SetBorderShown(hl, false)
+    ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0)
+    btn:HookScript("OnEnter", function() ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0.18) end)
+    btn:HookScript("OnLeave", function() ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0) end)
+    ns.Theme.DelayedTooltip(btn, function(self)
         if self.tooltipText then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText(self.tooltipText, 1, 1, 1, 1, true)
-            GameTooltip:Show()
         end
-    end)
-    btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
     end)
     return btn
 end
 
 local function SetupDropdownFrame()
-    segDropdown = CreateFrame("Frame", nil, widget, "BackdropTemplate")
+    segDropdown = CreateFrame("Frame", nil, widget)
     segDropdown:SetFrameStrata("FULLSCREEN_DIALOG")
-    segDropdown:SetBackdrop(DROPDOWN_BACKDROP)
-    segDropdown:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    segDropdown:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    ns.Theme.StylePanel(segDropdown, 0.97)
     segDropdown:Hide()
 
     -- Fixed header: Current + Overall
@@ -539,7 +502,7 @@ local function SetupDropdownFrame()
     -- Separator
     local sep = segDropdown:CreateTexture(nil, "ARTWORK")
     sep:SetHeight(1)
-    sep:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+    sep:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
     sep:SetPoint("TOPLEFT", 8, -4 - 2 * ROW_HEIGHT - 4)
     sep:SetPoint("TOPRIGHT", -8, -4 - 2 * ROW_HEIGHT - 4)
     segDropdown.sep = sep
@@ -570,7 +533,7 @@ local function SetupDropdownFrame()
 
     local thumb = track:CreateTexture(nil, "OVERLAY")
     thumb:SetWidth(SCROLLBAR_WIDTH)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
+    thumb:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT_DIM, 0.9))
     thumb:SetPoint("TOP", track, "TOP", 0, 0)
     thumb:SetHeight(20)
     segDropdown.scrollThumb = thumb

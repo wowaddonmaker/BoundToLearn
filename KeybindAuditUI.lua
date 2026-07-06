@@ -17,13 +17,6 @@ local SOUND_CLICK = Utils.SOUND_CLICK
 
 local UIParent = UIParent
 
-local PANEL_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-}
-
 local BAR_FRAME_MAP = {
     { key = "main",        label = "Action Bar 1",  prefix = "ActionButton",               barFrame = "MainMenuBar" },
     { key = "bottomLeft",  label = "Action Bar 2",  prefix = "MultiBarBottomLeftButton",   barFrame = "MultiBarBottomLeft" },
@@ -67,16 +60,12 @@ end
 
 local function LoadBarToggles()
     local db = GetDb()
-    if not db.barsInitialized then
-        -- First use: default to only bars whose first button is visible
-        for _, barDef in ipairs(BAR_FRAME_MAP) do
-            local btn1 = _G[barDef.prefix .. "1"]
-            db.bars[barDef.key] = btn1 and btn1:IsVisible() or false
-        end
-        db.barsInitialized = true
-    end
+    -- Always sync with actual bar visibility
     for _, barDef in ipairs(BAR_FRAME_MAP) do
-        barToggles[barDef.key] = db.bars[barDef.key]
+        local btn1 = _G[barDef.prefix .. "1"]
+        local visible = btn1 and btn1:IsVisible() or false
+        db.bars[barDef.key] = visible
+        barToggles[barDef.key] = visible
     end
 end
 
@@ -196,7 +185,7 @@ local function CreateScoreBar(parent, label, yOffset, categoryIndex)
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetPoint("LEFT", 100, 0)
     bg:SetSize(110, 12)
-    bg:SetColorTexture(0.15, 0.15, 0.15, 1)
+    bg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.PANEL_DARK))
     row.bg = bg
 
     local fill = row:CreateTexture(nil, "ARTWORK")
@@ -266,16 +255,9 @@ local function CreateIssueRow(parent, index)
 end
 
 local function CreateCheckbox(parent, label, yOffset, onClick)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    local cb = ns.Theme.CreateToggle(parent, label, nil, 130)
     cb:SetPoint("TOPLEFT", 20, yOffset)
-    cb:SetSize(26, 26)
-
-    local text = cb:CreateFontString(nil, "OVERLAY")
-    text:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-    text:SetTextColor(0.8, 0.8, 0.8)
-    text:SetText(label)
-    cb.label = text
+    cb.label = cb.Text
 
     cb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
@@ -304,14 +286,12 @@ function KeybindAuditUI:CreateFrame()
     end
 
     -- Main frame
-    auditFrame = CreateFrame("Frame", "BoundToLearnAuditFrame", UIParent, "BackdropTemplate")
+    auditFrame = CreateFrame("Frame", "BoundToLearnAuditFrame", UIParent)
     auditFrame:SetSize(580, 480)
     auditFrame:SetPoint("CENTER")
     auditFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     auditFrame:SetFrameLevel(20)
-    auditFrame:SetBackdrop(PANEL_BACKDROP)
-    auditFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    auditFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    ns.Theme.StylePanel(auditFrame)
     auditFrame:EnableMouse(true)
     auditFrame:SetMovable(true)
     auditFrame:RegisterForDrag("LeftButton")
@@ -323,19 +303,17 @@ function KeybindAuditUI:CreateFrame()
     end)
     tinsert(UISpecialFrames, "BoundToLearnAuditFrame")
 
-    local close = CreateFrame("Button", nil, auditFrame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
+    local close = ns.Theme.CreateCloseButton(auditFrame, function() auditFrame:Hide() end)
+    close:SetPoint("TOPRIGHT", -8, -8)
 
     -- Title
-    local title = auditFrame:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    local title = ns.Theme.CreateTitle(auditFrame, "Keybind Audit", 16)
     title:SetPoint("TOP", 0, -12)
-    title:SetText("|cFF55CCFFKeybind Audit|r")
 
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
     accent:SetSize(550, 2)
     accent:SetPoint("TOP", 0, -34)
-    accent:SetColorTexture(0.33, 0.80, 1.0, 0.6)
+    accent:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT))
 
     -- Methodology tab on the accent line
     local methTab = CreateFrame("Button", nil, auditFrame)
@@ -343,17 +321,17 @@ function KeybindAuditUI:CreateFrame()
     methTab:SetPoint("TOPRIGHT", accent, "BOTTOMRIGHT", 0, 0)
     local methTabBg = methTab:CreateTexture(nil, "BACKGROUND")
     methTabBg:SetAllPoints()
-    methTabBg:SetColorTexture(0.33, 0.80, 1.0, 0.15)
+    methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.15))
     local methTabText = methTab:CreateFontString(nil, "OVERLAY")
     methTabText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
     methTabText:SetPoint("CENTER", 0, 0)
     methTabText:SetText("Methodology")
-    methTabText:SetTextColor(0.33, 0.80, 1.0)
+    methTabText:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT))
     methTab:SetScript("OnEnter", function(self)
-        methTabBg:SetColorTexture(0.33, 0.80, 1.0, 0.3)
+        methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.3))
     end)
     methTab:SetScript("OnLeave", function(self)
-        methTabBg:SetColorTexture(0.33, 0.80, 1.0, 0.15)
+        methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.15))
     end)
     methTab:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
@@ -410,14 +388,8 @@ function KeybindAuditUI:CreateSetupPage()
     -- Right column options
     local optX = 330
 
-    local mmoMouseCb = CreateFrame("CheckButton", nil, setupPage, "UICheckButtonTemplate")
+    local mmoMouseCb = ns.Theme.CreateToggle(setupPage, "I use an MMO mouse (12-button)", nil, 230)
     mmoMouseCb:SetPoint("TOPLEFT", optX, -82)
-    mmoMouseCb:SetSize(26, 26)
-    local mmoLabel = mmoMouseCb:CreateFontString(nil, "OVERLAY")
-    mmoLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    mmoLabel:SetPoint("LEFT", mmoMouseCb, "RIGHT", 4, 0)
-    mmoLabel:SetTextColor(0.8, 0.8, 0.8)
-    mmoLabel:SetText("I use an MMO mouse (12-button)")
     mmoMouseCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().mmoMouse = self:GetChecked()
@@ -432,36 +404,8 @@ function KeybindAuditUI:CreateSetupPage()
     mmoHint:SetTextColor(0.55, 0.55, 0.55)
     mmoHint:SetText("Number keys won't be penalized as distant since they're on your thumb.")
 
-    local skipCombatCb = CreateFrame("CheckButton", nil, setupPage, "UICheckButtonTemplate")
-    skipCombatCb:SetPoint("TOPLEFT", optX, -138)
-    skipCombatCb:SetSize(26, 26)
-    local skipCombatLabel = skipCombatCb:CreateFontString(nil, "OVERLAY")
-    skipCombatLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    skipCombatLabel:SetPoint("LEFT", skipCombatCb, "RIGHT", 4, 0)
-    skipCombatLabel:SetTextColor(0.8, 0.8, 0.8)
-    skipCombatLabel:SetText("Skip non-combat macros")
-    skipCombatCb:SetScript("OnClick", function(self)
-        PlayUISound(SOUND_CLICK)
-        GetDb().skipNonCombat = self:GetChecked()
-    end)
-    setupPage.skipCombatCb = skipCombatCb
-
-    local skipCombatHint = setupPage:CreateFontString(nil, "OVERLAY")
-    skipCombatHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    skipCombatHint:SetPoint("TOPLEFT", optX + 30, -164)
-    skipCombatHint:SetWidth(200)
-    skipCombatHint:SetJustifyH("LEFT")
-    skipCombatHint:SetTextColor(0.55, 0.55, 0.55)
-    skipCombatHint:SetText("Ignores macros without /cast, /use, or other combat commands.")
-
-    local skipBarsCb = CreateFrame("CheckButton", nil, setupPage, "UICheckButtonTemplate")
-    skipBarsCb:SetPoint("TOPLEFT", optX, -198)
-    skipBarsCb:SetSize(26, 26)
-    local skipBarsLabel = skipBarsCb:CreateFontString(nil, "OVERLAY")
-    skipBarsLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    skipBarsLabel:SetPoint("LEFT", skipBarsCb, "RIGHT", 4, 0)
-    skipBarsLabel:SetTextColor(0.8, 0.8, 0.8)
-    skipBarsLabel:SetText("Skip this setup next time")
+    local skipBarsCb = ns.Theme.CreateToggle(setupPage, "Skip this setup next time", nil, 230)
+    skipBarsCb:SetPoint("TOPLEFT", optX, -138)
     skipBarsCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().skipBarSelection = self:GetChecked()
@@ -470,17 +414,70 @@ function KeybindAuditUI:CreateSetupPage()
 
     local skipBarsHint = setupPage:CreateFontString(nil, "OVERLAY")
     skipBarsHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -224)
+    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -164)
     skipBarsHint:SetWidth(200)
     skipBarsHint:SetJustifyH("LEFT")
     skipBarsHint:SetTextColor(0.55, 0.55, 0.55)
     skipBarsHint:SetText("Next time you open the audit, click Settings (bottom-left) to change these options.")
 
+    -- Grouping checkbox (experimental)
+    local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 240)
+    groupingCb:SetPoint("TOPLEFT", optX, -198)
+    groupingCb:SetScript("OnClick", function(self)
+        PlayUISound(SOUND_CLICK)
+        GetDb().includeGrouping = self:GetChecked()
+    end)
+    setupPage.groupingCb = groupingCb
+
+    local groupingHint = setupPage:CreateFontString(nil, "OVERLAY")
+    groupingHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+    groupingHint:SetPoint("TOPLEFT", optX + 30, -224)
+    groupingHint:SetWidth(200)
+    groupingHint:SetJustifyH("LEFT")
+    groupingHint:SetTextColor(0.55, 0.55, 0.55)
+    groupingHint:SetText("Scores whether defensives, CCs, and offensive cooldowns are on nearby keys. Uses SpellData classifications.")
+
+    -- Keyboard layout selector (under bar checkboxes)
+    local layoutLabel = setupPage:CreateFontString(nil, "OVERLAY")
+    layoutLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    layoutLabel:SetPoint("TOPLEFT", 20, -210)
+    layoutLabel:SetTextColor(0.8, 0.8, 0.8)
+    layoutLabel:SetText("Keyboard layout:")
+
+    local LAYOUT_OPTIONS = { "QWERTY", "AZERTY", "QWERTZ", "DVORAK" }
+    local layoutButtons = {}
+    for i, layoutName in ipairs(LAYOUT_OPTIONS) do
+        local btn = CreateFrame("Button", nil, setupPage)
+        btn:SetSize(56, 18)
+        btn:SetPoint("TOPLEFT", layoutLabel, "BOTTOMLEFT", (i - 1) * 60, -4)
+
+        local btnBg = btn:CreateTexture(nil, "BACKGROUND")
+        btnBg:SetAllPoints()
+        btn.bg = btnBg
+
+        local btnText = btn:CreateFontString(nil, "OVERLAY")
+        btnText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+        btnText:SetPoint("CENTER")
+        btnText:SetText(layoutName)
+        btn.label = btnText
+
+        btn.layoutName = layoutName
+        btn:SetScript("OnClick", function(self)
+            PlayUISound(SOUND_CLICK)
+            GetDb().keyboardLayout = self.layoutName
+            for _, b in ipairs(layoutButtons) do
+                local selected = b.layoutName == self.layoutName
+                b.bg:SetColorTexture(selected and 0.2 or 0.1, selected and 0.5 or 0.1, selected and 0.2 or 0.1, selected and 0.5 or 0.3)
+                b.label:SetTextColor(selected and 0.3 or 0.6, selected and 1.0 or 0.6, selected and 0.3 or 0.6)
+            end
+        end)
+        tinsert(layoutButtons, btn)
+    end
+    setupPage.layoutButtons = layoutButtons
+
     -- Run Audit button
-    local runBtn = CreateFrame("Button", nil, setupPage, "UIPanelButtonTemplate")
-    runBtn:SetSize(140, 30)
+    local runBtn = ns.Theme.CreateAccentButton(setupPage, "Start Audit", 140, 30)
     runBtn:SetPoint("BOTTOM", 0, 20)
-    runBtn:SetText("Start Audit")
     runBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         SaveBarToggles()
@@ -515,18 +512,26 @@ function KeybindAuditUI:CreateResultsPage()
         categoryBars[i] = CreateScoreBar(resultsPage, cat, barY - (i - 1) * 22, i)
     end
 
-    -- Divider
+    -- Grouping bar (5th, shown only when enabled)
+    categoryBars[5] = CreateScoreBar(resultsPage, "Grouping |cFFFF8A33(Exp)|r", barY - 4 * 22, 5)
+    ns.Theme.DelayedTooltip(categoryBars[5], function(self)
+        GameTooltip:SetText("Experimental", ns.Theme.RGB(ns.Theme.C.ACCENT))
+        GameTooltip:AddLine("This score measures physical key proximity of\nabilities that share a role (defensives, CCs, etc).\n\nSpell classification may not cover all abilities.\nTreat this as a guideline, not a strict score.", 0.7, 0.7, 0.7, true)
+    end)
+    categoryBars[5]:Hide()
+
+    -- Divider (positioned dynamically based on grouping bar visibility)
     local div = resultsPage:CreateTexture(nil, "ARTWORK")
     div:SetSize(250, 1)
     div:SetPoint("TOPLEFT", 15, -244)
-    div:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+    div:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
+    resultsPage.divider = div
 
     -- Per-bar summary
-    local barSumY = -252
     for i = 1, 8 do
         local lbl = resultsPage:CreateFontString(nil, "OVERLAY")
         lbl:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-        lbl:SetPoint("TOPLEFT", 20, barSumY - (i - 1) * 16)
+        lbl:SetPoint("TOPLEFT", 20, -252 - (i - 1) * 16)
         lbl:SetWidth(250)
         lbl:SetJustifyH("LEFT")
         lbl:Hide()
@@ -551,7 +556,7 @@ function KeybindAuditUI:CreateResultsPage()
     vDiv:SetSize(1, 1)
     vDiv:SetPoint("TOPLEFT", rightX - 10, -42)
     vDiv:SetPoint("BOTTOMLEFT", rightX - 10, 40)
-    vDiv:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+    vDiv:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
 
     local recHeader = resultsPage:CreateFontString(nil, "OVERLAY")
     recHeader:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
@@ -562,6 +567,7 @@ function KeybindAuditUI:CreateResultsPage()
     issueContainer = CreateFrame("ScrollFrame", "BoundToLearnAuditScroll", resultsPage, "UIPanelScrollFrameTemplate")
     issueContainer:SetPoint("TOPLEFT", rightX, -64)
     issueContainer:SetPoint("BOTTOMRIGHT", -15, 44)
+    ns.Theme.StyleScrollBar(issueContainer.ScrollBar or _G["BoundToLearnAuditScrollScrollBar"])
 
     issueScrollChild = CreateFrame("Frame", nil, issueContainer)
     issueScrollChild:SetSize(250, 1)
@@ -581,20 +587,16 @@ function KeybindAuditUI:CreateResultsPage()
     resultsPage.noIssues = noIssues
 
     -- Settings button (bottom left)
-    local settingsBtn = CreateFrame("Button", nil, resultsPage, "UIPanelButtonTemplate")
-    settingsBtn:SetSize(80, 24)
+    local settingsBtn = ns.Theme.CreateButton(resultsPage, "Settings", 80, 24)
     settingsBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    settingsBtn:SetText("Settings")
     settingsBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         KeybindAuditUI:ShowSetup()
     end)
 
     -- Refresh button (bottom right)
-    local refreshBtn = CreateFrame("Button", nil, resultsPage, "UIPanelButtonTemplate")
-    refreshBtn:SetSize(80, 24)
+    local refreshBtn = ns.Theme.CreateButton(resultsPage, "Refresh", 80, 24)
     refreshBtn:SetPoint("BOTTOMRIGHT", -15, 12)
-    refreshBtn:SetText("Refresh")
     refreshBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         KeybindAuditUI:RefreshResults()
@@ -608,6 +610,7 @@ function KeybindAuditUI:CreateMethodologyPage()
     local scrollFrame = CreateFrame("ScrollFrame", nil, methodologyPage, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 15, -42)
     scrollFrame:SetPoint("BOTTOMRIGHT", -30, 44)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(520)
@@ -620,39 +623,48 @@ function KeybindAuditUI:CreateMethodologyPage()
     text:SetJustifyH("LEFT")
     text:SetTextColor(0.75, 0.75, 0.75)
     text:SetText(
-        "|cFF55CCFFOverview|r\n"
+        "|cFFFF8A33Overview|r\n"
         .. "The audit scans your action bars and scores your keybind setup on a 0-100 scale "
         .. "across four categories.\n\n"
-        .. "|cFF55CCFFCoverage (40%)|r\n"
+        .. "|cFFFF8A33Coverage (40%)|r\n"
         .. "Percentage of filled action bar slots that have a keybind assigned. "
         .. "Every ability on your bars should be reachable without clicking.\n\n"
-        .. "|cFF55CCFFReachability (30%)|r\n"
+        .. "|cFFFF8A33Reachability (30%)|r\n"
         .. "How close your keybinds are to your movement keys. Each bound slot is scored:\n"
         .. "  |cFF66DD66Prime keys (100)|r: 1-5, Q, E, R, F, G, Z, X, C, V, T, B, `, Tab, mouse buttons\n"
         .. "  |cFFDDDD44Acceptable (60)|r: 6, Y, H, N, and other unlisted keys\n"
         .. "  |cFFDD8844Poor (20)|r: 7-0, -, =, F1-F12\n"
         .. "Modifier combos (Shift-Q, Ctrl-3) inherit their base key's tier.\n\n"
-        .. "|cFF55CCFFModifier Usage (15%)|r\n"
+        .. "|cFFFF8A33Modifier Usage (15%)|r\n"
         .. "Rewards using Shift, Ctrl, and Alt combos to expand your keybind space "
         .. "without moving your hand. Scored by the ratio of modified binds to total binds.\n\n"
-        .. "|cFF55CCFFAnti-patterns (15%)|r\n"
+        .. "|cFFFF8A33Anti-patterns (15%)|r\n"
         .. "Starts at 100 and deducts for common issues:\n"
         .. "  Keyboard turning (A/D bound to turn): -40\n"
         .. "  Each unbound ability: -5 (max -40)\n"
         .. "  Each poor-tier keybind: -3 (max -20)\n\n"
-        .. "|cFF55CCFFGrading|r\n"
+        .. "|cFFFF8A33Grouping|r |cFFFF8800(Experimental, opt-in)|r\n"
+        .. "Measures physical key proximity of abilities that share a role "
+        .. "(defensives, CCs, offensive cooldowns, interrupts). Abilities are classified "
+        .. "using spell data. For each role with 2+ bound abilities, the average pairwise "
+        .. "distance between their keys is scored:\n"
+        .. "  |cFF66DD66Same key / adjacent (dist 0-1.5): 90-100|r\n"
+        .. "  |cFFDDDD44Nearby (dist 1.5-3.5): 60-75|r\n"
+        .. "  |cFFDD8844Distant (dist 3.5+): 20-40|r\n"
+        .. "Distance is measured on your selected keyboard layout (QWERTY, AZERTY, etc). "
+        .. "When enabled, weights redistribute: Coverage 35%, Reachability 25%, "
+        .. "Modifiers 12%, Anti-patterns 13%, Grouping 15%.\n\n"
+        .. "|cFFFF8A33Grading|r\n"
         .. "A+ (95+)  A (90+)  A- (85+)  B+ (80+)  B (75+)  B- (70+)\n"
         .. "C+ (65+)  C (60+)  D (50+)  F (below 50)\n\n"
-        .. "|cFF55CCFFMMO Mouse|r\n"
+        .. "|cFFFF8A33MMO Mouse|r\n"
         .. "When enabled, number row keys (6-0, -, =) are treated as prime keys "
         .. "since they map to your thumb grid."
     )
     content:SetHeight(text:GetStringHeight() + 10)
 
-    local backBtn = CreateFrame("Button", nil, methodologyPage, "UIPanelButtonTemplate")
-    backBtn:SetSize(80, 24)
+    local backBtn = ns.Theme.CreateButton(methodologyPage, "Back", 80, 24)
     backBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    backBtn:SetText("Back")
     backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         KeybindAuditUI:ToggleMethodology()
@@ -686,9 +698,9 @@ local TIER_COLORS = {
 
 local function BuildCoverageDetail(results)
     local lines = {}
-    tinsert(lines, sformat("|cFF55CCFFScore: %d / 100|r", results.scores.coverage))
+    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.coverage))
     tinsert(lines, sformat("\n%d of %d filled slots have keybinds assigned.", results.totalBound, results.totalFilled))
-    tinsert(lines, "\n\n|cFF55CCFFPer-bar breakdown:|r")
+    tinsert(lines, "\n\n|cFFFF8A33Per-bar breakdown:|r")
     for _, barDef in ipairs(results.barOrder) do
         local barData = results.bars[barDef.key]
         if barData and not barData.excluded and barData.filledCount > 0 then
@@ -703,7 +715,7 @@ local function BuildCoverageDetail(results)
         if not slot.keybind then tinsert(unbound, slot) end
     end
     if #unbound > 0 then
-        tinsert(lines, "\n\n|cFF55CCFFUnbound abilities:|r")
+        tinsert(lines, "\n\n|cFFFF8A33Unbound abilities:|r")
         for _, slot in ipairs(unbound) do
             tinsert(lines, sformat("  |cFFDD8844%s|r on %s, slot %d", slot.actionName, slot.barLabel, slot.barIndex))
         end
@@ -714,7 +726,7 @@ end
 
 local function BuildReachabilityDetail(results)
     local lines = {}
-    tinsert(lines, sformat("|cFF55CCFFScore: %d / 100|r", results.scores.reachability))
+    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.reachability))
     local primeCount, acceptCount, poorCount = 0, 0, 0
     for _, slot in ipairs(results.allSlots) do
         if slot.keybind then
@@ -727,7 +739,7 @@ local function BuildReachabilityDetail(results)
     tinsert(lines, sformat("\n  %sPrime: %d|r (100 pts each)", TIER_COLORS.prime, primeCount))
     tinsert(lines, sformat("  %sAcceptable: %d|r (60 pts each)", TIER_COLORS.acceptable, acceptCount))
     tinsert(lines, sformat("  %sPoor: %d|r (20 pts each)", TIER_COLORS.poor, poorCount))
-    tinsert(lines, "\n\n|cFF55CCFFBound slots:|r")
+    tinsert(lines, "\n\n|cFFFF8A33Bound slots:|r")
     for _, slot in ipairs(results.allSlots) do
         if slot.keybind then
             local tc = TIER_COLORS[slot.tier] or TIER_COLORS.acceptable
@@ -740,21 +752,21 @@ end
 
 local function BuildModifierDetail(results)
     local lines = {}
-    tinsert(lines, sformat("|cFF55CCFFScore: %d / 100|r", results.scores.modifiers))
+    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.modifiers))
     local modCount = 0
     for _, slot in ipairs(results.allSlots) do
         if slot.keybind and slot.hasModifier then modCount = modCount + 1 end
     end
     local ratio = results.totalBound > 0 and (modCount / results.totalBound * 100) or 0
     tinsert(lines, sformat("\n%d of %d keybinds use modifiers (%.0f%%).", modCount, results.totalBound, ratio))
-    tinsert(lines, "\n\n|cFF55CCFFScoring tiers:|r")
+    tinsert(lines, "\n\n|cFFFF8A33Scoring tiers:|r")
     tinsert(lines, "  51%+ modified: 100 pts")
     tinsert(lines, "  31-50%: 80 pts")
     tinsert(lines, "  16-30%: 60 pts")
     tinsert(lines, "  1-15%: 40 pts")
     tinsert(lines, "  0%: 20 pts")
     if modCount > 0 then
-        tinsert(lines, "\n\n|cFF55CCFFModified keybinds:|r")
+        tinsert(lines, "\n\n|cFFFF8A33Modified keybinds:|r")
         for _, slot in ipairs(results.allSlots) do
             if slot.keybind and slot.hasModifier then
                 tinsert(lines, sformat("  |cFF66DD66%s|r - %s", slot.keybind, slot.actionName))
@@ -767,7 +779,7 @@ end
 
 local function BuildAntiPatternDetail(results)
     local lines = {}
-    tinsert(lines, sformat("|cFF55CCFFScore: %d / 100|r", results.scores.antiPatterns))
+    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.antiPatterns))
     tinsert(lines, "\nStarts at 100, with deductions for common issues:")
     local deductions = {}
     if results.keyboardTurning then
@@ -787,7 +799,7 @@ local function BuildAntiPatternDetail(results)
         tinsert(deductions, sformat("  |cFFDD8844-%d|r %d poor-tier keybinds (3 each, max 20)", penalty, poorCount))
     end
     if #deductions > 0 then
-        tinsert(lines, "\n|cFF55CCFFDeductions:|r")
+        tinsert(lines, "\n|cFFFF8A33Deductions:|r")
         for _, d in ipairs(deductions) do tinsert(lines, d) end
     else
         tinsert(lines, "\n|cFF66DD66No deductions. Clean setup.|r")
@@ -796,8 +808,78 @@ local function BuildAntiPatternDetail(results)
     return table.concat(lines, "\n")
 end
 
-local CATEGORY_BUILDERS = { BuildCoverageDetail, BuildReachabilityDetail, BuildModifierDetail, BuildAntiPatternDetail }
-local CATEGORY_NAMES = { "Coverage", "Reachability", "Modifier Usage", "Anti-patterns" }
+local function BuildGroupingDetail(results)
+    local lines = {}
+    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.grouping))
+    if not results.includeGrouping then
+        tinsert(lines, "\n|cFFFF8800This category is not included in your overall score.|r")
+        tinsert(lines, "Enable it in Settings to factor it into your grade.")
+    end
+
+    tinsert(lines, "\n\nMeasures physical key proximity of abilities that share a role.")
+    tinsert(lines, "Defensives near each other, CCs near each other, and so on.")
+    tinsert(lines, sformat("Layout: |cFFFF8A33%s|r", results.keyboardLayout or "QWERTY"))
+
+    local roleLabels = ns.KeybindAudit.ROLE_LABELS
+    local roleScores = results.roleScores or {}
+    local roleGroups = results.roleGroups or {}
+
+    -- Sorted display: scored groups first (by score descending), then unscored
+    local scored, unscored = {}, {}
+    for role, group in pairs(roleGroups) do
+        if roleScores[role] then
+            tinsert(scored, role)
+        elseif #group.slots == 1 then
+            tinsert(unscored, role)
+        end
+    end
+    table.sort(scored, function(a, b) return (roleScores[a].score or 0) > (roleScores[b].score or 0) end)
+    table.sort(unscored, function(a, b) return (roleLabels[a] or a) < (roleLabels[b] or b) end)
+
+    if #scored > 0 then
+        tinsert(lines, "\n")
+        for _, role in ipairs(scored) do
+            local info = roleScores[role]
+            local label = roleLabels[role] or role
+            local color = info.score >= 75 and "66DD66" or info.score >= 50 and "DDDD44" or "DD8844"
+            tinsert(lines, sformat("\n|cFF%s%s|r  |cFFAAAAAA%d abilities, avg distance %.1f, score %d|r",
+                color, label, info.count, info.avgDist, info.score))
+            local group = roleGroups[role]
+            if group then
+                for _, slotData in ipairs(group.slots) do
+                    local bindStr = slotData.keybind or "?"
+                    local nameStr = slotData.actionName or "?"
+                    tinsert(lines, sformat("    |cFFCCCCCC%s|r  %s", bindStr, nameStr))
+                end
+            end
+        end
+    end
+
+    if #unscored > 0 then
+        tinsert(lines, "\n\n|cFF888888Single-ability roles (not scored):|r")
+        for _, role in ipairs(unscored) do
+            local label = roleLabels[role] or role
+            local group = roleGroups[role]
+            local slotData = group and group.slots[1]
+            if slotData then
+                tinsert(lines, sformat("  |cFF888888%s:|r %s (%s)", label, slotData.actionName or "?", slotData.keybind or "?"))
+            end
+        end
+    end
+
+    if #scored == 0 and #unscored == 0 then
+        tinsert(lines, "\n\nNo classified abilities found on your action bars.")
+        tinsert(lines, "This metric uses spell data to identify defensives, CCs,")
+        tinsert(lines, "offensive cooldowns, and interrupts.")
+    end
+
+    tinsert(lines, "\n\n|cFFFF8800This is an experimental metric. Spell classification covers most|r")
+    tinsert(lines, "|cFFFF8800common abilities but may miss some. Treat as a guideline.|r")
+    return table.concat(lines, "\n")
+end
+
+local CATEGORY_BUILDERS = { BuildCoverageDetail, BuildReachabilityDetail, BuildModifierDetail, BuildAntiPatternDetail, BuildGroupingDetail }
+local CATEGORY_NAMES = { "Coverage", "Reachability", "Modifier Usage", "Anti-patterns", "Grouping" }
 
 function KeybindAuditUI:CreateCategoryDetailPage()
     categoryDetailPage = CreateFrame("Frame", nil, auditFrame)
@@ -806,12 +888,13 @@ function KeybindAuditUI:CreateCategoryDetailPage()
     local titleText = categoryDetailPage:CreateFontString(nil, "OVERLAY")
     titleText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
     titleText:SetPoint("TOP", 0, -48)
-    titleText:SetTextColor(0.33, 0.80, 1.0)
+    titleText:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
     categoryDetailPage.titleText = titleText
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, categoryDetailPage, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 20, -72)
     scrollFrame:SetPoint("BOTTOMRIGHT", -35, 44)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(510)
@@ -826,20 +909,16 @@ function KeybindAuditUI:CreateCategoryDetailPage()
     categoryDetailPage.bodyText = bodyText
     categoryDetailPage.content = content
 
-    local backBtn = CreateFrame("Button", nil, categoryDetailPage, "UIPanelButtonTemplate")
-    backBtn:SetSize(100, 24)
+    local backBtn = ns.Theme.CreateButton(categoryDetailPage, "Scorecard", 100, 24)
     backBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    backBtn:SetText("Scorecard")
     backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         categoryDetailPage:Hide()
         resultsPage:Show()
     end)
 
-    local settingsBtn = CreateFrame("Button", nil, categoryDetailPage, "UIPanelButtonTemplate")
-    settingsBtn:SetSize(80, 24)
+    local settingsBtn = ns.Theme.CreateButton(categoryDetailPage, "Settings", 80, 24)
     settingsBtn:SetPoint("BOTTOMRIGHT", -15, 12)
-    settingsBtn:SetText("Settings")
     settingsBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         KeybindAuditUI:ShowSetup()
@@ -904,15 +983,21 @@ function KeybindAuditUI:ShowSetup()
         end
     end
     setupPage.mmoMouseCb:SetChecked(db.mmoMouse)
-    setupPage.skipCombatCb:SetChecked(db.skipNonCombat)
     setupPage.skipBarsCb:SetChecked(db.skipBarSelection)
+    setupPage.groupingCb:SetChecked(db.includeGrouping)
+    local currentLayout = db.keyboardLayout or "QWERTY"
+    for _, btn in ipairs(setupPage.layoutButtons) do
+        local selected = btn.layoutName == currentLayout
+        btn.bg:SetColorTexture(selected and 0.2 or 0.1, selected and 0.5 or 0.1, selected and 0.2 or 0.1, selected and 0.5 or 0.3)
+        btn.label:SetTextColor(selected and 0.3 or 0.6, selected and 1.0 or 0.6, selected and 0.3 or 0.6)
+    end
 
     methodologyPage:Hide()
     categoryDetailPage:Hide()
     resultsPage:Hide()
     setupPage:Show()
     self:ShowBarOverlays()
-    auditFrame:SetSize(580, 340)
+    auditFrame:SetSize(580, 330)
 end
 
 function KeybindAuditUI:ShowResults()
@@ -932,8 +1017,9 @@ function KeybindAuditUI:RefreshResults()
     local db = GetDb()
     local results = audit:Scan({
         barFilter = db.bars,
-        skipNonCombat = db.skipNonCombat,
         mmoMouse = db.mmoMouse,
+        includeGrouping = db.includeGrouping,
+        keyboardLayout = db.keyboardLayout,
     })
     if not results then return end
 
@@ -948,6 +1034,25 @@ function KeybindAuditUI:RefreshResults()
     SetScoreBar(categoryBars[2], results.scores.reachability)
     SetScoreBar(categoryBars[3], results.scores.modifiers)
     SetScoreBar(categoryBars[4], results.scores.antiPatterns)
+
+    -- Grouping bar (conditional)
+    local groupingShift = 0
+    if results.includeGrouping then
+        SetScoreBar(categoryBars[5], results.scores.grouping)
+        categoryBars[5]:Show()
+        groupingShift = 22
+    else
+        categoryBars[5]:Hide()
+    end
+
+    -- Shift divider and per-bar summaries when grouping bar is visible
+    resultsPage.divider:ClearAllPoints()
+    resultsPage.divider:SetPoint("TOPLEFT", 15, -244 - groupingShift)
+    local barSumY = -252 - groupingShift
+    for i = 1, 8 do
+        barSummaryLabels[i]:ClearAllPoints()
+        barSummaryLabels[i]:SetPoint("TOPLEFT", 20, barSumY - (i - 1) * 16)
+    end
 
     local barIdx = 0
     for _, barDef in ipairs(results.barOrder) do

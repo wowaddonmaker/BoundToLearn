@@ -32,7 +32,23 @@ local UnitExists = UnitExists
 local IsMounted = IsMounted
 local HasOverrideActionBar = HasOverrideActionBar
 local GetMacroBody = GetMacroBody
-local IsSpellHelpful = C_Spell and C_Spell.IsSpellHelpful
+-- Pre-pull / passive buff spells (not combat abilities)
+local BUFF_SPELLS = {
+    [1459]   = true,   -- Arcane Intellect
+    [21562]  = true,   -- Power Word: Fortitude
+    [6673]   = true,   -- Battle Shout
+    [264761] = true,   -- War-Scroll of Battle Shout
+    [264764] = true,   -- War-Scroll of Fortitude
+    [264760] = true,   -- War-Scroll of Intellect
+    [381732] = true,   -- Blessing of the Bronze
+    [1126]   = true,   -- Mark of the Wild
+    [462854] = true,   -- Skyfury
+    [462855] = true,   -- Skyfury (rank 2)
+    [116781] = true,   -- Legacy of the White Tiger (Monk)
+    [155522] = true,   -- Power of the Grave (DK)
+    [203538] = true,   -- Greater Blessing of Kings
+    [203539] = true,   -- Greater Blessing of Wisdom
+}
 
 -- Spells that create consumables (Conjure Refreshment variants)
 local CONSUMABLE_SPELLS = {
@@ -205,7 +221,7 @@ end
 
 local function ShouldIgnoreAction(slot)
     local actionType, id = GetActionInfo(slot)
-    local filter = BoundToLearn.db.tracker.filter
+    local filter = BoundToLearn.db.filter
     local blocklist = BoundToLearn.db.tracker.blocklist
 
     -- User blocklist always applies
@@ -242,13 +258,15 @@ local function ShouldIgnoreAction(slot)
         return true
     end
 
-    -- Buffs (helpful spells cast out of combat, e.g. Arcane Intellect, Fortitude)
-    if filter.buffs and actionType == "spell" and id and not inCombat then
-        if IsSpellHelpful and IsSpellHelpful(id) then return true end
+    -- Pre-pull buffs (Arcane Intellect, Fortitude, Mark of the Wild, etc.)
+    if filter.buffs and actionType == "spell" and id and BUFF_SPELLS[id] then
+        return true
     end
 
     return false
 end
+
+Tracker.ShouldIgnoreAction = ShouldIgnoreAction
 
 local function GetActionIdentifier(slot)
     local actionType, id = GetActionInfo(slot)

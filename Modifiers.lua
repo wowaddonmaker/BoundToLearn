@@ -7,7 +7,24 @@ local Utils   = ns.Utils
 local pairs   = Utils.pairs
 local ipairs  = Utils.ipairs
 
+-- No modifier is forced by difficulty. Difficulty comes from chart density and
+-- speed, not gimmick modifiers, so every modifier stays purely optional. This
+-- table is kept (empty) so the force-enable/required plumbing is inert, not
+-- special-cased away.
+local REQUIRED_MODIFIERS = {}
+Modifiers.REQUIRED_MODIFIERS = REQUIRED_MODIFIERS
+
 local MODIFIER_LIST = {
+    {
+        id = "fake",
+        name = "Fake",
+        desc = "Some notes show the wrong icon. Hitting a fake note costs points.",
+        unlockHint = "Beat Easy difficulty",
+        check = function()
+            local db = BoundToLearn.db.stats.difficultyBest
+            return db and db.Easy and db.Easy.highestScore > 0
+        end,
+    },
     {
         id = "angled",
         name = "Angled",
@@ -102,7 +119,25 @@ function Modifiers:GetActive()
             active[id] = true
         end
     end
+    -- Force-enable required modifiers for current difficulty
+    local diff = BoundToLearn.db.game.difficulty
+    local required = REQUIRED_MODIFIERS[diff]
+    if required then
+        for _, id in ipairs(required) do
+            active[id] = true
+        end
+    end
     return active
+end
+
+function Modifiers:IsRequired(id)
+    local diff = BoundToLearn.db.game.difficulty
+    local required = REQUIRED_MODIFIERS[diff]
+    if not required then return false end
+    for _, reqId in ipairs(required) do
+        if reqId == id then return true end
+    end
+    return false
 end
 
 function Modifiers:GetActiveCount()

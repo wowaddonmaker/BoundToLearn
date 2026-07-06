@@ -56,8 +56,13 @@ function Utils.PlayUISound(soundKitID)
     PlaySound(soundKitID)
 end
 
+-- Brand orange (matches Theme.ACCENT_HEX); kept literal so chat output
+-- never depends on Theme load order.
+Utils.BRAND_HEX = "FF8A33"
+
 function Utils.Print(msg)
-    print(sformat("|cFF55CCFF[BoundToLearn]|r %s", msg))
+    local hex = (ns.Theme and ns.Theme.ACCENT_HEX) or Utils.BRAND_HEX
+    print(sformat("|cFF%s[BoundToLearn]|r %s", hex, msg))
 end
 
 function Utils.DebugPrint(...)

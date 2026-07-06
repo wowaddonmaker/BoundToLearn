@@ -296,7 +296,7 @@ function Leaderboard:HandleChallengeInvite(parts, fullName, sName)
 
     pendingChallenge = { from = sName, fullName = fullName, sent = GetTime() }
     BoundToLearn:Print(sformat(
-        "|cFFFFCC00%s|r has challenged you. Type |cFF55CCFF/btl accept|r or |cFF55CCFF/btl decline|r.",
+        "|cFFFFCC00%s|r has challenged you. Type |cFFFF8A33/btl accept|r or |cFFFF8A33/btl decline|r.",
         sName))
 
     -- Auto-timeout

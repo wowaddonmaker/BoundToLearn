@@ -15,6 +15,17 @@ BoundToLearn._ns = ns
 ns.BoundToLearn = BoundToLearn
 
 local DB_DEFAULTS = {
+    filter = {
+        mounts = true,
+        toys = true,
+        hearthstones = true,
+        teleports = true,
+        consumables = true,
+        professions = true,
+        skyriding = true,
+        nonCombatMacros = true,
+        buffs = true,
+    },
     tracker = {
         enabled = true,
         showWidget = true,
@@ -24,22 +35,15 @@ local DB_DEFAULTS = {
         hideInCombat = false,
         blocklist = {},
         maxSegments = 6,
-        filter = {
-            mounts = true,
-            toys = true,
-            hearthstones = true,
-            teleports = true,
-            consumables = true,
-            professions = true,
-            skyriding = true,
-            nonCombatMacros = true,
-            buffs = true,
-        },
     },
     game = {
         difficulty = "Medium",
         modifiers = {},
+        songKey = "s1",            -- selected track for the rhythm game
+        songScores = {},           -- [songKey][difficulty] = best score
+        songProgress = {},         -- [songKey] = best fraction (0-1) reached
         mode = "timed",            -- "timed", "practice", "competitive"
+        compBarPos = false,        -- saved competitive lane-bar position (drag setup)
         duration = 90,             -- seconds (timed/competitive)
         fallSpeed = 150,
         fallDistance = 300,
@@ -56,7 +60,18 @@ local DB_DEFAULTS = {
             bottomRight = false,   -- MultiBarBottomRight
             right = false,         -- MultiBarRight
             left = false,          -- MultiBarLeft
+            bar6 = false,          -- MultiBar5
+            bar7 = false,          -- MultiBar6
+            bar8 = false,          -- MultiBar7
         },
+    },
+    pingTrainer = {
+        targetStyle = "portraits",  -- "portraits", "blobs", "3d"
+        background = "orgrimmar",   -- selected background id
+        randomBG = false,           -- randomize from unlocked backgrounds
+        unlockedBGs = { orgrimmar = true },
+        muteMusic = false,
+        mutePingSounds = true,      -- ping sounds off by default
     },
     stats = {
         sessions = {},
@@ -65,6 +80,7 @@ local DB_DEFAULTS = {
             highestScore = 0,
             bestAccuracy = 0,
             bestKeybindRatio = 0,
+            fastestQuiz = 0,
         },
         difficultyBest = {
             Easy = { highestScore = 0, longestCombo = 0 },
@@ -76,6 +92,8 @@ local DB_DEFAULTS = {
         lifetimeKeybinds = 0,
         lifetimeGameNotes = 0,
         lifetimeGameHits = 0,
+        lifetimeQuizzes = 0,
+        lifetimeQuizAbilities = 0,
     },
     options = {
         showLoginMessage = true,
@@ -83,6 +101,7 @@ local DB_DEFAULTS = {
         firstRun = true,
         showGameWarning = true,
         muteChat = false,
+        colorTheme = "Orange",
     },
     leaderboard = {
         Easy = {},
@@ -106,9 +125,10 @@ local DB_DEFAULTS = {
             bar7 = true,
             bar8 = true,
         },
-        skipNonCombat = true,
         skipBarSelection = false,
         mmoMouse = false,
+        includeGrouping = false,
+        keyboardLayout = "QWERTY",
     },
     achievements = {
         unlocked = {},  -- [achievementID] = timestamp
@@ -135,6 +155,40 @@ local function OnInitialize()
     MergeDefaults(BoundToLearnDB, DB_DEFAULTS)
     BoundToLearn.db = BoundToLearnDB
 
+    -- Apply the saved color theme before any UI is built.
+    if ns.Theme and ns.Theme.ApplyTheme then
+        ns.Theme.ApplyTheme(BoundToLearnDB.options.colorTheme)
+    end
+
+    -- Crash recovery for the round music fade: if a round set the Music volume
+    -- low/zero for a fade and a crash skipped the restore, put it back.
+    if BoundToLearnDB.pendingMusicRestore then
+        SetCVar("Sound_MusicVolume", BoundToLearnDB.pendingMusicRestore)
+        BoundToLearnDB.pendingMusicRestore = nil
+    end
+
+    -- One-time recovery for an earlier build that muted the Music channel via the
+    -- Sound_MusicVolume CVar and could leave it at 0 permanently on a crash.
+    if not BoundToLearnDB.musicVolRestored then
+        BoundToLearnDB.musicVolRestored = true
+        if (tonumber(GetCVar("Sound_MusicVolume")) or 0) == 0 then
+            SetCVar("Sound_MusicVolume", 0.4)
+        end
+    end
+
+    -- Migrate: filter moved from tracker.filter to top-level filter
+    if BoundToLearnDB.tracker and BoundToLearnDB.tracker.filter then
+        for k, v in pairs(BoundToLearnDB.tracker.filter) do
+            BoundToLearnDB.filter[k] = v
+        end
+        BoundToLearnDB.tracker.filter = nil
+    end
+    -- Migrate: skipNonCombat moved to shared filter
+    if BoundToLearnDB.audit and BoundToLearnDB.audit.skipNonCombat ~= nil then
+        BoundToLearnDB.filter.nonCombatMacros = BoundToLearnDB.audit.skipNonCombat
+        BoundToLearnDB.audit.skipNonCombat = nil
+    end
+
     ns.version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
 
     SLASH_KBTRACK1 = "/kbtrack"
@@ -157,6 +211,8 @@ local function OnInitialize()
         elseif msg == "reset" then
             if ns.Tracker then ns.Tracker:ResetSession() end
             BoundToLearn:Print("Session reset.")
+        elseif msg == "reset scores" or msg == "resetscores" then
+            BoundToLearn:ConfirmResetScores()
         elseif msg == "lb" or msg == "leaderboard" then
             if ns.LeaderboardUI then ns.LeaderboardUI:Toggle() end
         elseif msg == "accept" then
@@ -177,11 +233,19 @@ local function OnInitialize()
             if ns.ClickBlock then ns.ClickBlock:SetMode("interrupt"); ns.ClickBlock:Enable() end
         elseif msg == "audit" or msg == "keybinds" then
             if ns.KeybindAuditUI then ns.KeybindAuditUI:Toggle() end
+        elseif msg == "quiz" then
+            if ns.KeybindQuiz then ns.KeybindQuiz:Toggle() end
+        elseif msg == "debughitbox" then
+            if ns.PingGameUI then ns.PingGameUI:ToggleDebugHitbox() end
+        elseif msg == "ping" then
+            if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
             if ns.TrackerUI then ns.TrackerUI:Hide() end
             if ns.GameUI then ns.GameUI:Hide() end
-        elseif msg == "help" or msg == "" then
+        elseif msg == "help" or msg == "?" then
             BoundToLearn:PrintHelp()
+        elseif msg == "" then
+            BoundToLearn:ShowMinimapMenu()
         else
             BoundToLearn:Print(sformat("Unknown command: %s. Type /btl help for options.", msg))
         end
@@ -200,6 +264,8 @@ local function OnPlayerLogin()
         if ns.Leaderboard   then ns.Leaderboard:Initialize()   end
         if ns.LeaderboardUI then ns.LeaderboardUI:Initialize() end
         if ns.ClickBlock   then ns.ClickBlock:Initialize()   end
+        if ns.PingGame     then ns.PingGame:Initialize()     end
+        if ns.PingGameUI   then ns.PingGameUI:Initialize()   end
     end)
 
     C_Timer.After(0.6, function()
@@ -277,7 +343,7 @@ end
 
 function BoundToLearn:PrintHelp()
     local lines = {
-        "|cFF55CCFFBoundToLearn|r - Keybind training companion",
+        "|cFFFF8A33BoundToLearn|r - Keybind training companion",
         "  /btl track       - Enable/disable keybind tracker",
         "  /btl game        - Open keybind practice game",
         "  /btl lb          - Show leaderboard",
@@ -285,6 +351,8 @@ function BoundToLearn:PrintHelp()
         "  /btl accept      - Accept a challenge",
         "  /btl decline     - Decline a challenge",
         "  /btl audit       - Show keybind audit",
+        "  /btl quiz        - Start keybind quiz",
+        "  /btl ping        - Open ping trainer",
         "  /btl stats       - Show statistics panel",
         "  /btl options     - Open settings",
         "  /btl enforce      - Toggle click blocking (keybind-only mode)",
@@ -297,6 +365,42 @@ function BoundToLearn:PrintHelp()
     for _, line in ipairs(lines) do
         print(line)
     end
+end
+
+-- Hidden testing command (/btl reset scores): wipe all persistent progress.
+-- Not listed in help; confirmed via popup so a user who stumbles on it is
+-- warned about exactly what they lose before anything is erased.
+function BoundToLearn:ConfirmResetScores()
+    if not StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] then
+        StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] = {
+            text = "Reset ALL BoundToLearn progress?\n\nThis permanently erases every achievement, trophy, personal best, high score, and leaderboard entry. It cannot be undone.",
+            button1 = "Erase Everything",
+            button2 = "Cancel",
+            showAlert = true,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+            preferredIndex = 3,
+            OnAccept = function()
+                local db = BoundToLearn.db
+                wipe(db.achievements.unlocked)
+                for _, board in pairs(db.leaderboard) do wipe(board) end
+                local s = db.stats
+                wipe(s.sessions)
+                local pb = s.personalBest
+                pb.longestCombo, pb.highestScore = 0, 0
+                pb.bestAccuracy, pb.bestKeybindRatio, pb.fastestQuiz = 0, 0, 0
+                for _, d in pairs(s.difficultyBest) do
+                    d.highestScore, d.longestCombo = 0, 0
+                end
+                s.lifetimeClicks, s.lifetimeKeybinds = 0, 0
+                s.lifetimeGameNotes, s.lifetimeGameHits = 0, 0
+                s.lifetimeQuizzes, s.lifetimeQuizAbilities = 0, 0
+                BoundToLearn:Print("All scores, achievements, and trophies reset.")
+            end,
+        }
+    end
+    StaticPopup_Show("BOUNDTOLEARN_RESET_SCORES")
 end
 
 -- Minimap button
@@ -375,7 +479,7 @@ function BoundToLearn:CreateMinimapButton()
 
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("|cFF55CCFFBoundToLearn|r")
+        GameTooltip:SetText("|cFFFF8A33BoundToLearn|r")
         GameTooltip:AddLine("Left-click: Menu", 1, 1, 1)
         GameTooltip:AddLine("Right-click: Options", 1, 1, 1)
         GameTooltip:Show()
@@ -394,51 +498,79 @@ local minimapMenu
 
 function BoundToLearn:ShowMinimapMenu(anchor)
     if not minimapMenu then
-        minimapMenu = CreateFrame("Frame", "BoundToLearnMinimapMenu", UIParent, "BackdropTemplate")
-        minimapMenu:SetSize(140, 156)
+        minimapMenu = CreateFrame("Frame", "BoundToLearnMinimapMenu", UIParent)
         minimapMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-        minimapMenu:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        minimapMenu:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-        minimapMenu:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+        ns.Theme.StylePanel(minimapMenu, 0.97)
         minimapMenu:Hide()
 
-        local menuItems = {
-            { getText = function() return "Options" end, func = function() self:OpenOptions() end },
-            { getText = function() return "Open Game" end, func = function() self:OpenGame() end },
-            { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
+        local menuEntries = {
+            { header = "Games" },
+            { getText = function() return "Icon Game" end, func = function() self:OpenGame() end },
+            { getText = function() return "Ping Trainer" end, func = function() if ns.PingGameUI then ns.PingGameUI:Toggle() end end },
+            { header = "Practice" },
+            { getText = function() return "Keybind Quiz" end, func = function() if ns.KeybindQuiz then ns.KeybindQuiz:Toggle() end end },
             { getText = function() return "Keybind Audit" end, func = function() if ns.KeybindAuditUI then ns.KeybindAuditUI:Toggle() end end },
+            { header = "Tracker" },
             { getText = function()
                 return self.db.tracker.enabled and "Disable Tracker" or "Enable Tracker"
             end, func = function() self:ToggleTracker() end },
+            { separator = true },
+            { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
+            { getText = function() return "Options" end, func = function() self:OpenOptions() end },
         }
 
         local menuBtns = {}
-        for i, item in ipairs(menuItems) do
-            local menuBtn = CreateFrame("Button", nil, minimapMenu)
-            menuBtn:SetSize(130, 22)
-            menuBtn:SetPoint("TOPLEFT", 5, -5 - (i - 1) * 26)
-            menuBtn:SetNormalFontObject("GameFontHighlightSmall")
-            menuBtn:SetHighlightFontObject("GameFontNormalSmall")
-            menuBtn:SetText(item.getText())
-            menuBtn:SetScript("OnClick", function()
-                PlayUISound(SOUND_CLICK)
-                minimapMenu:Hide()
-                item.func()
-            end)
-            menuBtns[i] = { btn = menuBtn, getText = item.getText }
+        local yOff = -5
+        for _, item in ipairs(menuEntries) do
+            if item.header then
+                yOff = yOff - 6
+                local label = minimapMenu:CreateFontString(nil, "OVERLAY")
+                label:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+                label:SetPoint("TOP", 0, yOff)
+                label:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
+                label:SetText(item.header)
+                yOff = yOff - 18
+            elseif item.separator then
+                local div = minimapMenu:CreateTexture(nil, "ARTWORK")
+                div:SetHeight(1)
+                div:SetPoint("TOPLEFT", 6, yOff - 2)
+                div:SetPoint("TOPRIGHT", -6, yOff - 2)
+                div:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
+                yOff = yOff - 5
+            else
+                local menuBtn = CreateFrame("Button", nil, minimapMenu)
+                menuBtn:SetSize(130, 22)
+                menuBtn:SetPoint("TOPLEFT", 5, yOff)
+                menuBtn:SetNormalFontObject("GameFontHighlightSmall")
+                menuBtn:SetHighlightFontObject("GameFontNormalSmall")
+                local hl = CreateFrame("Frame", nil, menuBtn)
+                hl:SetPoint("TOPLEFT", -1, 1)
+                hl:SetPoint("BOTTOMRIGHT", 1, -1)
+                ns.Theme.Round(hl)
+                ns.Theme.SetBarHeight(hl, 10)
+                ns.Theme.SetBorderShown(hl, false)
+                ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0)
+                menuBtn:HookScript("OnEnter", function() ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0.18) end)
+                menuBtn:HookScript("OnLeave", function() ns.Theme.SetFillColor(hl, ns.Theme.C.ACCENT, 0) end)
+                menuBtn:SetText(item.getText())
+                menuBtn:SetScript("OnClick", function()
+                    PlayUISound(SOUND_CLICK)
+                    minimapMenu:Hide()
+                    item.func()
+                end)
+                tinsert(menuBtns, { btn = menuBtn, getText = item.getText })
+                yOff = yOff - 26
+            end
         end
+        minimapMenu:SetSize(140, -yOff + 5)
 
         minimapMenu:SetScript("OnShow", function(self)
             for _, entry in ipairs(menuBtns) do
                 entry.btn:SetText(entry.getText())
             end
             self:SetScript("OnUpdate", function(self)
-                if not self:IsMouseOver() and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
+                if not self:IsMouseOver() and not (minimapButton and minimapButton:IsMouseOver())
+                   and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
                     self:Hide()
                 end
             end)
@@ -455,7 +587,17 @@ function BoundToLearn:ShowMinimapMenu(anchor)
     end
 
     minimapMenu:ClearAllPoints()
-    minimapMenu:SetPoint("TOPRIGHT", anchor, "BOTTOMLEFT", 0, 0)
+    if anchor then
+        -- Hang straight down from the button so it reads as attached; clamping
+        -- keeps it on-screen when the button sits near a screen edge.
+        minimapMenu:SetClampedToScreen(true)
+        minimapMenu:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
+    else
+        -- Bare /btl: drop the menu at the cursor.
+        local cx, cy = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        minimapMenu:SetPoint("TOP", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
+    end
     minimapMenu:Show()
 end
 
@@ -465,80 +607,65 @@ local welcomeFrame
 function BoundToLearn:ShowWelcome()
     if welcomeFrame then welcomeFrame:Show(); return end
 
-    local f = CreateFrame("Frame", "BoundToLearnWelcome", UIParent, "BackdropTemplate")
+    local f = CreateFrame("Frame", "BoundToLearnWelcome", UIParent)
     f:SetSize(420, 390)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    ns.Theme.StylePanel(f)
     f:EnableMouse(true)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
 
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
+    local title = ns.Theme.CreateTitle(f, "Welcome to BoundToLearn", 18)
+    title:SetPoint("TOP", 0, -16)
 
-    local title = f:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
-    title:SetPoint("TOP", 0, -14)
-    title:SetText("|cFF55CCFFWelcome to BoundToLearn|r")
+    local titleRule = ns.Theme.CreateDivider(f)
+    titleRule:SetPoint("TOPLEFT", 16, -40)
+    titleRule:SetPoint("TOPRIGHT", -16, -40)
 
+    local GOLD, ACC, WARN = ns.Theme.GOLD_HEX, ns.Theme.ACCENT_HEX, ns.Theme.OKAY_HEX
     local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    body:SetPoint("TOPLEFT", 20, -45)
-    body:SetPoint("TOPRIGHT", -20, -45)
+    body:SetPoint("TOPLEFT", 20, -52)
+    body:SetPoint("TOPRIGHT", -20, -52)
     body:SetJustifyH("LEFT")
     body:SetSpacing(3)
     body:SetText(
-        "|cFFFFCC00Keybind Tracker|r\n" ..
+        "|cFF" .. GOLD .. "Keybind Tracker|r\n" ..
         "Automatically tracks whether you use keybinds or click " ..
         "your abilities. A small floating widget shows your keybind " ..
         "ratio in real time. The goal: build muscle memory so " ..
         "keybinds become second nature.\n\n" ..
-        "|cFFFFCC00Practice Game|r\n" ..
+        "|cFF" .. GOLD .. "Practice Game|r\n" ..
         "A rhythm-based minigame where spell icons fall toward " ..
         "your action bar. Press the correct keybind at the right time " ..
         "to score points. Build combos for multipliers and bonus rewards.\n\n" ..
-        "|cFFFF6600Note:|r Starting the practice game will |cFFFF6600temporarily " ..
+        "|cFF" .. WARN .. "Note:|r Starting the practice game will |cFF" .. WARN .. "temporarily " ..
         "disable your abilities|r so keypresses are scored instead of " ..
         "casting spells. Your abilities return to normal the moment the " ..
         "game ends. The game cannot run during combat.\n\n" ..
-        "|cFFFFCC00Getting Started|r\n" ..
-        "Use |cFF55CCFF/btl|r to see all commands, or right-click the " ..
+        "|cFF" .. GOLD .. "Getting Started|r\n" ..
+        "Use |cFF" .. ACC .. "/btl|r to see all commands, or right-click the " ..
         "minimap button for quick access to options."
     )
 
-    local cb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-    cb:SetPoint("BOTTOMLEFT", 14, 40)
+    local cb = ns.Theme.CreateToggle(f, "Don't show this again", nil, 190)
+    cb:SetPoint("BOTTOMLEFT", 16, 18)
     cb:SetChecked(false)
-    local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-    cbText:SetText("Don't show this again")
 
-    local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btn:SetSize(100, 24)
-    btn:SetPoint("BOTTOM", 0, 14)
-    btn:SetText("Got It")
-    btn:SetScript("OnClick", function()
+    local btn = ns.Theme.CreateAccentButton(f, "Got It", 100, 26)
+    btn:SetPoint("BOTTOMRIGHT", -16, 16)
+    local function dismiss()
         if cb:GetChecked() then
             BoundToLearn.db.options.firstRun = false
         end
         f:Hide()
-    end)
+    end
+    btn:SetScript("OnClick", dismiss)
 
-    close:SetScript("OnClick", function()
-        if cb:GetChecked() then
-            BoundToLearn.db.options.firstRun = false
-        end
-        f:Hide()
-    end)
+    local close = ns.Theme.CreateCloseButton(f, dismiss)
+    close:SetPoint("TOPRIGHT", -8, -8)
 
     f:Show()
     welcomeFrame = f
@@ -549,43 +676,31 @@ local gameConfirmFrame
 
 local function ShowGameConfirm()
     if not gameConfirmFrame then
-        local f = CreateFrame("Frame", "BoundToLearnGameConfirm", UIParent, "BackdropTemplate")
-        f:SetSize(340, 190)
+        local f = CreateFrame("Frame", "BoundToLearnGameConfirm", UIParent)
+        f:SetSize(340, 200)
         f:SetPoint("CENTER", 0, 60)
         f:SetFrameStrata("DIALOG")
-        f:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-        f:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+        ns.Theme.StylePanel(f)
         f:EnableMouse(true)
 
         local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        body:SetPoint("TOPLEFT", 20, -16)
-        body:SetPoint("TOPRIGHT", -20, -16)
+        body:SetPoint("TOPLEFT", 20, -22)
+        body:SetPoint("TOPRIGHT", -20, -22)
         body:SetJustifyH("CENTER")
         body:SetSpacing(3)
         body:SetText(
-            "Starting the practice game will |cFFFF6600temporarily\n" ..
+            "Starting the practice game will |cFF" .. ns.Theme.OKAY_HEX .. "temporarily\n" ..
             "disable your abilities|r so keypresses are\n" ..
             "scored instead of casting spells.\n\n" ..
             "Your abilities return to normal when the game ends."
         )
 
-        local cb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-        cb:SetPoint("BOTTOMLEFT", 14, 38)
-        local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-        cbText:SetText("Don't ask again")
+        local cb = ns.Theme.CreateToggle(f, "Don't ask again", nil, 160)
+        cb:SetPoint("BOTTOMLEFT", 16, 16)
         f.dontAsk = cb
 
-        local startBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        startBtn:SetSize(100, 24)
-        startBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -4, 10)
-        startBtn:SetText("Start")
+        local startBtn = ns.Theme.CreateAccentButton(f, "Start", 100, 26)
+        startBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -4, 14)
         startBtn:SetScript("OnClick", function()
             if cb:GetChecked() then
                 BoundToLearn.db.options.showGameWarning = false
@@ -594,10 +709,8 @@ local function ShowGameConfirm()
             if ns.Game then ns.Game:Start() end
         end)
 
-        local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        cancelBtn:SetSize(100, 24)
-        cancelBtn:SetPoint("BOTTOMLEFT", f, "BOTTOM", 4, 10)
-        cancelBtn:SetText("Cancel")
+        local cancelBtn = ns.Theme.CreateButton(f, "Cancel", 100, 26)
+        cancelBtn:SetPoint("BOTTOMLEFT", f, "BOTTOM", 4, 14)
         cancelBtn:SetScript("OnClick", function()
             f:Hide()
         end)
@@ -653,5 +766,15 @@ function BoundToLearn:UpdateMinimapButton()
         self:CreateMinimapButton()
     elseif minimapButton then
         minimapButton:Hide()
+    end
+end
+
+-- Blizzard addon compartment (the addon-list button under the minimap).
+-- Gives players a way in even when the minimap button is hidden.
+function BoundToLearn_OnAddonCompartmentClick(_, button, menuButtonFrame)
+    if button == "RightButton" then
+        BoundToLearn:OpenOptions()
+    else
+        BoundToLearn:ShowMinimapMenu(menuButtonFrame)
     end
 end

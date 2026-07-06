@@ -6,6 +6,7 @@ ns.Options = Options
 local Utils     = ns.Utils
 local sformat   = Utils.sformat
 local mfloor    = Utils.mfloor
+local mceil     = Utils.mceil
 local mmin, mmax = Utils.mmin, Utils.mmax
 local tonumber  = Utils.tonumber
 local tostring  = Utils.tostring
@@ -27,40 +28,8 @@ local optionsFrame
 local isInitialized = false
 local activeTab = "general"
 
-local PANEL_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-}
-
-local INNER_BACKDROP = {
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 14,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-}
-
 local function CreateThemedButton(parent, width, height, text)
-    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width, height)
-    btn:SetBackdrop(INNER_BACKDROP)
-    btn:SetBackdropColor(0.12, 0.12, 0.12, 1)
-    btn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("CENTER")
-    label:SetText(text)
-    btn.label = label
-
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.33, 0.8, 1, 1)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
-    end)
-
-    return btn
+    return ns.Theme.CreateButton(parent, text, width, height)
 end
 
 -- Collapsible section system
@@ -75,22 +44,23 @@ local function CreateSectionHeader(parent, text)
     accent:SetPoint("TOPLEFT", 0, 0)
     accent:SetPoint("TOPRIGHT", 0, 0)
     accent:SetHeight(1)
-    accent:SetColorTexture(0.33, 0.8, 1, 0.4)
+    accent:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.4))
 
-    local arrow = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    arrow:SetPoint("LEFT", 4, -3)
-    arrow:SetTextColor(0.33, 0.8, 1)
+    local arrow = ns.Theme.CreateArrow(header, 9)
+    arrow:SetPoint("LEFT", 5, -3)
     header.arrow = arrow
 
+    local goldText = "|cFF" .. ns.Theme.GOLD_HEX .. text .. "|r"
+    local hoverText = "|cFF" .. ns.Theme.CREAM_HEX .. text .. "|r"
     local label = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     label:SetPoint("LEFT", 18, -3)
-    label:SetText("|cFF55CCFF" .. text .. "|r")
+    label:SetText(goldText)
 
     header:SetScript("OnEnter", function()
-        label:SetText("|cFFAAEEFF" .. text .. "|r")
+        label:SetText(hoverText)
     end)
     header:SetScript("OnLeave", function()
-        label:SetText("|cFF55CCFF" .. text .. "|r")
+        label:SetText(goldText)
     end)
 
     return header
@@ -100,13 +70,27 @@ end
 local FRAME_OVERHEAD = 125
 local MIN_FRAME_HEIGHT = 160
 
+-- Keep the window's TOP edge fixed while sections expand/collapse so the
+-- frame grows and shrinks downward instead of jerking about its center.
+local function AnchorTopFixed(h)
+    local top = optionsFrame:GetTop()
+    if top then
+        local cx = optionsFrame:GetLeft() + optionsFrame:GetWidth() / 2
+        optionsFrame:ClearAllPoints()
+        optionsFrame:SetPoint("TOP", UIParent, "BOTTOMLEFT", cx, top)
+    end
+    optionsFrame:SetHeight(h)
+end
+
 local function ReflowSections(sections)
     local y = 0
     for _, sec in ipairs(sections) do
+        sec.header:ClearAllPoints()
         sec.header:SetPoint("TOPLEFT", 0, y)
         sec.header:SetPoint("TOPRIGHT", 0, y)
         y = y - HEADER_HEIGHT
         if sec.expanded then
+            sec.content:ClearAllPoints()
             sec.content:SetPoint("TOPLEFT", 0, y)
             sec.content:SetPoint("TOPRIGHT", 0, y)
             sec.content:Show()
@@ -115,24 +99,24 @@ local function ReflowSections(sections)
             sec.content:Hide()
         end
         y = y - SECTION_GAP
-        sec.header.arrow:SetText(sec.expanded and "v" or ">")
+        sec.header.arrow:SetDirection(sec.expanded and "down" or "right")
     end
     if optionsFrame then
-        local h = mmax(-y + FRAME_OVERHEAD, MIN_FRAME_HEIGHT)
-        optionsFrame:SetHeight(h)
+        AnchorTopFixed(mmax(-y + FRAME_OVERHEAD, MIN_FRAME_HEIGHT))
     end
 end
 
-local function AddSection(sections, parent, title, contentHeight, buildFunc)
+-- buildFunc returns its final (negative) y cursor; the section measures its
+-- own content height from that so callers never hand-maintain a magic number.
+local function AddSection(sections, parent, title, buildFunc)
     local header = CreateSectionHeader(parent, title)
     local content = CreateFrame("Frame", nil, parent)
-    content:SetHeight(contentHeight)
     content:Hide()
 
     local sec = {
         header = header,
         content = content,
-        contentHeight = contentHeight,
+        contentHeight = 1,
         expanded = false,
     }
 
@@ -144,7 +128,9 @@ local function AddSection(sections, parent, title, contentHeight, buildFunc)
 
     tinsert(sections, sec)
 
-    buildFunc(content)
+    local endY = buildFunc(content) or 0
+    sec.contentHeight = mmax(-endY, 1)
+    content:SetHeight(sec.contentHeight)
     return sec
 end
 
@@ -156,13 +142,11 @@ end
 function Options:CreateFrame()
     if optionsFrame then return end
 
-    optionsFrame = CreateFrame("Frame", "BoundToLearnOptionsFrame", UIParent, "BackdropTemplate")
+    optionsFrame = CreateFrame("Frame", "BoundToLearnOptionsFrame", UIParent)
     optionsFrame:SetSize(440, 500)
     optionsFrame:SetPoint("CENTER")
     optionsFrame:SetFrameStrata("DIALOG")
-    optionsFrame:SetBackdrop(PANEL_BACKDROP)
-    optionsFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    optionsFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    ns.Theme.StylePanel(optionsFrame)
     optionsFrame:EnableMouse(true)
     optionsFrame:SetMovable(true)
     optionsFrame:RegisterForDrag("LeftButton")
@@ -176,32 +160,19 @@ function Options:CreateFrame()
     end)
     tinsert(UISpecialFrames, "BoundToLearnOptionsFrame")
 
-    local close = CreateFrame("Button", nil, optionsFrame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
+    local close = ns.Theme.CreateCloseButton(optionsFrame, function() optionsFrame:Hide() end)
+    close:SetPoint("TOPRIGHT", -8, -8)
 
-    local title = optionsFrame:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    local title = ns.Theme.CreateTitle(optionsFrame, "BoundToLearn Options", 16)
     title:SetPoint("TOP", 0, -12)
-    title:SetText("|cFF55CCFFBoundToLearn Options|r")
 
     local tabs = { { key = "general", label = "General" }, { key = "game", label = "Game" } }
     optionsFrame.tabs = {}
     for i, t in ipairs(tabs) do
-        local tab = CreateFrame("Button", nil, optionsFrame)
+        local tab = ns.Theme.CreateTab(optionsFrame, t.label)
         tab:SetSize(100, 24)
         tab:SetPoint("TOPLEFT", 15 + (i - 1) * 110, -35)
-        tab:SetNormalFontObject("GameFontNormal")
-        tab:SetHighlightFontObject("GameFontHighlight")
-        tab:SetText(t.label)
         tab.tabKey = t.key
-
-        local underline = tab:CreateTexture(nil, "OVERLAY")
-        underline:SetPoint("BOTTOMLEFT", 0, -2)
-        underline:SetPoint("BOTTOMRIGHT", 0, -2)
-        underline:SetHeight(2)
-        underline:SetColorTexture(0.33, 0.8, 1, 1)
-        underline:Hide()
-        tab.underline = underline
 
         tab:SetScript("OnClick", function()
             PlayUISound(SOUND_TAB)
@@ -228,7 +199,7 @@ function Options:SetTab(tabKey)
         optionsFrame.gamePanel:SetShown(tabKey == "game")
     end
     for _, tab in ipairs(optionsFrame.tabs) do
-        tab.underline:SetShown(tab.tabKey == tabKey)
+        tab:SetActive(tab.tabKey == tabKey)
     end
     local sections = (tabKey == "general" and optionsFrame.generalSections)
         or (tabKey == "game" and optionsFrame.gameSections)
@@ -252,8 +223,9 @@ function Options:CreateGeneralPanel()
     optionsFrame.generalSections = sections
 
     -- Section 1: General
-    AddSection(sections, panel, "General", 72, function(content)
+    AddSection(sections, panel, "General", function(content)
         local y = 0
+        y = self:AddThemePicker(content, y)
         y = self:AddCheckbox(content, "Show Login Message", y,
             function() return BoundToLearn.db.options.showLoginMessage end,
             function(v) BoundToLearn.db.options.showLoginMessage = v end)
@@ -266,10 +238,27 @@ function Options:CreateGeneralPanel()
                 BoundToLearn.db.options.showMinimapButton = v
                 BoundToLearn:UpdateMinimapButton()
             end)
+
+        y = y - 8
+        local filterNames = {
+            { key = "mounts",          label = "Mounts" },
+            { key = "toys",            label = "Toys" },
+            { key = "hearthstones",    label = "Hearthstones" },
+            { key = "teleports",       label = "Teleports" },
+            { key = "consumables",     label = "Consumables" },
+            { key = "professions",     label = "Professions" },
+            { key = "skyriding",       label = "Skyriding" },
+            { key = "nonCombatMacros", label = "Non-combat macros" },
+            { key = "buffs",           label = "Buffs" },
+        }
+        y = self:AddGroupedGrid(content, y, "Ignore these action types:", filterNames, 3,
+            function(key) return BoundToLearn.db.filter[key] end,
+            function(key, v) BoundToLearn.db.filter[key] = v end)
+        return y
     end)
 
     -- Section 2: Keybind Tracker
-    AddSection(sections, panel, "Keybind Tracker", 290, function(content)
+    AddSection(sections, panel, "Keybind Tracker", function(content)
         local y = 0
         y = self:AddCheckbox(content, "Enable on Login", y,
             function() return BoundToLearn.db.tracker.enabled end,
@@ -320,41 +309,7 @@ function Options:CreateGeneralPanel()
             function() return BoundToLearn.db.tracker.maxSegments end,
             function(v) BoundToLearn.db.tracker.maxSegments = v end,
             function(v) return sformat("%.0f", v) end)
-
-        y = y - 6
-        local filterLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        filterLabel:SetPoint("TOPLEFT", 14, y)
-        filterLabel:SetText("Ignore in Tracker:")
-        filterLabel:SetTextColor(0.55, 0.55, 0.55)
-        y = y - 18
-
-        local filterNames = {
-            { key = "mounts",          label = "Mounts" },
-            { key = "toys",            label = "Toys" },
-            { key = "hearthstones",    label = "Hearthstones" },
-            { key = "teleports",       label = "Teleports" },
-            { key = "consumables",     label = "Consumables" },
-            { key = "professions",     label = "Professions" },
-            { key = "skyriding",       label = "Skyriding" },
-            { key = "nonCombatMacros", label = "Non-combat macros" },
-            { key = "buffs",           label = "Buffs (out of combat)" },
-        }
-        local FILTERS_PER_ROW = 3
-        local FILTER_SPACING = 130
-        for i, f in ipairs(filterNames) do
-            local col = (i - 1) % FILTERS_PER_ROW
-            local row = mfloor((i - 1) / FILTERS_PER_ROW)
-            local cb = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-            cb:SetPoint("TOPLEFT", col * FILTER_SPACING + 14, y - row * 28)
-            cb:SetChecked(BoundToLearn.db.tracker.filter[f.key])
-            local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-            cbText:SetText(f.label)
-            local key = f.key
-            cb:SetScript("OnClick", function(self)
-                BoundToLearn.db.tracker.filter[key] = self:GetChecked()
-            end)
-        end
+        return y
     end)
 
     -- Section 3: Click Blocking
@@ -443,7 +398,7 @@ function Options:CreateGeneralPanel()
         RefreshBlacklistContent()
     end
 
-    AddSection(sections, panel, "Click Blocking", 148, function(content)
+    AddSection(sections, panel, "Click Blocking", function(content)
         local y = 0
         y = self:AddCheckbox(content, "Enable Click Blocking", y,
             function() return BoundToLearn.db.clickBlock.enabled end,
@@ -453,6 +408,7 @@ function Options:CreateGeneralPanel()
                 end
                 if updateModeState then updateModeState() end
             end)
+        y = self:AddDivider(content, y)
 
         local modeOptions = {
             { value = "all",       label = "All Abilities" },
@@ -462,11 +418,11 @@ function Options:CreateGeneralPanel()
         }
 
         for i, opt in ipairs(modeOptions) do
-            local cb = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-            cb:SetPoint("TOPLEFT", 26, y - (i - 1) * 24)
-            local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-            cbText:SetText(opt.label)
+            local ry = y - (i - 1) * 26
+            local cb = ns.Theme.CreateToggle(content, opt.label)
+            cb:ClearAllPoints()
+            cb:SetPoint("TOPLEFT", content, "TOPLEFT", 30, ry)
+            cb:SetPoint("TOPRIGHT", content, "TOPRIGHT", -8, ry)
             local val = opt.value
             cb:SetScript("OnClick", function()
                 BoundToLearn.db.clickBlock.mode = val
@@ -475,32 +431,39 @@ function Options:CreateGeneralPanel()
             end)
             tinsert(modeCBs, { cb = cb, value = val })
         end
-        y = y - #modeOptions * 24
+        y = y - #modeOptions * 26 - 4
 
-        -- Custom blacklist box (right side)
-        blacklistBox = CreateFrame("Frame", nil, content, "BackdropTemplate")
-        blacklistBox:SetSize(175, 120)
-        blacklistBox:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, 0)
-        blacklistBox:SetBackdrop(INNER_BACKDROP)
-        blacklistBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
-        blacklistBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+        -- Custom blacklist box, below the modes (shown only in custom mode).
+        local boxY = y
+        blacklistBox = CreateFrame("Frame", nil, content)
+        blacklistBox:SetHeight(120)
+        blacklistBox.RestPosition = function(self)
+            self:SetParent(content)
+            self:ClearAllPoints()
+            self:SetPoint("TOPLEFT", content, "TOPLEFT", 4, boxY)
+            self:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, boxY)
+            self:SetFrameLevel(1)
+        end
+        blacklistBox:RestPosition()
+        ns.Theme.StyleCard(blacklistBox, ns.Theme.C.PANEL_DARK)
         blacklistBox:Hide()
 
         local boxTitle = blacklistBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        boxTitle:SetPoint("TOP", 0, -6)
-        boxTitle:SetText("|cFF55CCFFBlocked Spells|r")
+        boxTitle:SetPoint("TOPLEFT", 8, -6)
+        boxTitle:SetText("|cFF" .. ns.Theme.ACCENT_HEX .. "Blocked Spells|r")
 
         local blScrollFrame = CreateFrame("ScrollFrame", nil, blacklistBox, "UIPanelScrollFrameTemplate")
-        blScrollFrame:SetPoint("TOPLEFT", 6, -20)
-        blScrollFrame:SetPoint("BOTTOMRIGHT", -24, 30)
+        blScrollFrame:SetPoint("TOPLEFT", 6, -22)
+        blScrollFrame:SetPoint("BOTTOMRIGHT", -26, 30)
+        ns.Theme.StyleScrollBar(blScrollFrame.ScrollBar)
 
         local blContent = CreateFrame("Frame", nil, blScrollFrame)
-        blContent:SetSize(140, 1)
+        blContent:SetSize(340, 1)
         blScrollFrame:SetScrollChild(blContent)
         blacklistBox.content = blContent
 
         local selectBtn = CreateThemedButton(blacklistBox, 78, 22, "Select")
-        selectBtn:SetPoint("BOTTOMLEFT", 6, 5)
+        selectBtn:SetPoint("BOTTOMLEFT", 8, 6)
 
         -- Dim overlay for the options frame (blocks interaction with dimmed controls)
         local panelDim = CreateFrame("Frame", nil, optionsFrame)
@@ -516,20 +479,17 @@ function Options:CreateGeneralPanel()
         local dimHintLine1 = panelDim:CreateFontString(nil, "OVERLAY")
         dimHintLine1:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
         dimHintLine1:SetPoint("TOP", optionsFrame, "BOTTOM", 0, -12)
-        dimHintLine1:SetText("|cFF55CCFFClick the spells you want to block|r")
+        dimHintLine1:SetText("|cFF" .. ns.Theme.ACCENT_HEX .. "Click the spells you want to block|r")
         local dimHintLine2 = panelDim:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         dimHintLine2:SetPoint("TOP", dimHintLine1, "BOTTOM", 0, -4)
         dimHintLine2:SetText("|cFF888888Go ahead, click away.\nThis is the one time we'll allow it.|r")
         dimHintLine2:SetJustifyH("CENTER")
 
-        -- Save original parent for reparenting during select mode
-        local blacklistOrigParent = blacklistBox:GetParent()
-
         local function SetSelectUI(active)
             selectBtn.selectHighlight = active
             if active then
-                selectBtn.label:SetText("|cFF00FF00Done|r")
-                selectBtn:SetBackdropBorderColor(0.2, 1, 0.2, 1)
+                selectBtn:SetText("|cFF" .. ns.Theme.ACCENT_HEX .. "Done|r")
+                ns.Theme.SetFillColor(selectBtn, ns.Theme.C.ACCENT_DIM)
                 optionsFrame:SetFrameStrata("TOOLTIP")
                 panelDim:Show()
                 -- Reparent blacklist box to optionsFrame so it sits above the dim
@@ -540,15 +500,12 @@ function Options:CreateGeneralPanel()
                 blacklistBox:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", left, top)
                 blacklistBox:SetFrameLevel(panelDim:GetFrameLevel() + 5)
             else
-                selectBtn.label:SetText("Select")
-                selectBtn:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+                selectBtn:SetText("Select")
+                ns.Theme.SetFillColor(selectBtn, ns.Theme.C.BTN_NORMAL)
                 optionsFrame:SetFrameStrata("DIALOG")
                 panelDim:Hide()
-                -- Reparent back to original content frame
-                blacklistBox:SetParent(blacklistOrigParent)
-                blacklistBox:ClearAllPoints()
-                blacklistBox:SetPoint("TOPRIGHT", blacklistOrigParent, "TOPRIGHT", -4, 0)
-                blacklistBox:SetFrameLevel(1)
+                -- Reparent back to the content frame at its resting spot.
+                blacklistBox:RestPosition()
             end
         end
 
@@ -576,9 +533,9 @@ function Options:CreateGeneralPanel()
         end)
         selectBtn:SetScript("OnLeave", function(self)
             if self.selectHighlight then
-                self:SetBackdropBorderColor(0.2, 1, 0.2, 1)
+                ns.Theme.SetFillColor(self, ns.Theme.C.ACCENT_DIM)
             else
-                self:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+                ns.Theme.SetFillColor(self, ns.Theme.C.BTN_NORMAL)
             end
         end)
 
@@ -604,6 +561,7 @@ function Options:CreateGeneralPanel()
             hideOnEscape = true,
             preferredIndex = 3,
         }
+        return boxY - 126
     end)
 
     updateModeState = UpdateModeRadios
@@ -627,7 +585,7 @@ function Options:CreateGamePanel()
     optionsFrame.gameSections = sections
 
     -- Section 1: Game Settings
-    AddSection(sections, panel, "Game Settings", 80, function(content)
+    AddSection(sections, panel, "Game Settings", function(content)
         local y = 0
         local desc = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         desc:SetPoint("TOPLEFT", 4, y)
@@ -643,39 +601,24 @@ function Options:CreateGamePanel()
         y = self:AddCheckbox(content, "Show Combo Counter", y,
             function() return BoundToLearn.db.game.showCombo end,
             function(v) BoundToLearn.db.game.showCombo = v end)
+        return y
     end)
 
     -- Section 2: Action Bars
-    AddSection(sections, panel, "Action Bars", 94, function(content)
-        local y = 0
-        local barLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        barLabel:SetPoint("TOPLEFT", 14, y)
-        barLabel:SetText("Select which action bars to include in the game:")
-        barLabel:SetTextColor(0.6, 0.6, 0.6)
-        y = y - 18
-
+    AddSection(sections, panel, "Action Bars", function(content)
         local barDefs = {
-            { key = "main",        label = "Action Bar 1 (Main Bar)" },
-            { key = "bottomLeft",  label = "Action Bar 2" },
-            { key = "bottomRight", label = "Action Bar 3" },
-            { key = "right",       label = "Action Bar 4" },
-            { key = "left",        label = "Action Bar 5" },
+            { key = "main",        label = "Bar 1 (Main)" },
+            { key = "bottomLeft",  label = "Bar 2" },
+            { key = "bottomRight", label = "Bar 3" },
+            { key = "right",       label = "Bar 4" },
+            { key = "left",        label = "Bar 5" },
+            { key = "bar6",        label = "Bar 6" },
+            { key = "bar7",        label = "Bar 7" },
+            { key = "bar8",        label = "Bar 8" },
         }
-
-        for i, b in ipairs(barDefs) do
-            local col = (i - 1) % 2
-            local row = mfloor((i - 1) / 2)
-            local cb = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-            cb:SetPoint("TOPLEFT", 14 + col * 200, y - row * 24)
-            cb:SetChecked(BoundToLearn.db.game.bars[b.key])
-            local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-            cbText:SetText(b.label)
-            local key = b.key
-            cb:SetScript("OnClick", function(self)
-                BoundToLearn.db.game.bars[key] = self:GetChecked()
-            end)
-        end
+        return self:AddGroupedGrid(content, 0, "Action bars to include in the game:", barDefs, 3,
+            function(key) return BoundToLearn.db.game.bars[key] end,
+            function(key, v) BoundToLearn.db.game.bars[key] = v end)
     end)
 
     ReflowSections(sections)
@@ -685,50 +628,166 @@ end
 -- Shared UI helpers
 -- =========================================
 
-function Options:AddCheckbox(parent, label, y, getter, setter)
-    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", 14, y)
+-- Single-column control rows span the full content width: label on the left,
+-- control pinned to a shared right column. Optional indent nudges sub-options
+-- (e.g. click-block modes under their master toggle) to the right.
+local ROW_RIGHT = -8
+local ROW_STEP = 26
+
+function Options:AddCheckbox(parent, label, y, getter, setter, indent)
+    local cb = ns.Theme.CreateToggle(parent, label)
+    cb:ClearAllPoints()
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 14 + (indent or 0), y)
+    cb:SetPoint("TOPRIGHT", parent, "TOPRIGHT", ROW_RIGHT, y)
     cb:SetChecked(getter())
-    local cbText = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    cbText:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-    cbText:SetText(label)
     cb:SetScript("OnClick", function(self)
         setter(self:GetChecked())
     end)
-    return y - 24
+    return y - ROW_STEP
 end
 
 function Options:AddSlider(parent, label, minVal, maxVal, step, y, getter, setter, formatFunc)
     formatFunc = formatFunc or function(v) return sformat("%.0f", v) end
-
     y = y - 4
-    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", 18, y - 2)
+
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(18)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", ROW_RIGHT, y)
+
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
     lbl:SetText(label)
 
-    local slider = CreateFrame("Slider", nil, parent, "OptionsSliderTemplate")
-    slider:SetWidth(160)
-    slider:SetPoint("TOPLEFT", 170, y)
-    slider:SetMinMaxValues(minVal, maxVal)
-    slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
-    slider.Low:SetText("")
-    slider.High:SetText("")
-    slider.Text:SetText("")
+    local valText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    valText:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    valText:SetJustifyH("RIGHT")
+    valText:SetWidth(46)
+    valText:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_BODY))
 
-    local valText = slider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    valText:SetPoint("LEFT", slider, "RIGHT", 8, 0)
+    local slider = ns.Theme.CreateSlider(row, 150, minVal, maxVal, step)
+    slider:SetPoint("RIGHT", valText, "LEFT", -8, 0)
 
     slider:SetValue(getter())
     valText:SetText(formatFunc(getter()))
-
     slider:SetScript("OnValueChanged", function(self, value)
         value = mfloor(value / step + 0.5) * step
         setter(value)
         valText:SetText(formatFunc(value))
     end)
+    return y - ROW_STEP
+end
 
-    return y - 26
+-- Thin separator under a gating master toggle (or between blocks).
+function Options:AddDivider(parent, y)
+    local line = ns.Theme.CreateDivider(parent)
+    line:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y - 2)
+    line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, y - 2)
+    return y - 8
+end
+
+-- Related toggles wrapped in one grouped backdrop card (EasyFind-style), laid
+-- out in a grid. Each cell right-aligns its own switch.
+local GROUP_CARD_W = 440 - 15 * 2 - 4 * 2   -- frame width - panel inset - card inset
+function Options:AddGroupedGrid(parent, y, caption, items, perRow, getState, onToggle)
+    if caption then
+        local cap = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        cap:SetPoint("TOPLEFT", 4, y)
+        cap:SetText(caption)
+        cap:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_DIM))
+        y = y - 16
+    end
+    local PAD, CELL_H = 8, 24
+    local rows = mceil(#items / perRow)
+    local card = CreateFrame("Frame", nil, parent)
+    card:SetPoint("TOPLEFT", 4, y)
+    card:SetPoint("TOPRIGHT", -4, y)
+    card:SetHeight(rows * CELL_H + PAD * 2)
+    ns.Theme.StyleCard(card, ns.Theme.C.SECTION_FILL)
+
+    local cellW = (GROUP_CARD_W - PAD * 2) / perRow
+    for i, item in ipairs(items) do
+        local col = (i - 1) % perRow
+        local rw = mfloor((i - 1) / perRow)
+        local cb = ns.Theme.CreateToggle(card, item.label, nil, cellW - 6)
+        cb:SetPoint("TOPLEFT", card, "TOPLEFT", PAD + col * cellW, -PAD - rw * CELL_H)
+        cb:SetChecked(getState(item.key))
+        local key = item.key
+        cb:SetScript("OnClick", function(self) onToggle(key, self:GetChecked()) end)
+    end
+    return y - (rows * CELL_H + PAD * 2) - 6
+end
+
+-- Color theme picker: a right-aligned row of accent swatches. Clicking one
+-- applies it immediately for new windows; a reload finishes retinting the
+-- rest, so a "Reload" affordance appears after a change.
+function Options:AddThemePicker(parent, y)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(20)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", ROW_RIGHT, y)
+
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+    lbl:SetText("Color Theme")
+    lbl:SetTextColor(ns.Theme.RGB(ns.Theme.C.TEXT_PRIMARY))
+
+    local order = ns.Theme.THEME_ORDER
+    local n = #order
+    local SIZE, GAP = 16, 6
+    local swatches = {}
+    local function refreshSel()
+        local cur = BoundToLearn.db.options.colorTheme
+        for i = 1, n do
+            local sw = swatches[i]
+            sw.underline:SetShown(sw.themeName == cur)
+            sw:SetAlpha(sw.themeName == cur and 1 or 0.6)
+        end
+    end
+    for i = n, 1, -1 do
+        local name = order[i]
+        local ac = ns.Theme.THEMES[name][1]
+        local sw = CreateFrame("Button", nil, row)
+        sw.themeName = name
+        sw:SetSize(SIZE, SIZE)
+        sw:SetPoint("RIGHT", row, "RIGHT", -(n - i) * (SIZE + GAP), 0)
+        ns.Theme.Round(sw)
+        ns.Theme.SetBarHeight(sw, SIZE)
+        ns.Theme.SetBorderShown(sw, false)
+        ns.Theme.SetFillColor(sw, ac)
+        local underline = sw:CreateTexture(nil, "OVERLAY")
+        underline:SetHeight(2)
+        underline:SetPoint("TOPLEFT", sw, "BOTTOMLEFT", 0, -2)
+        underline:SetPoint("TOPRIGHT", sw, "BOTTOMRIGHT", 0, -2)
+        underline:SetColorTexture(0.95, 0.95, 0.95, 1)
+        underline:Hide()
+        sw.underline = underline
+        ns.Theme.AttachTooltip(sw, name, "Use the " .. name .. " color theme.")
+        sw:SetScript("OnClick", function()
+            if BoundToLearn.db.options.colorTheme == name then return end
+            BoundToLearn.db.options.colorTheme = name
+            ns.Theme.ApplyTheme(name)
+            refreshSel()
+            if optionsFrame.themeReload then optionsFrame.themeReload:Show() end
+            if optionsFrame.themeHint then optionsFrame.themeHint:Show() end
+        end)
+        swatches[i] = sw
+    end
+    refreshSel()
+
+    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", 14, y - 22)
+    hint:SetText("Reload to finish applying the theme.")
+    hint:Hide()
+    optionsFrame.themeHint = hint
+
+    local reloadBtn = ns.Theme.CreateButton(parent, "Reload", 70, 18)
+    reloadBtn:SetPoint("LEFT", hint, "RIGHT", 6, 0)
+    reloadBtn:SetScript("OnClick", function() C_UI.Reload() end)
+    reloadBtn:Hide()
+    optionsFrame.themeReload = reloadBtn
+
+    return y - 46
 end
 
 -- =========================================
@@ -781,15 +840,15 @@ function Options:CreateResetButtons()
             db.tracker.widgetScale = 1.0
             db.tracker.combatOnly = false
             db.tracker.hideInCombat = false
-            db.tracker.filter.mounts = true
-            db.tracker.filter.toys = true
-            db.tracker.filter.hearthstones = true
-            db.tracker.filter.teleports = true
-            db.tracker.filter.consumables = true
-            db.tracker.filter.professions = true
-            db.tracker.filter.skyriding = true
-            db.tracker.filter.nonCombatMacros = true
-            db.tracker.filter.buffs = true
+            db.filter.mounts = true
+            db.filter.toys = true
+            db.filter.hearthstones = true
+            db.filter.teleports = true
+            db.filter.consumables = true
+            db.filter.professions = true
+            db.filter.skyriding = true
+            db.filter.nonCombatMacros = true
+            db.filter.buffs = true
             db.clickBlock.enabled = false
             db.clickBlock.mode = "all"
             wipe(db.clickBlock.customBlacklist)
