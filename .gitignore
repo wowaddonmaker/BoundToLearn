@@ -1,3 +1,9 @@
 .claude/
 README.md
 tools/
+
+# Dev recordings and local logs, never commit
+*.mp4
+*.mov
+*.webm
+target/
