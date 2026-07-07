@@ -67,9 +67,9 @@ local DB_DEFAULTS = {
     },
     pingTrainer = {
         targetStyle = "portraits",  -- "portraits", "blobs", "3d"
-        background = "orgrimmar",   -- selected background id
+        background = "classic",     -- selected expansion background id
         randomBG = false,           -- randomize from unlocked backgrounds
-        unlockedBGs = { orgrimmar = true },
+        unlockedBGs = { classic = true, tbc = true },
         muteMusic = false,
         mutePingSounds = true,      -- ping sounds off by default
     },
@@ -94,14 +94,14 @@ local DB_DEFAULTS = {
         lifetimeGameHits = 0,
         lifetimeQuizzes = 0,
         lifetimeQuizAbilities = 0,
+        scoreScaleV2 = false,
     },
     options = {
-        showLoginMessage = true,
         showMinimapButton = true,
         firstRun = true,
         showGameWarning = true,
         muteChat = false,
-        colorTheme = "Orange",
+        colorTheme = "Blue",
     },
     leaderboard = {
         Easy = {},
@@ -155,6 +155,17 @@ local function OnInitialize()
     MergeDefaults(BoundToLearnDB, DB_DEFAULTS)
     BoundToLearn.db = BoundToLearnDB
 
+    -- One-time reset of score bests when scoring moved to the normalized money-score
+    -- (capped near 100k). Old bests were on a much larger, length-dependent scale and
+    -- would be permanently unbeatable. Combo and accuracy bests are scale-independent
+    -- and kept.
+    if not BoundToLearnDB.stats.scoreScaleV2 then
+        BoundToLearnDB.stats.personalBest.highestScore = 0
+        for _, d in pairs(BoundToLearnDB.stats.difficultyBest) do d.highestScore = 0 end
+        for _, board in pairs(BoundToLearnDB.leaderboard) do wipe(board) end
+        BoundToLearnDB.stats.scoreScaleV2 = true
+    end
+
     -- Apply the saved color theme before any UI is built.
     if ns.Theme and ns.Theme.ApplyTheme then
         ns.Theme.ApplyTheme(BoundToLearnDB.options.colorTheme)
@@ -193,6 +204,22 @@ local function OnInitialize()
     if BoundToLearnDB.audit and BoundToLearnDB.audit.skipNonCombat ~= nil then
         BoundToLearnDB.filter.nonCombatMacros = BoundToLearnDB.audit.skipNonCombat
         BoundToLearnDB.audit.skipNonCombat = nil
+    end
+
+    -- Migrate: Ping Trainer backgrounds are now per-expansion. Retire the old
+    -- zone-art ids, seed the always-on Classic/TBC backdrops, and reset any stale
+    -- selection to Classic.
+    local pt = BoundToLearnDB.pingTrainer
+    if pt then
+        pt.unlockedBGs = pt.unlockedBGs or {}
+        pt.unlockedBGs.orgrimmar = nil
+        pt.unlockedBGs.darnassus = nil
+        pt.unlockedBGs.naxxramas = nil
+        pt.unlockedBGs.classic = true
+        pt.unlockedBGs.tbc = true
+        if pt.background == "orgrimmar" or pt.background == "darnassus" or pt.background == "naxxramas" then
+            pt.background = "classic"
+        end
     end
 
     ns.version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
@@ -243,6 +270,8 @@ local function OnInitialize()
             if ns.KeybindQuiz then ns.KeybindQuiz:Toggle() end
         elseif msg == "debughitbox" then
             if ns.PingGameUI then ns.PingGameUI:ToggleDebugHitbox() end
+        elseif msg == "wheeldbg" then
+            if ns.GameUI then ns.GameUI:DumpWheel() end
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
@@ -279,12 +308,6 @@ local function OnPlayerLogin()
             BoundToLearn:CreateMinimapButton()
         end
     end)
-
-    if BoundToLearn.db.options.showLoginMessage then
-        C_Timer.After(1, function()
-            BoundToLearn:Print("Loaded. Type /btl to get started.")
-        end)
-    end
 
     if BoundToLearn.db.options.firstRun then
         C_Timer.After(2, function()
@@ -506,6 +529,9 @@ function BoundToLearn:ShowMinimapMenu(anchor)
     if not minimapMenu then
         minimapMenu = CreateFrame("Frame", "BoundToLearnMinimapMenu", UIParent)
         minimapMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+        -- Capture the mouse over the whole menu so hovers do not fall through to
+        -- the minimap buttons behind it (their tooltips were bleeding over the menu).
+        minimapMenu:EnableMouse(true)
         ns.Theme.StylePanel(minimapMenu, 0.97)
         minimapMenu:Hide()
 
