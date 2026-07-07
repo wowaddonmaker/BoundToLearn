@@ -95,29 +95,29 @@ local playerFaction
 
 -- Backgrounds: texture, music FileDataID, unlock requirement, display name
 -- Music IDs from wowhead zone music database
+-- Arena backgrounds, one per expansion, using the Adventure Guide backdrop art
+-- shared with the song select (SongData.XPAC_BG). Music is resolved per
+-- expansion at play time. Classic and TBC are always available; later
+-- expansions unlock at score/combo milestones so the picker doubles as a
+-- progression track. Names come from Blizzard's localized EXPANSION_NAME* keys.
 local BACKGROUNDS = {
-    {
-        id = "orgrimmar",
-        name = "Orgrimmar",
-        texture = "Interface\\DRESSUPFRAME\\DressUpBackground-Orc1",
-        musicID = 53198,        -- Zone-Orgrimmar
-        unlock = nil,           -- default, always unlocked
-    },
-    {
-        id = "darnassus",
-        name = "Darnassus",
-        texture = "Interface\\DRESSUPFRAME\\DressUpBackground-NightElf1",
-        musicID = 53184,        -- Zone-Darnassus
-        unlock = { type = "score", value = 500, label = "Score 500+ in a game" },
-    },
-    {
-        id = "naxxramas",
-        name = "Naxxramas",
-        texture = "Interface\\DRESSUPFRAME\\DressUpBackground-DeathKnight1",
-        musicID = 53614,        -- Zone-NaxxramasDeathKnight
-        unlock = { type = "combo", value = 10, label = "Get a 10+ combo" },
-    },
+    { id = "classic",      tier = 1,  nameKey = "EXPANSION_NAME0" },
+    { id = "tbc",          tier = 2,  nameKey = "EXPANSION_NAME1" },
+    { id = "wrath",        tier = 3,  nameKey = "EXPANSION_NAME2", unlock = { type = "score", value = 500,  label = "Score 500+" } },
+    { id = "cataclysm",    tier = 4,  nameKey = "EXPANSION_NAME3", unlock = { type = "combo", value = 10,   label = "10+ combo" } },
+    { id = "pandaria",     tier = 5,  nameKey = "EXPANSION_NAME4", unlock = { type = "score", value = 1000, label = "Score 1000+" } },
+    { id = "draenor",      tier = 6,  nameKey = "EXPANSION_NAME5", unlock = { type = "combo", value = 15,   label = "15+ combo" } },
+    { id = "legion",       tier = 7,  nameKey = "EXPANSION_NAME6", unlock = { type = "score", value = 2000, label = "Score 2000+" } },
+    { id = "bfa",          tier = 8,  nameKey = "EXPANSION_NAME7", unlock = { type = "combo", value = 20,   label = "20+ combo" } },
+    { id = "shadowlands",  tier = 9,  nameKey = "EXPANSION_NAME8", unlock = { type = "score", value = 3500, label = "Score 3500+" } },
+    { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 5000, label = "Score 5000+" } },
+    { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 25, label = "25+ combo" } },
 }
+for i = 1, #BACKGROUNDS do
+    local bg = BACKGROUNDS[i]
+    bg.name = _G[bg.nameKey] or bg.nameFallback or bg.nameKey
+    bg.atlas = ns.SongData.XPAC_BG[bg.tier]
+end
 
 -- Real WoW ping sound IDs (from wowhead sound database)
 local PING_SOUNDS = {
@@ -189,13 +189,35 @@ local function GetSelectedBackground()
         end
     end
 
-    local selectedID = pt.background or "orgrimmar"
+    local selectedID = pt.background or "classic"
     for i = 1, #BACKGROUNDS do
         if BACKGROUNDS[i].id == selectedID then
             return BACKGROUNDS[i]
         end
     end
     return BACKGROUNDS[1]
+end
+
+-- Backgrounds are Adventure Guide atlases now, so route through SetAtlas; keep a
+-- texture path branch in case a future entry uses a raw file.
+-- The Adventure Guide backdrops carry a decorative header band across the top
+-- (stone tiling + a gold streak). Crop it out and keep the scenic body, then let
+-- that stretch to fill the arena.
+local GetAtlasInfo = C_Texture and C_Texture.GetAtlasInfo
+local BG_CROP_TOP = 0.27
+local BG_CROP_BOTTOM = 0.03
+local function ApplyBackground(tex, bg)
+    if bg and bg.atlas then
+        tex:SetAtlas(bg.atlas)
+        local info = GetAtlasInfo and GetAtlasInfo(bg.atlas)
+        if info then
+            local h = info.bottomTexCoord - info.topTexCoord
+            tex:SetTexCoord(info.leftTexCoord, info.rightTexCoord,
+                info.topTexCoord + h * BG_CROP_TOP, info.bottomTexCoord - h * BG_CROP_BOTTOM)
+        end
+    elseif bg and bg.texture then
+        tex:SetTexture(bg.texture)
+    end
 end
 
 local function IsMusicMuted()
@@ -209,10 +231,11 @@ local function IsPingSoundMuted()
 end
 
 local function StartBackgroundMusic(bg)
-    if not bg or not bg.musicID or IsMusicMuted() then return end
+    if not bg or IsMusicMuted() then return end
+    local musicID = bg.musicID or (bg.tier and ns.SongData.TierMusic and ns.SongData.TierMusic(bg.tier))
     -- PlayMusic replaces the current zone music on the Music channel.
     -- We don't need to touch the volume - PlayMusic overrides zone music directly.
-    PlayMusic(bg.musicID)
+    if musicID then PlayMusic(musicID) end
 end
 
 local function StopBackgroundMusic()
@@ -677,7 +700,7 @@ function PingGameUI:CreateUI()
     -- Arena-style background texture
     local bgTex = gameArea:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints()
-    bgTex:SetTexture(GetSelectedBackground().texture)
+    ApplyBackground(bgTex, GetSelectedBackground())
     bgTex:SetVertexColor(0.8, 0.8, 0.8, 1)
     gameArea.bgTex = bgTex
 
@@ -809,11 +832,12 @@ function PingGameUI:CreateStartScreen()
     showcaseRow:SetHeight(SHOWCASE_H)
 
     local SHOWCASE = {
-        { npcID = 3296,  anim = 26,  facing = 0.3,  kit = "Attack",  label = "Attack",  color = {1, 0.27, 0.27} },
-        { npcID = 68,    anim = 225, facing = -0.2, kit = "Assist",  label = "Assist",  color = {0.27, 0.8, 0.27} },
-        { npcID = 5953,  anim = 4,   facing = 0.15, kit = "Warning", label = "Warning", color = {1, 0.8, 0} },
+        { npcID = 3296,  anim = 26,  facing = 0.3,  kit = "Attack",  label = "Attack",  color = {1, 0.27, 0.27}, targetType = TARGET_ENEMY },
+        { npcID = 68,    anim = 225, facing = -0.2, kit = "Assist",  label = "Assist",  color = {0.27, 0.8, 0.27}, targetType = TARGET_ALLY },
+        { npcID = 5953,  anim = 4,   facing = 0.15, kit = "Warning", label = "Warning", color = {1, 0.8, 0}, targetType = TARGET_HAZARD },
     }
 
+    startFrame.showcaseCells = {}
     local showcaseWidth = GAME_WIDTH - 20
     local cellWidth = mfloor(showcaseWidth / 3)
     for i, sc in ipairs(SHOWCASE) do
@@ -833,6 +857,26 @@ function PingGameUI:CreateStartScreen()
             self:SetAnimation(capturedAnim)
             self:SetScript("OnModelLoaded", nil)
         end)
+
+        -- Portraits style: a race/hazard icon in the same spot as the model.
+        local portraitIcon = showcaseRow:CreateTexture(nil, "ARTWORK")
+        portraitIcon:SetSize(74, 74)
+        portraitIcon:SetPoint("CENTER", modelFrame, "CENTER", 0, 8)
+        portraitIcon:Hide()
+
+        -- Blobs style: a soft colored circle with a short label.
+        local blob = showcaseRow:CreateTexture(nil, "ARTWORK")
+        blob:SetTexture("Interface\\COMMON\\Indicator-Gray")
+        blob:SetSize(66, 66)
+        blob:SetPoint("CENTER", modelFrame, "CENTER", 0, 8)
+        blob:SetVertexColor(sc.color[1], sc.color[2], sc.color[3], 0.95)
+        blob:Hide()
+        local blobLabel = showcaseRow:CreateFontString(nil, "OVERLAY")
+        blobLabel:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+        blobLabel:SetPoint("CENTER", blob, "CENTER", 0, 0)
+        blobLabel:SetText(TARGET_LABELS[sc.targetType])
+        blobLabel:SetTextColor(1, 1, 1)
+        blobLabel:Hide()
 
         local pingIcon = showcaseRow:CreateTexture(nil, "OVERLAY")
         pingIcon:SetSize(36, 36)
@@ -854,6 +898,11 @@ function PingGameUI:CreateStartScreen()
         typeLabel:SetPoint("TOP", barBG, "BOTTOM", 0, -3)
         typeLabel:SetTextColor(sc.color[1], sc.color[2], sc.color[3])
         typeLabel:SetText(sc.label)
+
+        startFrame.showcaseCells[i] = {
+            model = modelFrame, portrait = portraitIcon, blob = blob, blobLabel = blobLabel,
+            targetType = sc.targetType, npcID = sc.npcID, facing = sc.facing, anim = sc.anim,
+        }
     end
 
     -- ===== Middle section =====
@@ -1055,11 +1104,11 @@ function PingGameUI:CreateStartScreen()
     -- ===== Map dropdown below start button =====
     local mapLabel = startFrame:CreateFontString(nil, "OVERLAY")
     mapLabel:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-    mapLabel:SetPoint("BOTTOM", startBtn, "BOTTOM", -85, -24)
-    mapLabel:SetText("|cFFFFD700Map|r")
+    mapLabel:SetPoint("BOTTOM", startBtn, "BOTTOM", -100, -24)
+    mapLabel:SetText("|cFFFFD700Expansion|r")
 
     local mapBtn = CreateFrame("Button", nil, startFrame, "BackdropTemplate")
-    mapBtn:SetSize(140, 20)
+    mapBtn:SetSize(165, 20)
     mapBtn:SetPoint("LEFT", mapLabel, "RIGHT", 6, 0)
     mapBtn:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -1084,7 +1133,7 @@ function PingGameUI:CreateStartScreen()
     -- Dropdown opens upward (above the button) to avoid clipping bottom
     local mapDropdown = CreateFrame("Frame", nil, mapBtn, "BackdropTemplate")
     mapDropdown:SetPoint("BOTTOMLEFT", mapBtn, "TOPLEFT", 0, 2)
-    mapDropdown:SetPoint("BOTTOMRIGHT", mapBtn, "TOPRIGHT", 0, 2)
+    mapDropdown:SetWidth(205)
     local dropdownRowH = 18
     local dropdownRows = #BACKGROUNDS + 1
     mapDropdown:SetHeight(dropdownRows * dropdownRowH + 6)
@@ -1358,9 +1407,9 @@ end
 function PingGameUI:UpdateBackgroundButtons()
     if not startFrame or not startFrame.bgBtns then return end
     local pt = GetPingTrainerDB()
-    local selectedID = pt and pt.background or "orgrimmar"
+    local selectedID = pt and pt.background or "classic"
     local isRandom = pt and pt.randomBG
-    local selectedName = "Orgrimmar"
+    local selectedName = BACKGROUNDS[1].name
 
     for i, btn in ipairs(startFrame.bgBtns) do
         local bg = BACKGROUNDS[i]
@@ -1440,6 +1489,7 @@ function PingGameUI:UpdateStyleButtons()
             btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
         end
     end
+    self:RefreshShowcase()
 end
 
 function PingGameUI:UpdateDiffButtons()
@@ -1490,6 +1540,52 @@ local function GetRandomRaceAtlas(isEnemy)
     return sformat("raceicon128-%s-%s", raceInfo.clientFileString, gender)
 end
 
+-- Reflect the chosen icon style in the three start-screen previews, live.
+function PingGameUI:RefreshShowcase()
+    if not startFrame or not startFrame.showcaseCells then return end
+    local style = self:GetTargetStyle()
+    for _, cell in ipairs(startFrame.showcaseCells) do
+        if style == "3d" then
+            cell.portrait:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()
+            -- A PlayerModel can render blank after a hide/show cycle, so re-feed the
+            -- creature whenever it transitions back to visible.
+            if not cell.model:IsShown() then
+                cell.model:Show()
+                cell.model:SetCreature(cell.npcID)
+                local facing, anim = cell.facing, cell.anim
+                cell.model:SetScript("OnModelLoaded", function(m)
+                    m:SetFacing(facing)
+                    m:SetAnimation(anim)
+                    m:SetScript("OnModelLoaded", nil)
+                end)
+            end
+        elseif style == "blobs" then
+            cell.model:Hide(); cell.portrait:Hide(); cell.blob:Show(); cell.blobLabel:Show()
+        else
+            cell.model:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()
+            if not cell.portraitSet then
+                if cell.targetType == TARGET_HAZARD then
+                    cell.portrait:SetTexture(HAZARD_ICONS[math.random(#HAZARD_ICONS)])
+                    cell.portrait:SetTexCoord(0, 1, 0, 1)
+                    cell.portraitSet = true
+                else
+                    local atlas = GetRandomRaceAtlas(cell.targetType == TARGET_ENEMY)
+                    if atlas then
+                        cell.portrait:SetAtlas(atlas)
+                        cell.portrait:SetTexCoord(0, 1, 0, 1)
+                        cell.portraitSet = true
+                    end
+                end
+            end
+            if cell.portraitSet then
+                cell.portrait:Show()
+            else
+                cell.blob:Show(); cell.blobLabel:Show()
+            end
+        end
+    end
+end
+
 function PingGameUI:ShowStartScreen()
     if not mainFrame then self:CreateUI() end
     if gameArea then gameArea:Hide() end
@@ -1511,7 +1607,7 @@ function PingGameUI:OnGameStart()
 
     -- Select and apply background + music
     local bg = GetSelectedBackground()
-    gameArea.bgTex:SetTexture(bg.texture)
+    ApplyBackground(gameArea.bgTex, bg)
     StartBackgroundMusic(bg)
 
     gameArea:Show()
