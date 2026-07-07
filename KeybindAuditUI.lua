@@ -77,18 +77,16 @@ local function SaveBarToggles()
 end
 
 local function UpdateBarOverlay(overlay, included)
+    local word = included and "Included" or "Excluded"
+    overlay.label:SetText(overlay.barLabel .. " (" .. word .. ")")
     if included then
         overlay.bg:SetColorTexture(0.1, 0.6, 0.1, 0.25)
         overlay.border:SetColorTexture(0.2, 0.8, 0.2, 0.8)
         overlay.label:SetTextColor(0.3, 1.0, 0.3)
-        overlay.status:SetText("Included")
-        overlay.status:SetTextColor(0.3, 0.9, 0.3)
     else
         overlay.bg:SetColorTexture(0.4, 0.1, 0.1, 0.25)
         overlay.border:SetColorTexture(0.6, 0.2, 0.2, 0.6)
         overlay.label:SetTextColor(0.8, 0.4, 0.4)
-        overlay.status:SetText("Excluded")
-        overlay.status:SetTextColor(0.8, 0.4, 0.4)
     end
 end
 
@@ -132,20 +130,17 @@ local function CreateBarOverlay(barDef)
 
     local label = overlay:CreateFontString(nil, "OVERLAY")
     label:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
-    label:SetPoint("CENTER", 0, 8)
+    label:SetPoint("CENTER", 0, 6)
     label:SetText(barDef.label)
     overlay.label = label
+    overlay.barLabel = barDef.label
 
     local hint = overlay:CreateFontString(nil, "OVERLAY")
     hint:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
     hint:SetPoint("CENTER", 0, -8)
     hint:SetText("Click to toggle")
     hint:SetTextColor(0.7, 0.7, 0.7)
-
-    local status = overlay:CreateFontString(nil, "OVERLAY")
-    status:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    status:SetPoint("CENTER", 0, -20)
-    overlay.status = status
+    overlay.hint = hint
 
     overlay.barKey = barDef.key
     overlay:SetScript("OnClick", function(self)
@@ -952,8 +947,7 @@ function KeybindAuditUI:ShowBarOverlays()
             local btn1 = _G[barDef.prefix .. "1"]
             if btn1 and btn1:IsVisible() then
                 PositionOverlay(overlay, barDef)
-                local label = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
-                overlay.label:SetText(label)
+                overlay.barLabel = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
                 UpdateBarOverlay(overlay, barToggles[barDef.key])
                 overlay:Show()
             else
@@ -977,11 +971,25 @@ function KeybindAuditUI:ShowSetup()
     for _, barDef in ipairs(BAR_FRAME_MAP) do
         local cb = setupPage.barCheckboxes[barDef.key]
         if cb then
-            cb:SetChecked(barToggles[barDef.key])
             local label = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
-            cb.label:SetText(label)
+            local btn1 = _G[barDef.prefix .. "1"]
+            local barEnabled = btn1 and btn1:IsVisible()
+            if barEnabled then
+                cb:EnableMouse(true)
+                cb.label:SetText(label)
+                cb.label:SetTextColor(0.9, 0.9, 0.9)
+                cb:SetChecked(barToggles[barDef.key])
+            else
+                -- Not enabled in the default UI: can't audit a bar you can't see.
+                barToggles[barDef.key] = false
+                cb:SetChecked(false)
+                cb:EnableMouse(false)
+                cb.label:SetText(label .. " (not shown)")
+                cb.label:SetTextColor(0.4, 0.4, 0.4)
+            end
         end
     end
+    SaveBarToggles()
     setupPage.mmoMouseCb:SetChecked(db.mmoMouse)
     setupPage.skipBarsCb:SetChecked(db.skipBarSelection)
     setupPage.groupingCb:SetChecked(db.includeGrouping)
