@@ -78,7 +78,7 @@ end
 local RGB = Theme.RGB
 
 -- Delayed hover tooltip where the caller populates GameTooltip themselves.
--- buildFn(self) runs 0.4s after mouse-enter (matching EasyFind's grace); the
+-- buildFn(self) runs 0.4s after mouse-enter (a short grace delay); the
 -- owner/anchor is set for you. Returning nothing from buildFn shows nothing.
 function Theme.DelayedTooltip(frame, buildFn, anchor)
     frame:HookScript("OnEnter", function(self)
@@ -265,35 +265,16 @@ local function ApplyGloss(frame)
 end
 Theme.ApplyGloss = ApplyGloss
 
--- One-call dark glossy panel background (window bodies, popups).
+-- One-call dark glossy panel background (window bodies, popups). The outline is
+-- the addon's own soft rounded-rect nine-slice (the same CombinedBorder texture
+-- the search results window uses), not a low-res tooltip/dialog edge.
 function Theme.StylePanel(frame, alpha)
     Theme.Round(frame)
-    Theme.SetBarHeight(frame, 16)
-    Theme.SetBorderShown(frame, false)
+    Theme.SetBarHeight(frame, 24)
+    Theme.SetBorderShown(frame, true)
     Theme.SetFill(frame, 0.045, 0.042, 0.038, 1)
     Theme.SetFillAlpha(frame, alpha or 1)
     ApplyGloss(frame)
-    -- Ornate outline only (the EasyFind map-results border): a dark fill framed by
-    -- the tooltip border, so nothing is stamped behind the panel's real content and
-    -- there is never a second theme underneath. Built as a child BackdropTemplate
-    -- frame so it works on any frame type.
-    if not frame._btlBorder then
-        -- Sibling, not a child: panels that SetClipsChildren (the song wheel)
-        -- would otherwise clip the border, which sits just outside the panel edge.
-        -- Sync its visibility to the panel so it still hides with it.
-        local host = frame:GetParent() or UIParent
-        local b = CreateFrame("Frame", nil, host, "BackdropTemplate")
-        b:SetPoint("TOPLEFT", frame, "TOPLEFT", -3, 3)
-        b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 3, -3)
-        b:SetFrameStrata(frame:GetFrameStrata())
-        b:SetFrameLevel(frame:GetFrameLevel() + 1)
-        b:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 16 })
-        b:SetBackdropBorderColor(1, 0.95, 0.85, 0.95)
-        b:SetShown(frame:IsShown())
-        frame:HookScript("OnShow", function() b:Show() end)
-        frame:HookScript("OnHide", function() b:Hide() end)
-        frame._btlBorder = b
-    end
     if not frame._btlGlossHooked then
         frame._btlGlossHooked = true
         frame:HookScript("OnSizeChanged", ApplyGloss)
@@ -444,13 +425,15 @@ function Theme.CreateCloseButton(parent, onClose)
     Theme.Round(btn)
     Theme.SetBarHeight(btn, 8)
     Theme.SetBorderShown(btn, false)
-    Theme.SetFillColor(btn, C.BTN_NORMAL)
+    -- Just the x until hovered; the button shape only appears on hover.
+    Theme.SetFillColor(btn, C.MISS)
+    Theme.SetFillAlpha(btn, 0)
     local x = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     x:SetPoint("CENTER", 0, 0)
     x:SetText("\195\151") -- multiplication sign glyph
     x:SetTextColor(RGB(C.TEXT_BODY, 1))
-    btn:SetScript("OnEnter", function() Theme.SetFillColor(btn, C.MISS); x:SetTextColor(1, 1, 1, 1) end)
-    btn:SetScript("OnLeave", function() Theme.SetFillColor(btn, C.BTN_NORMAL); x:SetTextColor(RGB(C.TEXT_BODY, 1)) end)
+    btn:SetScript("OnEnter", function() Theme.SetFillAlpha(btn, 1); x:SetTextColor(1, 1, 1, 1) end)
+    btn:SetScript("OnLeave", function() Theme.SetFillAlpha(btn, 0); x:SetTextColor(RGB(C.TEXT_BODY, 1)) end)
     btn:SetScript("OnClick", function()
         if Utils.PlayUISound then Utils.PlayUISound(Utils.SOUND_CLOSE) end
         if onClose then onClose() end
@@ -524,7 +507,7 @@ end
 
 --------------------------------------------------------------------------
 -- Sleek horizontal slider using Blizzard's Minimal_SliderBar atlases (thin
--- track endcaps + stretch middle + diamond thumb), matching EasyFind.
+-- track endcaps + stretch middle + diamond thumb).
 -- Native Slider API: SetMinMaxValues/SetValue/GetValue/SetValueStep +
 -- OnValueChanged.
 --------------------------------------------------------------------------
