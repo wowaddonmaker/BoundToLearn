@@ -52,8 +52,12 @@ local mirrorFlipped = false
 local nextMirrorFlip = 0
 local gameModifiers = {}
 
-local SCORE_VALUES = { perfect = 300, great = 200, good = 100, miss = 0 }
-local RED_HERRING_PENALTY = -150
+-- DDR-style "money score": a flawless run of ANY track lands at SCORE_CAP,
+-- regardless of length. A note is worth SCORE_CAP / noteBudget, scaled by how
+-- cleanly it was hit. The old per-note point values ran to hundreds of thousands
+-- and scaled with track length, which maxed every rank on the first decent game.
+local SCORE_CAP = 100000
+local JUDGE_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.45, miss = 0 }
 local COMBO_THRESHOLDS = { 5, 10, 20, 35 }
 
 -- Focus (health) system
@@ -88,6 +92,12 @@ local DIFFICULTY_PRESETS = {
                 timingPerfect = 0.025, timingGreat = 0.07, timingGood = 0.15,
                 redHerringChance = 0, randomAngles = false, doublesChance = 0 },
 }
+
+-- Note spacing is paced to each song's real tempo: spawn interval = one beat times
+-- this many beats-per-note, so a faster track plays faster and lower difficulties
+-- leave more beats between notes. The presets' fixed spawnInterval is only a
+-- fallback for a song with no known BPM.
+local BEATS_PER_NOTE = { Easy = 3, Medium = 2, Hard = 1.4, Extreme = 1 }
 
 local MODIFIER_KEYS = {
     LSHIFT = true, RSHIFT = true,
@@ -146,7 +156,11 @@ function Game:Initialize()
             inputFrame:SetPropagateKeyboardInput(false)
             self:OnKeybindInput(slotInfo.slot)
         else
-            inputFrame:SetPropagateKeyboardInput(true)
+            -- Swallow every other key while the game is running so stray binds
+            -- (game menu, bags, character pane, spellbook, map, etc.) can't pop a
+            -- window mid-song. ESC still stops the game; modifiers still pass, and
+            -- the input frame is hidden on pause/stop so normal keys return then.
+            inputFrame:SetPropagateKeyboardInput(false)
         end
     end)
 
@@ -210,6 +224,14 @@ function Game:GetSettings()
             timingGreat = db.timingGreat,
             timingGood = db.timingGood,
         }
+    end
+    -- Pace note spacing to the song's real tempo so it feels tied to the music.
+    -- Lanes stay random across every bind (see SpawnNote). Custom keeps its slider.
+    if difficulty ~= "Custom" then
+        local bpm = ns.SongData.BPM(ns.SongData.Get(db.songKey))
+        if bpm and bpm > 0 then
+            settings.spawnInterval = mmax(0.34, mmin(2.6, (60 / bpm) * (BEATS_PER_NOTE[difficulty] or 1)))
+        end
     end
     -- Competitive has 15 lanes; scale note cap to keep similar density
     if currentMode == "competitive" then
@@ -427,6 +449,7 @@ function Game:Start()
     gameDuration = (currentMode == "practice") and 0 or ns.SongData.PlayLength(ns.SongData.Get(db.songKey))
 
     ResetGameState()
+    self:SetScoreBudget()
     self:BlockActionBars()
 
     if BoundToLearn.db.game.soundEnabled then
@@ -482,6 +505,7 @@ function Game:StartCompetitive()
     end
 
     ResetGameState()
+    self:SetScoreBudget()
     self:BlockActionBars()
 
     if BoundToLearn.db.game.soundEnabled then
@@ -776,6 +800,17 @@ function Game:OnUpdate(elapsed)
     end
 end
 
+-- Money-score calibration: a flawless run should land at SCORE_CAP. Spread the cap
+-- across the notes a run will actually judge, estimated from the round length and
+-- the BPM-paced spawn interval. Call once slots and duration are set.
+function Game:SetScoreBudget()
+    local dur = gameDuration > 0 and gameDuration or 90
+    local interval = self:GetSettings().spawnInterval or 1.2
+    local budget = mmax(1, mfloor(dur / interval))
+    self.scoreNoteBudget = budget
+    self.scorePerNote = SCORE_CAP / mmax(1, budget)
+end
+
 -- Deterministic per-song, per-difficulty note pathing. Seeding from the song
 -- key + difficulty means a given chart draws the same lane sequence every play,
 -- so scores are comparable and a run is worth boasting about. Park-Miller keeps
@@ -795,7 +830,7 @@ function Game:ChartRandInt(n)
     return 1 + (self.chartState % n)
 end
 
-function Game:SpawnNote(now, settings)
+function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime)
     local activeCount = 0
     for _, n in ipairs(activeNotes) do
         if not n.evaluated then activeCount = activeCount + 1 end
@@ -803,20 +838,28 @@ function Game:SpawnNote(now, settings)
     if activeCount >= settings.maxActiveNotes then return end
     if #availableSlots == 0 then return end
 
-    local candidates = {}
-    for _, slotInfo in ipairs(availableSlots) do
-        local inUse = false
+    local chosen
+    if forcedSlot then
+        -- Chart note: use its lane. Skip if that lane already holds a live note.
         for _, n in ipairs(activeNotes) do
-            if not n.evaluated and n.slotInfo.slot == slotInfo.slot then
-                inUse = true
-                break
-            end
+            if not n.evaluated and n.slotInfo.slot == forcedSlot.slot then return end
         end
-        if not inUse then tinsert(candidates, slotInfo) end
+        chosen = forcedSlot
+    else
+        local candidates = {}
+        for _, slotInfo in ipairs(availableSlots) do
+            local inUse = false
+            for _, n in ipairs(activeNotes) do
+                if not n.evaluated and n.slotInfo.slot == slotInfo.slot then
+                    inUse = true
+                    break
+                end
+            end
+            if not inUse then tinsert(candidates, slotInfo) end
+        end
+        if #candidates == 0 then return end
+        chosen = candidates[self:ChartRandInt(#candidates)]
     end
-    if #candidates == 0 then return end
-
-    local chosen = candidates[self:ChartRandInt(#candidates)]
     local fallTime = settings.fallDistance / settings.fallSpeed
 
     local mods = ns.Modifiers and ns.Modifiers:GetActive() or {}
@@ -861,7 +904,7 @@ function Game:SpawnNote(now, settings)
     local note = {
         slotInfo = chosen,
         spawnTime = now,
-        targetTime = now + fallTime,
+        targetTime = forcedTargetTime or (now + fallTime),
         evaluated = false,
         evaluatedAt = nil,
         result = nil,
@@ -995,16 +1038,21 @@ function Game:EvaluateNote(note, result)
         end
     end
 
-    local points = SCORE_VALUES[result] * multiplier
+    -- Base money-score: each note is worth its slice of SCORE_CAP, scaled by the
+    -- judgment. The combo multiplier no longer inflates the base (that is what let
+    -- scores run away); combo still drives the streak titles and its own best.
+    local perNote = self.scorePerNote or (SCORE_CAP / 300)
+    local points = mfloor(perNote * (JUDGE_WEIGHT[result] or 0))
 
     -- Bomb hit bonus in competitive
     if note.isBomb and result ~= "miss" then
-        points = points + 150
+        points = points + mfloor(perNote * 0.5)
     end
 
-    -- Variable ratio reinforcement: random bonus on streaks
-    if combo > 0 and combo % math.random(7, 13) == 0 then
-        local bonus = math.random(200, 500)
+    -- Variable ratio reinforcement: an unpredictable sparkle bonus on streaks. Kept
+    -- small and length-independent so a flawless run still lands near SCORE_CAP.
+    if result ~= "miss" and combo > 0 and combo % math.random(7, 13) == 0 then
+        local bonus = mfloor(perNote * 0.5)
         points = points + bonus
         if ns.GameUI then ns.GameUI:ShowBonusText(bonus) end
     end
@@ -1067,11 +1115,12 @@ function Game:EvaluateRedHerring(note)
     hitCounts.redHerring = hitCounts.redHerring + 1
     combo = 0
     multiplier = 1
-    score = score + RED_HERRING_PENALTY
+    local penalty = -mfloor(self.scorePerNote or (SCORE_CAP / 300))
+    score = score + penalty
     if score < 0 then score = 0 end
 
     if ns.GameUI then
-        ns.GameUI:ShowHitResult(note, "redHerring", RED_HERRING_PENALTY)
+        ns.GameUI:ShowHitResult(note, "redHerring", penalty)
         ns.GameUI:UpdateScoreDisplay(score, combo, multiplier)
     end
 

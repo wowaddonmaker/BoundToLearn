@@ -105,11 +105,21 @@ function SongData.PlayLength(song)
     return mmin(full, cut)
 end
 
--- Gameplay tempo derived from the FileDataID: stable per song, spread across a
--- lively range so tracks differ. Not the audio's true BPM; it drives note
--- spacing and the difficulty rating.
+-- Real tempo measured from each track's audio, folded into a felt 80-160 range to
+-- dodge the half/double-time errors tempo detection makes. Drives note spacing and
+-- the difficulty rating. Falls back to a stable id-derived value if unknown.
+SongData.REAL_BPM = {
+    s1=152, s2=83, s3=152, s4=108, s5=108, s6=96, s7=118, s8=118, s9=152, s10=112,
+    s11=152, s12=112, s13=136, s14=129, s15=123, s16=144, s17=136, s18=118, s19=152, s20=152,
+    s21=118, s22=103, s23=136, s24=103, s25=86, s26=103, s27=108, s28=112, s29=96, s30=86,
+    s31=99, s32=136, s33=123, s34=112, s35=108, s36=108, s37=118, s38=108, s39=81, s40=152,
+    s41=129, s42=123, s43=136, s44=129, s45=123, s46=81, s47=89, s48=118, s49=152, s50=89,
+    s51=89, s52=136, s53=129, s54=96, s55=86, s56=81, s57=108, s58=96, s59=152, s60=129,
+    s61=144, s62=86, s63=152, s64=157, s65=118, s66=123, s67=152, s68=92,
+}
 function SongData.BPM(song)
-    return 96 + (song.id % 70)   -- 96..165
+    if not song then return 120 end
+    return SongData.REAL_BPM[song.key] or (96 + (song.id % 70))
 end
 
 -- How finely each difficulty divides the beat, how densely notes fill it, and
@@ -120,6 +130,7 @@ local DIFFICULTY = {
     Hard    = { subdiv = 2, fill = 0.80, jump = 0.12 },
     Extreme = { subdiv = 4, fill = 0.72, jump = 0.22 },
 }
+
 
 function SongData.DifficultyProfile(difficulty)
     return DIFFICULTY[difficulty] or DIFFICULTY.Medium
@@ -172,9 +183,13 @@ local function tierForIndex(n)
     return 1
 end
 
+-- Resolves each song to { img, tier } by matching the track's name against the
+-- Adventure Guide's instances. Forward-declared so XpacBackground can use the
+-- matched instance's real expansion instead of guessing from the song's index.
+local resolveSong
+
 function SongData.XpacBackground(song)
-    local n = tonumber(song.key:match("%d+")) or 1
-    local atlas = SongData.XPAC_BG[tierForIndex(n)]
+    local atlas = SongData.XPAC_BG[resolveSong(song).tier]
     if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
         return atlas
     end
@@ -184,20 +199,23 @@ end
 -- Five-axis "groove" profile (each 0-1) for the radar on the song select, using
 -- terms that fit a keybind rhythm game rather than DDR's. Varies per song and
 -- difficulty so every chart has a distinct shape.
--- Speed: scroll tempo. Density: overall notes. Chords: multi-key hits.
--- Bursts: peak subdivision. Stamina: track length / endurance.
-SongData.RADAR_LABELS = { "Speed", "Density", "Chords", "Bursts", "Stamina" }
+-- Speed: scroll pace. Density: overall notes. Offbeat: syncopation / off-beat
+-- emphasis. Bursts: peak subdivision. Stamina: track length / endurance.
+SongData.RADAR_LABELS = { "Speed", "Density", "Offbeat", "Bursts", "Stamina" }
 
 function SongData.Radar(song, difficulty)
-    local prof = SongData.DifficultyProfile(difficulty)
     local function clampAxis(v) return mmax(0.12, mmin(1, v)) end
-    local speed   = ((SongData.BPM(song) - 96) / 70)
+    -- Per-song shape: Speed and Stamina come from the track's real tempo and
+    -- length; Density, Offbeat and Bursts come from the difficulty profile, so the
+    -- radar differs both between tracks and between difficulties of one track.
+    local prof = SongData.DifficultyProfile(difficulty)
+    local speed   = ((SongData.BPM(song) - 80) / 80)
     local density = (prof.subdiv * prof.fill / 3.2)
-    local chords  = (prof.jump / 0.22)
+    local offbeat = (prof.jump / 0.22)
     local bursts  = (prof.subdiv / 4)
     local stamina = (((song.length or 200) - 120) / 640)
     return {
-        clampAxis(speed), clampAxis(density), clampAxis(chords),
+        clampAxis(speed), clampAxis(density), clampAxis(offbeat),
         clampAxis(bursts), clampAxis(stamina),
     }
 end
@@ -207,12 +225,48 @@ end
 -- load the guide, walk every expansion tier's dungeons and raids, and cache the
 -- button images. EJ_SelectTier mutates the guide's current tier, so it is saved
 -- and restored. All returned button images share the same crop as the live grid.
-local instanceImagesByTier
-local INSTANCE_TEXCOORD = { 0, 0.68359, 0, 0.74219 }
+local instanceList          -- flat { {img=, tier=, lname=, words=}, ... } across all tiers
+-- The Adventure Guide art sits in the top-left ~0.684 x 0.742 of its texture (the
+-- rest is padding). The selected bubble is wide and short (~4.3:1), so instead of
+-- squishing the whole tall chunk into it, sample a matching-aspect horizontal band
+-- from the middle of the art: full art width, a thin strip centred vertically.
+local INSTANCE_TEXCOORD = { 0, 0.68359, 0.29, 0.45 }
+
+-- Words too generic to tie a song to a specific instance on their own (they
+-- recur across many instance names), plus common song-title noise. A match must
+-- rest on a distinctive proper noun, not "Halls"/"Citadel"/"Intro".
+local NAME_STOP = {
+    ["the"] = true, ["of"] = true, ["and"] = true, ["for"] = true, ["a"] = true,
+    ["an"] = true, ["to"] = true, ["in"] = true, ["on"] = true,
+    mount = true, upper = true, lower = true, halls = true, hall = true,
+    temple = true, citadel = true, keep = true, castle = true, fortress = true,
+    palace = true, throne = true, vault = true, sanctum = true, chamber = true,
+    chambers = true, caverns = true, cavern = true, depths = true, deeps = true,
+    grounds = true, ground = true, spire = true, spires = true, peak = true,
+    peaks = true, isle = true, ruins = true, tomb = true, crypt = true, pit = true,
+    gate = true, gates = true, well = true, city = true, trial = true,
+    assault = true, battle = true, siege = true, ["return"] = true, crucible = true,
+    sanctuary = true, terrace = true, court = true, garden = true, gardens = true,
+    seat = true, hold = true, cove = true, den = true, lair = true, nest = true,
+    -- song-title noise
+    intro = true, hero = true, theme = true, part = true, main = true, title = true,
+    saga = true, remix = true, walk = true, day = true, night = true, ambient = true,
+    flyby = true, summit = true, crossing = true, ascent = true, descent = true,
+}
+
+-- Distinctive lowercase words (>= 4 chars) from a name, as a set.
+local function buildWordSet(str)
+    local out = {}
+    for w in str:gmatch("%a+") do
+        w = w:lower()
+        if #w >= 4 and not NAME_STOP[w] then out[w] = true end
+    end
+    return out
+end
 
 local function buildInstanceImages()
-    if instanceImagesByTier then return end
-    instanceImagesByTier = {}
+    if instanceList then return end
+    instanceList = {}
     if C_AddOns and C_AddOns.LoadAddOn then
         C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
     end
@@ -220,35 +274,123 @@ local function buildInstanceImages()
     local prevTier = EJ_GetCurrentTier and EJ_GetCurrentTier() or 1
     for tier = 1, EJ_GetNumTiers() do
         EJ_SelectTier(tier)
-        local list = {}
         for r = 1, 2 do
             local isRaid = (r == 2)
             local i = 1
             while true do
-                local instanceID, _, _, _, buttonImage1, buttonImage2 = EJ_GetInstanceByIndex(i, isRaid)
+                local instanceID, name, _, _, buttonImage1, buttonImage2 = EJ_GetInstanceByIndex(i, isRaid)
                 if not instanceID then break end
                 local img = buttonImage1 or buttonImage2
-                if img then list[#list + 1] = img end
+                if img and name then
+                    instanceList[#instanceList + 1] = {
+                        img = img, tier = tier,
+                        lname = name:lower(), words = buildWordSet(name),
+                    }
+                end
                 i = i + 1
             end
         end
-        instanceImagesByTier[tier] = list
     end
     EJ_SelectTier(prevTier)
 end
 
--- Returns (fileID, texcoords) for the selected song bubble, or nil if the guide
--- data is unavailable. Deterministic per song, themed to the song's expansion.
-function SongData.InstanceImage(song)
-    buildInstanceImages()
-    if not instanceImagesByTier then return nil end
-    local n = tonumber(song.key:match("%d+")) or 1
-    local list = instanceImagesByTier[tierForIndex(n)]
-    if not list or #list == 0 then
-        for _, l in pairs(instanceImagesByTier) do
-            if #l > 0 then list = l break end
+-- Score the song title against every instance name and return (img, tier) of the
+-- best match, or nil. A full-name hit ("Black Temple Summit" -> Black Temple)
+-- dominates; otherwise distinctive shared words add up ("Sunwell Flyby" ->
+-- Sunwell Plateau via "sunwell", "Fall of Ulduar" -> Ulduar). Generic words are
+-- filtered by NAME_STOP so "Halls"/"Citadel" alone never decide a match.
+local function matchInstance(title)
+    if not instanceList then return nil end
+    local titleWords = buildWordSet(title)
+    local bestImg, bestTier, bestScore = nil, nil, 0
+    for _, inst in ipairs(instanceList) do
+        local score = 0
+        if #inst.lname >= 5 and title:find(inst.lname, 1, true) then
+            score = #inst.lname * 3
+        end
+        for w in pairs(inst.words) do
+            if titleWords[w] then score = score + #w end
+        end
+        if score > bestScore then
+            bestScore, bestImg, bestTier = score, inst.img, inst.tier
         end
     end
-    if not list or #list == 0 then return nil end
-    return list[((n - 1) % #list) + 1], INSTANCE_TEXCOORD
+    if bestScore >= 5 then return bestImg, bestTier end
+    return nil
+end
+
+-- Iconic raid per expansion tier, used as the backdrop for tracks not named
+-- after a specific instance (character themes, zone music, expansion titles).
+-- Matched by a distinctive, apostrophe-free substring so the right button art is
+-- found regardless of the Adventure Guide's ordering.
+local TIER_FLAGSHIP = {
+    [1]  = "molten core",
+    [2]  = "black temple",
+    [3]  = "icecrown",
+    [4]  = "dragon soul",
+    [5]  = "siege of org",
+    [6]  = "hellfire cit",
+    [7]  = "antorus",
+    [8]  = "alotha",       -- Ny'alotha, the Waking City
+    [9]  = "sepulcher",    -- Sepulcher of the First Ones
+    [10] = "amirdrassil",
+}
+
+local flagshipCache = {}
+local function flagshipImage(tier)
+    local cached = flagshipCache[tier]
+    if cached ~= nil then return cached or nil end
+    local key = TIER_FLAGSHIP[tier]
+    local img = false
+    if key and instanceList then
+        for _, inst in ipairs(instanceList) do
+            if inst.lname:find(key, 1, true) then
+                img = inst.img
+                break
+            end
+        end
+    end
+    flagshipCache[tier] = img
+    return img or nil
+end
+
+local songResolveCache = {}
+resolveSong = function(song)
+    local cached = songResolveCache[song.key]
+    if cached then return cached end
+    buildInstanceImages()
+    local img, tier = matchInstance(song.title:lower())
+    if not tier then
+        tier = tierForIndex(tonumber(song.key:match("%d+")) or 1)
+    end
+    -- No name match: fall back to the era's flagship raid so the bubble still
+    -- shows fitting art instead of the neutral silver look.
+    if not img then
+        img = flagshipImage(tier)
+    end
+    cached = { img = img, tier = tier }
+    songResolveCache[song.key] = cached
+    return cached
+end
+
+-- Returns (fileID, texcoords) for the selected song bubble, or nil when the
+-- track is not named after any Adventure Guide instance (the bubble then keeps
+-- the neutral silver look rather than showing an unrelated instance).
+function SongData.InstanceImage(song)
+    local r = resolveSong(song)
+    if r.img then return r.img, INSTANCE_TEXCOORD end
+    return nil
+end
+
+-- A representative music file for an expansion tier: the first track that
+-- resolves to that tier. Lets the Ping Trainer play era-appropriate music for
+-- the chosen expansion backdrop without a second hand-maintained ID list.
+function SongData.TierMusic(tier)
+    for i = 1, #SongData.songs do
+        local song = SongData.songs[i]
+        if resolveSong(song).tier == tier then
+            return song.id
+        end
+    end
+    return nil
 end

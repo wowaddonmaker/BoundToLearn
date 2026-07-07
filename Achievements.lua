@@ -12,13 +12,16 @@ local mfloor   = Utils.mfloor
 
 -- Rank thresholds (per-difficulty, based on best score)
 local RANKS = {
+    -- Thresholds are on the normalized money-score (best per-difficulty run, capped
+    -- at 100k for a flawless run). They read as weighted-accuracy tiers: Bronze ~35%,
+    -- Mythic ~95%. Keep in sync with SCORE_CAP in Game.lua.
     { name = "Unranked",  threshold = 0,     color = "888888", rgb = {0.53, 0.53, 0.53} },
-    { name = "Bronze",    threshold = 1000,  color = "CD7F32", rgb = {0.80, 0.50, 0.20} },
-    { name = "Silver",    threshold = 3000,  color = "C0C0C0", rgb = {0.75, 0.75, 0.75} },
-    { name = "Gold",      threshold = 6000,  color = "FFD700", rgb = {1.00, 0.84, 0.00} },
-    { name = "Platinum",  threshold = 10000, color = "E5E4E2", rgb = {0.90, 0.89, 0.89} },
-    { name = "Diamond",   threshold = 15000, color = "55CCFF", rgb = {0.33, 0.80, 1.00} },
-    { name = "Mythic",    threshold = 25000, color = "FF55FF", rgb = {1.00, 0.33, 1.00} },
+    { name = "Bronze",    threshold = 35000, color = "CD7F32", rgb = {0.80, 0.50, 0.20} },
+    { name = "Silver",    threshold = 52000, color = "C0C0C0", rgb = {0.75, 0.75, 0.75} },
+    { name = "Gold",      threshold = 66000, color = "FFD700", rgb = {1.00, 0.84, 0.00} },
+    { name = "Platinum",  threshold = 78000, color = "E5E4E2", rgb = {0.90, 0.89, 0.89} },
+    { name = "Diamond",   threshold = 88000, color = "55CCFF", rgb = {0.33, 0.80, 1.00} },
+    { name = "Mythic",    threshold = 95000, color = "FF55FF", rgb = {1.00, 0.33, 1.00} },
 }
 Achievements.RANKS = RANKS
 
