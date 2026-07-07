@@ -1004,8 +1004,7 @@ function GameUI:CreateSongSelect()
     f:Hide()
 
     -- Per-expansion Adventure Guide backdrop for the whole menu, chosen by the
-    -- selected track's era. This is the ONLY background layer (StylePanel no
-    -- longer stamps the generic stone), so nothing is stacked behind it.
+    -- selected track's era, laid over StylePanel's dark rounded fill.
     local xbg = f:CreateTexture(nil, "ARTWORK")
     xbg:SetPoint("TOPLEFT", 7, -7)
     xbg:SetPoint("BOTTOMRIGHT", -7, 7)
@@ -1022,10 +1021,19 @@ function GameUI:CreateSongSelect()
     closeBtn:SetSize(16, 16)
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
 
+    local statsBtn = MakeBubbleButton(f, "Stats", 62, 22)
+    statsBtn:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    statsBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:ToggleStatsPanel()
+    end)
+    f.statsBtn = statsBtn
+
     -- Right column: a 3D-style song wheel. Fixed slots the tracks roll through
     -- with a sliding animation; the selected track is the large centre slot and
-    -- neighbours shrink and run off the clipped right edge above/below.
-    f:SetClipsChildren(true)
+    -- neighbours shrink and run off the clipped right edge above/below. The wheel's
+    -- own wheelClip clips the bubbles; f itself must not clip, or it would cut off
+    -- the tooltip-border child that sits just outside the panel edge.
     f:EnableMouseWheel(true)
     f:SetScript("OnMouseWheel", function(_, delta) GameUI:CycleSong(-delta) end)
     f:SetScript("OnUpdate", function(self, elapsed)
@@ -1061,6 +1069,31 @@ function GameUI:CreateSongSelect()
     ph:SetText("Search tracks...")
     search.placeholder = ph
 
+    -- Clear (x) button: just an x until hovered, then a button shape appears
+    -- behind it. Only shown when there is text.
+    local clearBtn = CreateFrame("Button", nil, search)
+    clearBtn:SetSize(16, 16)
+    clearBtn:SetPoint("RIGHT", -6, 0)
+    local clearShape = clearBtn:CreateTexture(nil, "BACKGROUND")
+    clearShape:SetPoint("CENTER")
+    clearShape:SetSize(22, 20)
+    clearShape:SetAtlas("UI-Journeys-Renown-Button")
+    clearShape:SetDesaturated(true)
+    clearShape:SetVertexColor(0.85, 0.88, 0.95)
+    clearShape:Hide()
+    local clearIcon = clearBtn:CreateTexture(nil, "OVERLAY")
+    clearIcon:SetAllPoints()
+    clearIcon:SetAtlas("common-search-clearbutton")
+    clearBtn:HookScript("OnEnter", function() clearShape:Show() end)
+    clearBtn:HookScript("OnLeave", function() clearShape:Hide() end)
+    clearBtn:SetScript("OnClick", function()
+        search:SetText("")
+        search:ClearFocus()
+        search.placeholder:Show()
+    end)
+    clearBtn:Hide()
+    search.clearBtn = clearBtn
+
     search:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
     search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     search:SetScript("OnEditFocusGained", function(self) self.placeholder:Hide() end)
@@ -1068,7 +1101,9 @@ function GameUI:CreateSongSelect()
         if self:GetText() == "" then self.placeholder:Show() end
     end)
     search:SetScript("OnTextChanged", function(self, userInput)
-        self.placeholder:SetShown(self:GetText() == "")
+        local has = self:GetText() ~= ""
+        self.placeholder:SetShown(not has)
+        self.clearBtn:SetShown(has)
         if userInput then GameUI:ApplySongSearch(self:GetText()) end
     end)
     f.searchBox = search
@@ -1082,6 +1117,16 @@ function GameUI:CreateSongSelect()
         local slot = CreateFrame("Button", nil, wheelClip)
         slot:EnableMouseWheel(true)
         slot:SetScript("OnMouseWheel", function(_, delta) GameUI:CycleSong(-delta) end)
+
+        -- Solid backing behind the bubble art. The wheel bubbles are distance-faded
+        -- (translucent), so without this the busy backdrop shows through them and
+        -- looks like it is slicing the bubble. Inset slightly to stay inside the
+        -- button's rounded frame. Fades with the slot like everything else.
+        local backing = slot:CreateTexture(nil, "BACKGROUND")
+        backing:SetPoint("TOPLEFT", 2, -2)
+        backing:SetPoint("BOTTOMRIGHT", -2, 2)
+        backing:SetColorTexture(0.06, 0.055, 0.05, 1)
+        slot.backing = backing
 
         local bg = slot:CreateTexture(nil, "ARTWORK")
         bg:SetAllPoints()
@@ -1135,13 +1180,22 @@ function GameUI:CreateSongSelect()
         local drow = CreateFrame("Button", nil, f)
         drow:SetSize(270, 22)
         drow:SetPoint("TOPLEFT", 16, dyTop - (i - 1) * 26)
-        Theme.Round(drow)
-        Theme.SetBarHeight(drow, 12)
-        Theme.SetBorderShown(drow, false)
         drow.diffName = name
 
+        -- Same silver renown texture as the song bubbles and action buttons.
+        local dbg = drow:CreateTexture(nil, "BACKGROUND")
+        dbg:SetAllPoints()
+        dbg:SetAtlas("UI-Journeys-Renown-Button")
+        dbg:SetDesaturated(true)
+        drow.dbg = dbg
+        local dhl = drow:CreateTexture(nil, "HIGHLIGHT")
+        dhl:SetAllPoints()
+        dhl:SetAtlas("UI-Journeys-Renown-Button")
+        dhl:SetBlendMode("ADD")
+        dhl:SetAlpha(0.18)
+
         local dl = drow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        dl:SetPoint("LEFT", 10, 0)
+        dl:SetPoint("LEFT", 16, 0)
         dl:SetText(name)
         drow.label = dl
 
@@ -1149,7 +1203,7 @@ function GameUI:CreateSongSelect()
         local SEGN, SEGW, SEGGAP = 10, 12, 2
         for s = 1, SEGN do
             local cap = MakeKeycap(drow, SEGW, 16)
-            cap:SetPoint("RIGHT", drow, "RIGHT", -8 - (SEGN - s) * (SEGW + SEGGAP), 0)
+            cap:SetPoint("RIGHT", drow, "RIGHT", -16 - (SEGN - s) * (SEGW + SEGGAP), 0)
             segs[s] = cap
         end
         f.diffSegs[i] = segs
@@ -1203,6 +1257,10 @@ function GameUI:CreateSongSelect()
     end
     self:CreateResultsPanel(f)
 
+    -- ESC closes the menu (and stops the preview music when it hides).
+    tinsert(UISpecialFrames, "BoundToLearnSongSelect")
+    f:HookScript("OnHide", function() StopMusic() end)
+
     songSelect = f
     self:RefreshSongSelect()
 end
@@ -1218,19 +1276,21 @@ local RESULT_JUDGMENTS = {
 }
 
 function GameUI:CreateResultsPanel(f)
+    -- Full-width, centered results: title/score/graph stacked in the middle, the
+    -- played track's art below the stats, and the buttons centered under it.
     local rp = CreateFrame("Frame", nil, f)
-    rp:SetPoint("TOPLEFT", 16, -66)
-    rp:SetPoint("BOTTOMLEFT", 16, 14)
-    rp:SetWidth(252)
+    rp:SetPoint("TOPLEFT", 16, -14)
+    rp:SetPoint("BOTTOMRIGHT", -16, 14)
+    rp:SetFrameLevel(f:GetFrameLevel() + 20)
     rp:Hide()
 
     rp.title = rp:CreateFontString(nil, "OVERLAY")
-    rp.title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
-    rp.title:SetPoint("TOP", 0, -2)
+    rp.title:SetFont("Fonts\\FRIZQT__.TTF", 22, "OUTLINE")
+    rp.title:SetPoint("TOP", 0, -8)
 
     rp.scoreFS = rp:CreateFontString(nil, "OVERLAY")
-    rp.scoreFS:SetFont("Fonts\\FRIZQT__.TTF", 34, "OUTLINE")
-    rp.scoreFS:SetPoint("TOP", 0, -30)
+    rp.scoreFS:SetFont("Fonts\\FRIZQT__.TTF", 40, "OUTLINE")
+    rp.scoreFS:SetPoint("TOP", 0, -54)
     rp.scoreFS:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     rp.scoreLabel = rp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1240,46 +1300,76 @@ function GameUI:CreateResultsPanel(f)
     rp.statFS = rp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rp.statFS:SetPoint("TOP", rp.scoreLabel, "BOTTOM", 0, -10)
 
+    -- Judgment bar graph in a fixed-width container so the whole group centers.
+    local BAR_W, ROWH = 150, 22
+    local graph = CreateFrame("Frame", nil, rp)
+    graph:SetSize(240, #RESULT_JUDGMENTS * ROWH)
+    graph:SetPoint("TOP", rp.statFS, "BOTTOM", 0, -14)
+    rp.graph = graph
+
     rp.bars = {}
-    local BAR_W, ROWH, gTop = 150, 22, -132
     for i, j in ipairs(RESULT_JUDGMENTS) do
-        local y = gTop - (i - 1) * ROWH
-        local lbl = rp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOPLEFT", 4, y)
+        local y = -(i - 1) * ROWH
+        local lbl = graph:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", 0, y)
         lbl:SetWidth(50)
         lbl:SetJustifyH("LEFT")
         lbl:SetText(j.label)
         lbl:SetTextColor(j.r, j.g, j.b)
 
-        local track = rp:CreateTexture(nil, "ARTWORK")
-        track:SetPoint("TOPLEFT", 56, y - 1)
+        local track = graph:CreateTexture(nil, "ARTWORK")
+        track:SetPoint("TOPLEFT", 52, y - 1)
         track:SetSize(BAR_W, 12)
         track:SetColorTexture(1, 1, 1, 0.08)
 
-        local fill = rp:CreateTexture(nil, "OVERLAY")
-        fill:SetPoint("TOPLEFT", 56, y - 1)
+        local fill = graph:CreateTexture(nil, "OVERLAY")
+        fill:SetPoint("TOPLEFT", 52, y - 1)
         fill:SetSize(1, 12)
         fill:SetColorTexture(j.r, j.g, j.b, 0.9)
 
-        local cnt = rp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        local cnt = graph:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         cnt:SetPoint("LEFT", track, "RIGHT", 6, 0)
         cnt:SetText("0")
 
         rp.bars[i] = { spec = j, label = lbl, track = track, fill = fill, count = cnt, w = BAR_W }
     end
 
-    rp.shareBtn = MakeBubbleButton(rp, "Share", 120, 24)
-    rp.shareBtn:SetPoint("BOTTOMLEFT", 0, 4)
-    rp.shareBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        GameUI:ToggleShareMenu(rp.shareBtn)
-    end)
+    -- Played track's art, sitting between the stats and the buttons.
+    rp.songImage = rp:CreateTexture(nil, "ARTWORK")
+    rp.songImage:SetPoint("TOP", graph, "BOTTOM", 0, -16)
+    rp.songImage:SetSize(300, 68)
+    rp.songTitle = rp:CreateFontString(nil, "OVERLAY")
+    rp.songTitle:SetFont("Fonts\\FRIZQT__.TTF", 17, "OUTLINE")
+    rp.songTitle:SetPoint("CENTER", rp.songImage, "CENTER", 0, 0)
+    rp.songTitle:SetTextColor(1, 1, 1)
 
-    rp.backBtn = MakeBubbleButton(rp, "Back to Songs", 120, 24)
-    rp.backBtn:SetPoint("BOTTOMRIGHT", 0, 4)
+    -- Back to Tracks sits top-left like a return button (with a left arrow); Try
+    -- Again and Share are the primary actions, centered as a pair along the bottom.
+    rp.backBtn = MakeBubbleButton(rp, "|TInterface\\Buttons\\UI-SpellbookIcon-PrevPage-Up:14:14|t Back to Tracks", 150, 24)
+    rp.backBtn:SetPoint("TOPLEFT", 2, -4)
     rp.backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ExitResultsMode()
+    end)
+
+    rp.retryBtn = MakeBubbleButton(rp, "Try Again", 128, 26)
+    rp.retryBtn:SetPoint("BOTTOM", -70, 8)
+    rp.retryBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        local r = GameUI.lastResults
+        if r then
+            if r.difficulty then BoundToLearn.db.game.difficulty = r.difficulty end
+            if r.mode then BoundToLearn.db.game.mode = r.mode end
+        end
+        GameUI:ExitResultsMode()
+        GameUI:StartFromSongSelect()
+    end)
+
+    rp.shareBtn = MakeBubbleButton(rp, "Share", 128, 26)
+    rp.shareBtn:SetPoint("BOTTOM", 70, 8)
+    rp.shareBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:ToggleShareMenu(rp.shareBtn)
     end)
 
     f.resultsPanel = rp
@@ -1287,6 +1377,8 @@ end
 
 function GameUI:ShowResultsOnSelect(results)
     if not songSelect then self:CreateSongSelect() end
+    songSelect.statsMode = false
+    if songSelect.statsPanel then songSelect.statsPanel:Hide() end
     self.lastResults = results
     local hc = results.hitCounts or {}
 
@@ -1310,6 +1402,7 @@ function GameUI:ShowResultsOnSelect(results)
     songSelect.resultsMode = true
     for _, control in ipairs(songSelect.leftControls) do control:Hide() end
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
+    if songSelect.statsBtn then songSelect.statsBtn:Hide() end
 
     local rp = songSelect.resultsPanel
     local totalNotes = results.totalNotes or 0
@@ -1346,6 +1439,18 @@ function GameUI:ShowResultsOnSelect(results)
         end
     end
 
+    local song = songs[songSelect.selIndex]
+    local img, tc = ns.SongData.InstanceImage(song)
+    if img then
+        rp.songImage:SetTexture(img)
+        if tc then rp.songImage:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) end
+        rp.songImage:SetVertexColor(1, 1, 1, 1)
+    else
+        rp.songImage:SetTexture(nil)
+        rp.songImage:SetColorTexture(0.10, 0.09, 0.08, 0.9)
+    end
+    rp.songTitle:SetText(song and song.title or "")
+
     rp:Show()
     songSelect:Show()
     self:RefreshSongSelect()
@@ -1366,11 +1471,148 @@ function GameUI:ExitResultsMode()
     self:HideLevelUpEffect()
     for _, control in ipairs(songSelect.leftControls) do control:Show() end
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
+    if songSelect.statsBtn then songSelect.statsBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
     end
     self:RefreshSongSelect()
+end
+
+-- Game stats overlay, reached from the Stats button on the select screen. Covers
+-- the carousel with aggregate lifetime numbers; Back returns to track selection.
+function GameUI:CreateStatsPanel(f)
+    local sp = CreateFrame("Frame", nil, f)
+    sp:SetPoint("TOPLEFT", 12, -12)
+    sp:SetPoint("BOTTOMRIGHT", -12, 12)
+    sp:SetFrameLevel(f:GetFrameLevel() + 25)
+    sp:Hide()
+
+    -- A page on the same window (like the round-over), not a separate box: no
+    -- backing, so the track's expansion backdrop shows through. Back returns to
+    -- the carousel.
+    local backBtn = MakeBubbleButton(sp, "Back", 66, 22)
+    backBtn:SetPoint("TOPLEFT", 2, -4)
+    backBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:HideStatsPage()
+    end)
+
+    local title = sp:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
+    title:SetPoint("TOP", 0, -8)
+    title:SetText("Your Stats")
+    title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
+
+    sp.values = {}
+    local function stat(offsetX, y, key, label, big)
+        local val = sp:CreateFontString(nil, "OVERLAY")
+        val:SetFont("Fonts\\FRIZQT__.TTF", big and 28 or 19, "OUTLINE")
+        val:SetPoint("TOP", sp, "TOP", offsetX, y)
+        val:SetTextColor(1, 1, 1)
+        local lbl = sp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOP", val, "BOTTOM", 0, -2)
+        lbl:SetText(label)
+        lbl:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
+        sp.values[key] = val
+    end
+    local function header(y, text)
+        local h = sp:CreateFontString(nil, "OVERLAY")
+        h:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        h:SetPoint("TOP", 0, y)
+        h:SetText(text)
+        h:SetTextColor(1, 0.82, 0)
+        local line = sp:CreateTexture(nil, "ARTWORK")
+        line:SetPoint("TOP", h, "BOTTOM", 0, -3)
+        line:SetSize(360, 1)
+        line:SetColorTexture(1, 1, 1, 0.12)
+    end
+
+    stat(-175, -54, "completed", "Tracks Completed", true)
+    stat(0,    -54, "accuracy",  "Lifetime Accuracy", true)
+    stat(175,  -54, "hits",      "Notes Hit", true)
+
+    header(-118, "Personal Bests")
+    stat(-175, -142, "highscore", "High Score", false)
+    stat(0,    -142, "combo",     "Longest Combo", false)
+    stat(175,  -142, "bestacc",   "Best Accuracy", false)
+
+    header(-206, "Best Score by Difficulty")
+    stat(-198, -230, "Easy",    "Easy", false)
+    stat(-66,  -230, "Medium",  "Medium", false)
+    stat(66,   -230, "Hard",    "Hard", false)
+    stat(198,  -230, "Extreme", "Extreme", false)
+
+    f.statsPanel = sp
+end
+
+function GameUI:RefreshStatsPanel()
+    if not (songSelect and songSelect.statsPanel) then return end
+    local sp = songSelect.statsPanel
+    local stats = BoundToLearn.db.stats
+    local g = BoundToLearn.db.game
+    local songs = ns.SongData.songs
+    local total = #songs
+
+    local completed = 0
+    local prog = g.songProgress or {}
+    for i = 1, total do
+        if (prog[songs[i].key] or 0) >= 0.99 then completed = completed + 1 end
+    end
+
+    local acc = (stats.lifetimeGameNotes or 0) > 0
+        and (stats.lifetimeGameHits / stats.lifetimeGameNotes * 100) or 0
+    local pb = stats.personalBest or {}
+
+    sp.values.completed:SetText(sformat("%d|cFF888888 / %d|r", completed, total))
+    sp.values.accuracy:SetText(sformat("%.0f%%", acc))
+    sp.values.hits:SetText(sformat("%d", stats.lifetimeGameHits or 0))
+    sp.values.highscore:SetText(sformat("%d", pb.highestScore or 0))
+    sp.values.combo:SetText(sformat("%d", pb.longestCombo or 0))
+    sp.values.bestacc:SetText(sformat("%.1f%%", pb.bestAccuracy or 0))
+
+    local dbest = stats.difficultyBest or {}
+    sp.values.Easy:SetText(sformat("%d", (dbest.Easy and dbest.Easy.highestScore) or 0))
+    sp.values.Medium:SetText(sformat("%d", (dbest.Medium and dbest.Medium.highestScore) or 0))
+    sp.values.Hard:SetText(sformat("%d", (dbest.Hard and dbest.Hard.highestScore) or 0))
+    sp.values.Extreme:SetText(sformat("%d", (dbest.Extreme and dbest.Extreme.highestScore) or 0))
+end
+
+function GameUI:ShowStatsPage()
+    if not songSelect then self:CreateSongSelect() end
+    if not songSelect.statsPanel then self:CreateStatsPanel(songSelect) end
+    if songSelect.resultsMode then self:ExitResultsMode() end
+    songSelect.statsMode = true
+    for _, control in ipairs(songSelect.leftControls) do control:Hide() end
+    if songSelect.mainTitle then songSelect.mainTitle:Hide() end
+    if songSelect.statsBtn then songSelect.statsBtn:Hide() end
+    if songSelect.searchBox then
+        songSelect.searchBox:SetText("")
+        songSelect.searchBox:Hide()
+        if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Hide() end
+    end
+    self:RefreshStatsPanel()
+    songSelect.statsPanel:Show()
+    self:RefreshSongSelect()
+end
+
+function GameUI:HideStatsPage()
+    if not songSelect then return end
+    songSelect.statsMode = false
+    if songSelect.statsPanel then songSelect.statsPanel:Hide() end
+    for _, control in ipairs(songSelect.leftControls) do control:Show() end
+    if songSelect.mainTitle then songSelect.mainTitle:Show() end
+    if songSelect.statsBtn then songSelect.statsBtn:Show() end
+    if songSelect.searchBox then
+        songSelect.searchBox:Show()
+        if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
+    end
+    self:RefreshSongSelect()
+end
+
+function GameUI:ToggleStatsPanel()
+    if not songSelect then return end
+    if songSelect.statsMode then self:HideStatsPage() else self:ShowStatsPage() end
 end
 
 -- The carousel always walks the full track list; search scrolls it to a match
@@ -1414,7 +1656,10 @@ end
 
 function GameUI:CycleSong(step)
     if not songSelect or not step or step == 0 then return end
-    if songSelect.resultsMode then self:ExitResultsMode() end
+    -- Keep the round-over up until the player explicitly picks a button. Scrolling
+    -- used to drop straight back to track selection, which read like a timeout.
+    if songSelect.resultsMode then return end
+    if songSelect.searchBox then songSelect.searchBox:ClearFocus() end
     local songs = self:GetWheelSongs()
     local n = #songs
     if n == 0 then return end
@@ -1425,6 +1670,10 @@ function GameUI:CycleSong(step)
     self:RefreshSongSelect()
     self:PlaySongPreview()
 end
+
+-- Pixels over which a wheel bubble fades to zero as its far edge reaches the
+-- viewport boundary. Guarantees a bubble is invisible by the time it clips.
+local WHEEL_EDGE_FADE = 16
 
 -- Positions/tilts/colours every wheel slot from the current selection plus the
 -- live animation offset. Called each animation frame and on any change.
@@ -1458,13 +1707,18 @@ function GameUI:PositionWheel()
         slot.durFS:SetTextColor(Theme.RGB(Theme.C.TEXT_PRIMARY, mmax(0.4, 0.85 - ae * 0.12)))
         local dsz = mmax(13, mfloor(h * 0.55))
         slot.donut:SetSize(dsz, dsz)
-        -- Selected bubble shows its themed dungeon/raid art; the rest are the
-        -- renown atlas desaturated to silver so they read on any backdrop.
+        -- Reset texcoords before choosing art. SetAtlas does NOT clear a prior
+        -- SetTexCoord, so a slot that just showed the cropped instance image keeps
+        -- that crop on its atlas: the neighbour-of-selection distortion that appears
+        -- only on the side songs scroll toward and sticks until reload. Selected
+        -- bubble shows its themed dungeon/raid art; the rest are the renown atlas
+        -- desaturated to silver so they read on any backdrop.
+        slot.bg:SetTexCoord(0, 1, 0, 1)
         if ae < 0.5 then
             local img, tc = ns.SongData.InstanceImage(sg)
             if img then
                 slot.bg:SetTexture(img)
-                if tc then slot.bg:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) end
+                slot.bg:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
             else
                 slot.bg:SetAtlas("UI-Journeys-Renown-Button-pressed")
             end
@@ -1488,7 +1742,9 @@ function GameUI:PositionWheel()
             slot.donutKey = slot.songKey
             SetDonut(slot.donut, SongBestProgress(sg.key), ar, ag, ab)
         end
-        slot:SetAlpha(mmax(0.28, 1 - ae * 0.09))
+        -- Depth fade by distance; the final clip-aware alpha is applied in the
+        -- positioning pass below, once each slot's on-screen position is known.
+        slot._depthAlpha = 1 - mmin(ae, 4) * 0.06
         slot:SetFrameLevel(baseLevel + mmax(0, mfloor((center - ae) * 2)))
     end
 
@@ -1511,15 +1767,63 @@ function GameUI:PositionWheel()
             break
         end
     end
+    -- Apply position, then a clip-aware alpha. A slot fades as it crosses the
+    -- viewport edge and is hidden once mostly clipped, so scrolling never leaves a
+    -- hard-cut sliver at the top or bottom (the bug that only appeared in motion).
+    -- The right offset is constant so every bubble's right edge lines up.
+    local viewHalf = songSelect.wheelClip:GetHeight() * 0.5
     for s, slot in ipairs(slots) do
-        -- Constant right offset for every slot so their right edges (and the
-        -- bottom-right duration) line up instead of fanning per position.
         slot:ClearAllPoints()
         slot:SetPoint("RIGHT", songSelect.wheelClip, "RIGHT", 14, yc[s] - y0)
-        -- Round-over shows only the played track, not the whole carousel.
-        slot:SetShown(not songSelect.resultsMode or s == center)
+        if songSelect.resultsMode or songSelect.statsMode then
+            slot:Hide()
+        elseif viewHalf < 1 then
+            slot:SetAlpha(slot._depthAlpha or 1)
+            slot:Show()
+        else
+            -- Fade a bubble out as its FAR edge nears the viewport boundary, so it
+            -- reaches zero before the clip cuts it. Keying off the outer edge (not
+            -- the amount already clipped) means no partial-clipped sliver is ever
+            -- left visible, in motion or at rest.
+            local pos = yc[s] - y0
+            local dist = pos < 0 and -pos or pos
+            local outerEdge = dist + slot._h * 0.5
+            local edgeFade = (viewHalf - outerEdge) / WHEEL_EDGE_FADE
+            if edgeFade < 0 then edgeFade = 0 elseif edgeFade > 1 then edgeFade = 1 end
+            local a = (slot._depthAlpha or 1) * edgeFade
+            slot:SetAlpha(a)
+            slot:SetShown(a > 0.02)
+        end
     end
     songSelect.donutDirty = false
+end
+
+-- Diagnostic: dump each bubble's real rendered bounds against the clip region so a
+-- persisting "crop" can be pinned to an actual clipped slot (or ruled out). Run
+-- /btl wheeldbg after scrolling and stopping. overTop/overBot > 0 on a shown slot
+-- means that slot is being hard-clipped at the top/bottom edge.
+function GameUI:DumpWheel()
+    if not songSelect then BoundToLearn:Print("wheeldbg: song select not open"); return end
+    local wc = songSelect.wheelClip
+    local ct, cb = wc:GetTop(), wc:GetBottom()
+    local clips = wc.DoesClipChildren and wc:DoesClipChildren()
+    BoundToLearn:Print(sformat("wheelClip h=%.0f top=%.0f bot=%.0f clips=%s animOff=%.3f results=%s stats=%s",
+        wc:GetHeight(), ct or -1, cb or -1, tostring(clips), songSelect.animOffset or 0,
+        tostring(songSelect.resultsMode), tostring(songSelect.statsMode)))
+    local cl, cr = wc:GetLeft(), wc:GetRight()
+    for s, slot in ipairs(songSelect.slots) do
+        local st, sb = slot:GetTop(), slot:GetBottom()
+        local sl, sr = slot:GetLeft(), slot:GetRight()
+        local overTop = (st and ct) and (st - ct) or 0
+        local overBot = (sb and cb) and (cb - sb) or 0
+        local overL = (sl and cl) and (cl - sl) or 0   -- >0: slot spills past clip LEFT
+        local overR = (sr and cr) and (sr - cr) or 0   -- >0: slot spills past clip RIGHT
+        local x1, _, _, y2 = slot.bg:GetTexCoord()      -- L, _, _, B; stale != 0/1
+        local x2 = select(5, slot.bg:GetTexCoord())     -- R
+        BoundToLearn:Print(sformat("  s%d %-11s e=%.2f w=%.0f h=%.0f a=%.2f shown=%s oT=%.0f oB=%.0f oL=%.0f oR=%.0f tc=%.2f,%.2f,%.2f",
+            s, tostring(slot.songKey), slot._e or 0, slot:GetWidth() or 0, slot._h or 0, slot:GetAlpha(),
+            tostring(slot:IsShown()), overTop, overBot, overL, overR, x1 or 0, x2 or 0, y2 or 0))
+    end
 end
 
 function GameUI:RefreshSongSelect()
@@ -1547,11 +1851,12 @@ function GameUI:RefreshSongSelect()
         local c = DIFF_COLORS[name]
         local selected = (name == curDiff)
         if selected then
-            Theme.SetFill(drow, c[1] * 0.4, c[2] * 0.4, c[3] * 0.4, 0.85)
-            drow.label:SetTextColor(c[1], c[2], c[3])
+            -- Tint the shared silver texture with the difficulty colour.
+            drow.dbg:SetVertexColor(c[1], c[2], c[3])
+            drow.label:SetTextColor(1, 1, 1)
         else
-            Theme.SetFill(drow, 0.10, 0.09, 0.08, 0.6)
-            drow.label:SetTextColor(c[1] * 0.55, c[2] * 0.55, c[3] * 0.55)
+            drow.dbg:SetVertexColor(0.80, 0.83, 0.88)
+            drow.label:SetTextColor(c[1] * 0.7, c[2] * 0.7, c[3] * 0.7)
         end
         local rating = (ns.SongData and ns.SongData.Rating(song, name)) or 5
         local caps = songSelect.diffSegs[i]
@@ -1591,6 +1896,7 @@ end
 function GameUI:ShowSongSelect()
     if not songSelect then self:CreateSongSelect() end
     if songSelect.resultsMode then self:ExitResultsMode() end
+    if songSelect.statsMode then self:HideStatsPage() end
     self:RefreshSongSelect()
     songSelect:Show()
     self:PlaySongPreview()
@@ -2361,13 +2667,15 @@ function GameUI:ShowCountdown(seconds, onComplete)
         if remaining > 0 then
             countdownText:SetText(tostring(remaining))
             countdownText:SetTextColor(1, 0.84, 0)
-            PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_TIMER)
+            -- SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_TIMER is nil on some clients, which
+            -- silently plays nothing; 3332 (raid-warning ding) is a confirmed fallback.
+            PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_TIMER or 3332)
             remaining = remaining - 1
             C_Timer.After(1, Tick)
         else
             countdownText:SetText("GO!")
             countdownText:SetTextColor(0.2, 1.0, 0.2)
-            PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_FINISHED)
+            PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_FINISHED or 8960)
             if onComplete then onComplete() end
             C_Timer.After(0.5, function()
                 if not countdownCancelFlag then
