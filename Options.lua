@@ -226,9 +226,6 @@ function Options:CreateGeneralPanel()
     AddSection(sections, panel, "General", function(content)
         local y = 0
         y = self:AddThemePicker(content, y)
-        y = self:AddCheckbox(content, "Show Login Message", y,
-            function() return BoundToLearn.db.options.showLoginMessage end,
-            function(v) BoundToLearn.db.options.showLoginMessage = v end)
         y = self:AddCheckbox(content, "Mute Chat Messages", y,
             function() return BoundToLearn.db.options.muteChat end,
             function(v) BoundToLearn.db.options.muteChat = v end)
@@ -686,7 +683,7 @@ function Options:AddDivider(parent, y)
     return y - 8
 end
 
--- Related toggles wrapped in one grouped backdrop card (EasyFind-style), laid
+-- Related toggles wrapped in one grouped backdrop card, laid
 -- out in a grid. Each cell right-aligns its own switch.
 local GROUP_CARD_W = 440 - 15 * 2 - 4 * 2   -- frame width - panel inset - card inset
 function Options:AddGroupedGrid(parent, y, caption, items, perRow, getState, onToggle)
@@ -718,9 +715,19 @@ function Options:AddGroupedGrid(parent, y, caption, items, perRow, getState, onT
     return y - (rows * CELL_H + PAD * 2) - 6
 end
 
--- Color theme picker: a right-aligned row of accent swatches. Clicking one
--- applies it immediately for new windows; a reload finishes retinting the
--- rest, so a "Reload" affordance appears after a change.
+StaticPopupDialogs["BOUNDTOLEARN_THEME_RELOAD"] = {
+    text = "Reload your interface to apply the new color theme?",
+    button1 = _G.RELOADUI or "Reload UI",
+    button2 = _G.CANCEL or "Cancel",
+    OnAccept = function() C_UI.Reload() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+-- Color theme picker: a right-aligned row of accent swatches. Picking one saves
+-- the choice and prompts a reload, which applies the whole theme at once (a live
+-- partial retint looks broken).
 function Options:AddThemePicker(parent, y)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(20)
@@ -766,28 +773,16 @@ function Options:AddThemePicker(parent, y)
         sw:SetScript("OnClick", function()
             if BoundToLearn.db.options.colorTheme == name then return end
             BoundToLearn.db.options.colorTheme = name
-            ns.Theme.ApplyTheme(name)
             refreshSel()
-            if optionsFrame.themeReload then optionsFrame.themeReload:Show() end
-            if optionsFrame.themeHint then optionsFrame.themeHint:Show() end
+            -- Do not retint live: applying only part of the UI looks broken. Save
+            -- the choice and let the reload apply the whole theme at once.
+            StaticPopup_Show("BOUNDTOLEARN_THEME_RELOAD")
         end)
         swatches[i] = sw
     end
     refreshSel()
 
-    local hint = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", 14, y - 22)
-    hint:SetText("Reload to finish applying the theme.")
-    hint:Hide()
-    optionsFrame.themeHint = hint
-
-    local reloadBtn = ns.Theme.CreateButton(parent, "Reload", 70, 18)
-    reloadBtn:SetPoint("LEFT", hint, "RIGHT", 6, 0)
-    reloadBtn:SetScript("OnClick", function() C_UI.Reload() end)
-    reloadBtn:Hide()
-    optionsFrame.themeReload = reloadBtn
-
-    return y - 46
+    return y - 24
 end
 
 -- =========================================
@@ -863,7 +858,6 @@ function Options:CreateResetButtons()
             db.game.timingGood = 0.25
             db.game.soundEnabled = true
             db.game.showCombo = true
-            db.options.showLoginMessage = true
             db.options.muteChat = false
             BoundToLearn:Print("Settings reset to defaults.")
             if optionsFrame and optionsFrame:IsShown() then
