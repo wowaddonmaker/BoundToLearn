@@ -7,3 +7,6 @@ tools/
 *.mov
 *.webm
 target/
+
+# Local demo/media, never shipped
+docs/
