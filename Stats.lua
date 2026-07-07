@@ -40,7 +40,6 @@ function Stats:RecordTrackerSession(sessionData)
 
     if ratio > db.personalBest.bestKeybindRatio then
         db.personalBest.bestKeybindRatio = mfloor(ratio * 10) / 10
-        BoundToLearn:Print("New personal best keybind ratio: " .. db.personalBest.bestKeybindRatio .. "%")
     end
 end
 
@@ -70,18 +69,14 @@ function Stats:RecordGameSession(gameData)
     db.lifetimeGameHits = db.lifetimeGameHits + (totalNotes - gameData.hitCounts.miss)
 
     local pb = db.personalBest
-    local newBest = false
     if summary.score > pb.highestScore then
         pb.highestScore = summary.score
-        newBest = true
     end
     if summary.combo > pb.longestCombo then
         pb.longestCombo = summary.combo
-        newBest = true
     end
     if accuracy > pb.bestAccuracy then
         pb.bestAccuracy = mfloor(accuracy * 10) / 10
-        newBest = true
     end
 
     -- Per-difficulty bests
@@ -113,9 +108,6 @@ function Stats:RecordGameSession(gameData)
         end
     end
 
-    if newBest then
-        BoundToLearn:Print("New personal best!")
-    end
 end
 
 function Stats:RecordQuizSession(quizData)
@@ -136,7 +128,6 @@ function Stats:RecordQuizSession(quizData)
     local pb = db.personalBest
     if pb.fastestQuiz == 0 or quizData.elapsed < pb.fastestQuiz then
         pb.fastestQuiz = mfloor(quizData.elapsed * 10) / 10
-        BoundToLearn:Print("New personal best quiz time: " .. pb.fastestQuiz .. "s")
     end
 end
 
