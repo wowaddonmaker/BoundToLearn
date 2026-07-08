@@ -1968,25 +1968,13 @@ function GameUI:RefreshSongSelect()
 end
 
 -- Preview the selected track while the select screen is open. Debounced so fast
--- scrolling only plays the track the player lands on. PlayMusic overrides the
--- client's zone music, so no volume muting is needed.
--- Song keys with a bundled hook-trimmed preview clip in media/previews/, mapped to
--- the clip's length in seconds. Each clip has a fade-in at the start and fade-out
--- at the end baked in, so re-starting it every clip length gives a seamless fade
--- loop. Length varies per clip (shorter tracks give shorter clips).
-local PREVIEW_CLIPS = {
-    s1=60, s2=60, s3=60, s4=60, s5=60, s6=60, s7=60, s8=60, s9=60, s10=60,
-    s11=47, s12=60, s13=60, s14=60, s15=60, s16=60, s17=60, s18=60, s19=60, s20=60,
-    s21=60, s22=60, s23=42, s24=60, s25=60, s26=35, s27=48, s28=60, s29=60, s30=60,
-    s31=58, s32=60, s33=60, s34=60, s35=60, s36=60, s37=60, s38=60, s39=60, s40=60,
-    s41=60, s42=60, s43=60, s44=60, s45=60, s46=60, s47=45, s48=60, s49=60, s50=60,
-    s51=60, s52=47, s53=60, s54=60, s55=60, s56=41, s57=60, s58=58, s59=60, s60=60,
-    s61=60, s62=60, s63=48, s64=26, s65=60, s66=60, s67=48, s68=40,
-}
-
+-- scrolling only plays the track the player lands on. PlayMusic plays Blizzard's own
+-- file by FileDataID (nothing bundled) and takes over the music channel, so the
+-- client's zone music is silenced with no muting needed. The client cannot seek, so
+-- the preview starts at 0:00; a long-intro track plays its intro before the hook.
 local previewToken = 0
 function GameUI:StopSongPreview()
-    previewToken = previewToken + 1   -- invalidate any pending debounce or clip loop
+    previewToken = previewToken + 1   -- invalidate any pending debounce
     StopMusic()
 end
 
@@ -1999,26 +1987,7 @@ function GameUI:PlaySongPreview()
         if token ~= previewToken then return end
         if not (songSelect and songSelect:IsShown()) then return end
         local song = ns.SongData and ns.SongData.Get(BoundToLearn.db.game.songKey)
-        if not song then return end
-        -- The client cannot seek into Blizzard's own music, so a long intro would
-        -- make the preview sit through it. Prefer a short clip bundled with the
-        -- addon, trimmed to the track's hook. PlayMusic (not PlaySoundFile) takes
-        -- over the music channel so the client's zone music is silenced. PlayMusic
-        -- will not loop a short addon file, so re-start it each length for the fade
-        -- loop (fades are baked in). A full track (FileDataID) loops natively.
-        local clipLen = PREVIEW_CLIPS[song.key]
-        if clipLen then
-            local clip = "Interface\\AddOns\\BoundToLearn\\media\\previews\\" .. song.key .. ".ogg"
-            local function loop()
-                if token ~= previewToken then return end
-                if not (songSelect and songSelect:IsShown()) then return end
-                PlayMusic(clip)
-                C_Timer.After(clipLen, loop)
-            end
-            loop()
-        elseif song.id then
-            PlayMusic(song.id)
-        end
+        if song and song.id then PlayMusic(song.id) end
     end)
 end
 
