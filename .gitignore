@@ -6,7 +6,9 @@ tools/
 *.mp4
 *.mov
 *.webm
+*.log
 target/
 
 # Local demo/media, never shipped
 docs/
+media/previews/

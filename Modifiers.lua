@@ -51,7 +51,7 @@ local MODIFIER_LIST = {
         unlockHint = "Earn Bronze rank on Hard",
         check = function()
             local db = BoundToLearn.db.stats.difficultyBest
-            return db and db.Hard and db.Hard.highestScore >= 1000
+            return db and db.Hard and db.Hard.highestScore >= 100
         end,
     },
     {
@@ -61,7 +61,7 @@ local MODIFIER_LIST = {
         unlockHint = "Earn Silver rank on Hard",
         check = function()
             local db = BoundToLearn.db.stats.difficultyBest
-            return db and db.Hard and db.Hard.highestScore >= 3000
+            return db and db.Hard and db.Hard.highestScore >= 300
         end,
     },
     {
@@ -72,7 +72,7 @@ local MODIFIER_LIST = {
         unlockHint = "Earn Gold rank on Medium",
         check = function()
             local db = BoundToLearn.db.stats.difficultyBest
-            return db and db.Medium and db.Medium.highestScore >= 6000
+            return db and db.Medium and db.Medium.highestScore >= 600
         end,
     },
     {
@@ -82,7 +82,7 @@ local MODIFIER_LIST = {
         unlockHint = "Earn Bronze rank on Extreme",
         check = function()
             local db = BoundToLearn.db.stats.difficultyBest
-            return db and db.Extreme and db.Extreme.highestScore >= 1000
+            return db and db.Extreme and db.Extreme.highestScore >= 100
         end,
     },
 }

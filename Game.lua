@@ -7,6 +7,7 @@ local Utils    = ns.Utils
 local GetTime  = Utils.GetTime
 local tinsert  = Utils.tinsert
 local tremove  = Utils.tremove
+local tsort    = Utils.tsort
 local wipe     = Utils.wipe
 local mabs     = Utils.mabs
 local mfloor   = Utils.mfloor
@@ -56,7 +57,7 @@ local gameModifiers = {}
 -- regardless of length. A note is worth SCORE_CAP / noteBudget, scaled by how
 -- cleanly it was hit. The old per-note point values ran to hundreds of thousands
 -- and scaled with track length, which maxed every rank on the first decent game.
-local SCORE_CAP = 100000
+local SCORE_CAP = 10000
 local JUDGE_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.45, miss = 0 }
 local COMBO_THRESHOLDS = { 5, 10, 20, 35 }
 
@@ -98,6 +99,34 @@ local DIFFICULTY_PRESETS = {
 -- leave more beats between notes. The presets' fixed spawnInterval is only a
 -- fallback for a song with no known BPM.
 local BEATS_PER_NOTE = { Easy = 3, Medium = 2, Hard = 1.4, Extreme = 1 }
+
+-- Real audio charts (ns.SongCharts): notes are {t, register 1-5, level 1-4}, one
+-- per 16th slot so the stream is monophonic (never two binds at once). Difficulty
+-- keeps notes up to its level; the active bind pool grows with difficulty so lower
+-- levels stay hittable. Rapid consecutive notes are kept to modifier-compatible
+-- binds so a fast run never demands releasing one modifier to press another.
+local ACTIVE_BINDS     = { Easy = 5, Medium = 9, Hard = 14, Extreme = 99 }
+-- How many times the active bind-set sweeps the whole layout over one song. The set
+-- (size ACTIVE_BINDS) stays a coordinated group moment-to-moment but drifts across
+-- every bind this many times, so no bind is ever left out of a track.
+local BIND_COVERAGE    = 2
+-- Target notes per second per difficulty. The level-1 pulse is always kept; higher
+-- tiers layer on up to this, so density ramps smoothly instead of jumping at Medium.
+local TARGET_DENSITY   = { Easy = 1.0, Medium = 1.6, Hard = 2.2, Extreme = 2.8 }
+local RAPID_GAP = 0.22
+
+local function bindMods(keybind)
+    local m = ""
+    if keybind:find("SHIFT-", 1, true) then m = m .. "S" end
+    if keybind:find("CTRL-", 1, true) then m = m .. "C" end
+    if keybind:find("ALT-", 1, true) then m = m .. "A" end
+    return m
+end
+local function modCompatible(a, b) return a == "" or b == "" or a == b end
+local function byEase(a, b)
+    if #a.mods ~= #b.mods then return #a.mods < #b.mods end
+    return a.slot < b.slot
+end
 
 local MODIFIER_KEYS = {
     LSHIFT = true, RSHIFT = true,
@@ -246,7 +275,7 @@ end
 
 function Game:GetTimeRemaining()
     if gameDuration == 0 then return nil end
-    local remaining = gameDuration - gameElapsed
+    local remaining = gameDuration - mmax(0, gameElapsed)
     return mmax(0, remaining)
 end
 
@@ -286,6 +315,7 @@ function Game:DiscoverSlots()
                                 local slotInfo = {
                                     slot = slot,
                                     keybind = keybind,
+                                    mods = bindMods(keybind),
                                     texture = texture,
                                     button = btn,
                                 }
@@ -319,6 +349,7 @@ function Game:DiscoverCompetitiveSlots()
             local slotInfo = {
                 slot = i,
                 keybind = keybind,
+                mods = bindMods(keybind),
                 texture = slotDef.texture,
                 button = btn,
                 competitive = true,
@@ -449,6 +480,7 @@ function Game:Start()
     gameDuration = (currentMode == "practice") and 0 or ns.SongData.PlayLength(ns.SongData.Get(db.songKey))
 
     ResetGameState()
+    self:BuildChart(db.songKey, db.difficulty)
     self:SetScoreBudget()
     self:BlockActionBars()
 
@@ -461,16 +493,22 @@ function Game:Start()
     end
 
     local countdownDuration = 3
+    -- Lead the music by one fall time so the first notes fall from the top instead of
+    -- popping in partway down. The highway starts at GO; the music starts leadIn later.
+    local settings = self:GetSettings()
+    local leadIn = settings.fallDistance / settings.fallSpeed
     if ns.GameUI then
         ns.GameUI:ShowCountdown(countdownDuration, function()
-            gameStartTime = GetTime()
+            gameStartTime = GetTime() + leadIn
             gameFrame:Show()
             inputFrame:Show()
             if BoundToLearn.db.game.soundEnabled then
                 local song = ns.SongData and ns.SongData.Get(db.songKey)
                 local track = (song and song.id) or DIFFICULTY_MUSIC[db.difficulty]
                 if track then
-                    BeginGameMusic(track)
+                    C_Timer.After(leadIn, function()
+                        if isRunning then BeginGameMusic(track) end
+                    end)
                 end
             end
         end)
@@ -517,16 +555,20 @@ function Game:StartCompetitive()
     end
 
     local difficulty = db.difficulty
+    local settings = self:GetSettings()
+    local leadIn = settings.fallDistance / settings.fallSpeed
     if ns.GameUI then
         ns.GameUI:ShowCountdown(3, function()
-            gameStartTime = GetTime()
+            gameStartTime = GetTime() + leadIn
             gameFrame:Show()
             inputFrame:Show()
             if BoundToLearn.db.game.soundEnabled then
                 local song = ns.SongData and ns.SongData.Get(db.songKey)
                 local track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
                 if track then
-                    BeginGameMusic(track)
+                    C_Timer.After(leadIn, function()
+                        if isRunning then BeginGameMusic(track) end
+                    end)
                 end
             end
         end)
@@ -562,8 +604,8 @@ function Game:Stop()
     end
     wipe(activeNotes)
 
-    local duration = gameElapsed
-    if duration == 0 then duration = GetTime() - gameStartTime end
+    local duration = mmax(0, gameElapsed)
+    if duration == 0 then duration = mmax(0, GetTime() - gameStartTime) end
     local totalNotes = hitCounts.perfect + hitCounts.great + hitCounts.good + hitCounts.miss
 
     local difficulty = BoundToLearn.db.game.difficulty
@@ -599,6 +641,8 @@ function Game:Stop()
             mode = currentMode,
             difficulty = difficulty,
             focusFailed = focusFailed,
+            chartTotal = self.chartNotes and #self.chartNotes or 0,
+            notesShown = self.chartNotes and mmin(self.chartCursor - 1, #self.chartNotes) or 0,
         })
         if currentMode == "competitive" then
             ns.GameUI:HideCompBar()
@@ -732,7 +776,7 @@ function Game:OnUpdate(elapsed)
 
     -- Update timer display
     if gameDuration > 0 and ns.GameUI then
-        ns.GameUI:UpdateTimer(gameDuration - gameElapsed)
+        ns.GameUI:UpdateTimer(gameDuration - mmax(0, gameElapsed))
     end
 
     -- Restore destroyed lanes
@@ -753,13 +797,26 @@ function Game:OnUpdate(elapsed)
         if ns.GameUI then ns.GameUI:SetMirrorFlipped(mirrorFlipped) end
     end
 
-    spawnAccumulator = spawnAccumulator + elapsed
-    if spawnAccumulator >= settings.spawnInterval then
-        spawnAccumulator = spawnAccumulator % settings.spawnInterval
-        self:SpawnNote(now, settings)
-        -- Doubles: modifier only, not available in competitive (modifier keys conflict)
-        if currentMode ~= "competitive" and activeMods.doubles and math.random() < 0.20 then
+    if self.chartNotes then
+        -- Chart-driven: spawn each onset so it reaches the target exactly when the
+        -- music is at that onset (gameStartTime is when the track began playing).
+        local fallTime = settings.fallDistance / settings.fallSpeed
+        local notes = self.chartNotes
+        while self.chartCursor <= #notes do
+            local cn = notes[self.chartCursor]
+            if gameElapsed < cn.t - fallTime then break end
+            self:SpawnNote(now, settings, cn.slotInfo, gameStartTime + cn.t)
+            self.chartCursor = self.chartCursor + 1
+        end
+    else
+        spawnAccumulator = spawnAccumulator + elapsed
+        if spawnAccumulator >= settings.spawnInterval then
+            spawnAccumulator = spawnAccumulator % settings.spawnInterval
             self:SpawnNote(now, settings)
+            -- Doubles: modifier only, not available in competitive (modifier keys conflict)
+            if currentMode ~= "competitive" and activeMods.doubles and math.random() < 0.20 then
+                self:SpawnNote(now, settings)
+            end
         end
     end
 
@@ -800,13 +857,121 @@ function Game:OnUpdate(elapsed)
     end
 end
 
+-- Load the baked onset chart for this track+difficulty into self.chartNotes. The
+-- level-1 pulse is always kept (steady backbone, no dead spots); higher tiers (weak
+-- beats, eighths, sixteenths) layer on in priority order up to the difficulty's
+-- notes-per-second target, evenly subsampling the tier that crosses it so density
+-- ramps smoothly. Returns true, or leaves chartNotes nil (false) when no chart
+-- exists so OnUpdate falls back to the procedural spawner.
+local buildBuckets = { {}, {}, {}, {} }
+function Game:BuildChart(key, diff)
+    self.chartNotes = nil
+    self.chartCursor = 1
+    local chart = ns.SongCharts and key and ns.SongCharts[key]
+    if not (chart and chart.notes and #chart.notes > 0) then return false end
+    if #availableSlots == 0 then return false end
+    local cutoff = gameDuration > 0 and gameDuration or 1e9
+    local src = chart.notes
+    for lvl = 1, 4 do wipe(buildBuckets[lvl]) end
+    local lastT = 0
+    for i = 1, #src do
+        local cn = src[i]
+        if cn[1] <= cutoff then
+            local bucket = buildBuckets[cn[3] or 1]
+            bucket[#bucket + 1] = cn[1]
+            if cn[1] > lastT then lastT = cn[1] end
+        end
+    end
+    local roundLen = (gameDuration > 0 and gameDuration) or lastT
+    if roundLen <= 0 then return false end
+    local target = (TARGET_DENSITY[diff] or 2.0) * roundLen
+    -- The pulse always plays; layer higher tiers on up to the target.
+    local chosen = {}
+    local pulse = buildBuckets[1]
+    for j = 1, #pulse do chosen[#chosen + 1] = pulse[j] end
+    for lvl = 2, 4 do
+        local bucket = buildBuckets[lvl]
+        local n = #bucket
+        local room = target - #chosen
+        if n > 0 and room > 0 then
+            if n <= room then
+                for j = 1, n do chosen[#chosen + 1] = bucket[j] end
+            else
+                local keep = mfloor(room)
+                if keep > 0 then
+                    local stride = n / keep
+                    for j = 1, keep do
+                        chosen[#chosen + 1] = bucket[mmin(n, mfloor((j - 0.5) * stride) + 1)]
+                    end
+                end
+                break
+            end
+        end
+    end
+    if #chosen == 0 then return false end
+    tsort(chosen)
+    local notes = {}
+    for i = 1, #chosen do notes[i] = { t = chosen[i] } end
+    self:AssignChartBinds(notes, diff)
+    self.chartNotes = notes
+    self.chartCursor = 1
+    return true
+end
+
+-- Map each chart note onto one of the player's binds. The trainer's job is to
+-- exercise the WHOLE layout, so for each note an "active set" of ACTIVE_BINDS[diff]
+-- binds (spread across the ease spectrum) is drawn from, and that set's offset drifts
+-- across every bind BIND_COVERAGE times over the song. Any short stretch stays a
+-- coordinated group; across a full track every bind rotates into play. Consecutive
+-- notes never reuse a bind, and notes closer than RAPID_GAP stay on modifier-
+-- compatible binds so a fast run is always physically playable.
+local assignEase, assignPool = {}, {}
+function Game:AssignChartBinds(notes, diff)
+    local nSlots = #availableSlots
+    wipe(assignEase)
+    for i = 1, nSlots do assignEase[i] = availableSlots[i] end
+    tsort(assignEase, byEase)                       -- easy (no-modifier) binds first
+    local W = mmin(nSlots, ACTIVE_BINDS[diff] or nSlots)
+    local total = mmax(1, #notes)
+    local prev
+    for i = 1, #notes do
+        local note = notes[i]
+        -- W binds spread across the ease spectrum, offset by a drift that sweeps the
+        -- whole layout BIND_COVERAGE times over the song so nothing is left out.
+        local drift = ((i - 1) / total) * BIND_COVERAGE
+        wipe(assignPool)
+        for j = 1, W do
+            local frac = (j - 0.5) / W + drift
+            assignPool[j] = assignEase[(mfloor(frac * nSlots) % nSlots) + 1]
+        end
+        local nP = #assignPool
+        local rapid = prev and (note.t - prev.t) < RAPID_GAP
+        local chosen
+        for _ = 1, nP * 3 do
+            local cand = assignPool[self:ChartRandInt(nP)]
+            local ok = not prev or cand.slot ~= prev.slotInfo.slot
+            if ok and rapid then
+                ok = modCompatible(cand.mods or "", prev.slotInfo.mods or "")
+            end
+            if ok then chosen = cand break end
+        end
+        note.slotInfo = chosen or assignPool[self:ChartRandInt(nP)]
+        prev = note
+    end
+end
+
 -- Money-score calibration: a flawless run should land at SCORE_CAP. Spread the cap
--- across the notes a run will actually judge, estimated from the round length and
--- the BPM-paced spawn interval. Call once slots and duration are set.
+-- across the notes a run will actually judge: the chart's note count when a chart
+-- is loaded, else a density estimate from the round length and spawn interval.
 function Game:SetScoreBudget()
-    local dur = gameDuration > 0 and gameDuration or 90
-    local interval = self:GetSettings().spawnInterval or 1.2
-    local budget = mmax(1, mfloor(dur / interval))
+    local budget
+    if self.chartNotes and #self.chartNotes > 0 then
+        budget = #self.chartNotes
+    else
+        local dur = gameDuration > 0 and gameDuration or 90
+        local interval = self:GetSettings().spawnInterval or 1.2
+        budget = mmax(1, mfloor(dur / interval))
+    end
     self.scoreNoteBudget = budget
     self.scorePerNote = SCORE_CAP / mmax(1, budget)
 end
@@ -1065,17 +1230,13 @@ function Game:EvaluateNote(note, result)
     end
 
     if BoundToLearn.db.game.soundEnabled then
+        -- Only misses get a sound. Per-hit tones on every perfect/great/good played
+        -- constantly and read as noise over the music, so hits are silent.
         if note.isBomb and result == "miss" then
             PlaySound(44191)  -- bomb explosion
         elseif note.isBomb then
             PlaySound(888)    -- bomb shot down
-        elseif result == "perfect" then
-            PlaySound(891)    -- igBackPackCoinSelect (coin jingle)
-        elseif result == "great" then
-            PlaySound(3332)   -- RaidWarning (crisp ding)
-        elseif result == "good" then
-            PlaySound(867)    -- igAbilityPageTurn (soft tap)
-        else
+        elseif result == "miss" then
             PlaySound(846)    -- igQuestFailed
         end
     end

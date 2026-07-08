@@ -13,15 +13,15 @@ local mfloor   = Utils.mfloor
 -- Rank thresholds (per-difficulty, based on best score)
 local RANKS = {
     -- Thresholds are on the normalized money-score (best per-difficulty run, capped
-    -- at 100k for a flawless run). They read as weighted-accuracy tiers: Bronze ~35%,
+    -- at 10k for a flawless run). They read as weighted-accuracy tiers: Bronze ~35%,
     -- Mythic ~95%. Keep in sync with SCORE_CAP in Game.lua.
-    { name = "Unranked",  threshold = 0,     color = "888888", rgb = {0.53, 0.53, 0.53} },
-    { name = "Bronze",    threshold = 35000, color = "CD7F32", rgb = {0.80, 0.50, 0.20} },
-    { name = "Silver",    threshold = 52000, color = "C0C0C0", rgb = {0.75, 0.75, 0.75} },
-    { name = "Gold",      threshold = 66000, color = "FFD700", rgb = {1.00, 0.84, 0.00} },
-    { name = "Platinum",  threshold = 78000, color = "E5E4E2", rgb = {0.90, 0.89, 0.89} },
-    { name = "Diamond",   threshold = 88000, color = "55CCFF", rgb = {0.33, 0.80, 1.00} },
-    { name = "Mythic",    threshold = 95000, color = "FF55FF", rgb = {1.00, 0.33, 1.00} },
+    { name = "Unranked",  threshold = 0,    color = "888888", rgb = {0.53, 0.53, 0.53} },
+    { name = "Bronze",    threshold = 3500, color = "CD7F32", rgb = {0.80, 0.50, 0.20} },
+    { name = "Silver",    threshold = 5200, color = "C0C0C0", rgb = {0.75, 0.75, 0.75} },
+    { name = "Gold",      threshold = 6600, color = "FFD700", rgb = {1.00, 0.84, 0.00} },
+    { name = "Platinum",  threshold = 7800, color = "E5E4E2", rgb = {0.90, 0.89, 0.89} },
+    { name = "Diamond",   threshold = 8800, color = "55CCFF", rgb = {0.33, 0.80, 1.00} },
+    { name = "Mythic",    threshold = 9500, color = "FF55FF", rgb = {1.00, 0.33, 1.00} },
 }
 Achievements.RANKS = RANKS
 
@@ -84,8 +84,8 @@ local ACHIEVEMENT_LIST = {
     { id = "combo_200",       name = "Inhuman",          desc = "Reach a 200 combo streak",                              category = "combo", icon = "Islands-QuestBangGlow" },
 
     -- Score
-    { id = "score_25k",       name = "High Roller",      desc = "Score 25,000+ in a single round",                       category = "score", icon = "Coin-Gold" },
-    { id = "score_50k",       name = "Score Legend",      desc = "Score 50,000+ in a single round",                       category = "score", icon = "Coin-Gold" },
+    { id = "score_25k",       name = "High Roller",      desc = "Score 2,500+ in a single round",                        category = "score", icon = "Coin-Gold" },
+    { id = "score_50k",       name = "Score Legend",      desc = "Score 5,000+ in a single round",                        category = "score", icon = "Coin-Gold" },
 
     -- Lifetime
     { id = "hits_5000",       name = "Seasoned",         desc = "Land 5,000 total hits across all games",                category = "lifetime", icon = "communities-icon-achievement" },
@@ -103,7 +103,7 @@ local ACHIEVEMENT_LIST = {
     { id = "diamond_all",     name = "Diamond Collector", desc = "Earn Diamond rank on all four difficulties",            category = "mastery", icon = "UI-HUD-MicroMenu-StreamDLGreen-Up" },
 
     -- Endgame
-    { id = "score_100k",      name = "Six Figures",      desc = "Score 100,000+ in a single round",                      category = "score", icon = "Coin-Gold" },
+    { id = "score_100k",      name = "Perfect Score",      desc = "Score 10,000+ in a single round",                       category = "score", icon = "Coin-Gold" },
     { id = "combo_500",       name = "Metronome",        desc = "Reach a 500 combo streak",                              category = "combo", icon = "Islands-QuestBangGlow" },
     { id = "mythic_all",      name = "Mythic Collector",  desc = "Earn Mythic rank on all four difficulties",             category = "mastery", icon = "UI-HUD-MicroMenu-StreamDLGreen-Up" },
     { id = "flawless_hard",   name = "Flawless",         desc = "Complete a Hard round with zero misses",                 category = "mastery", icon = "UI-HUD-MicroMenu-StreamDLGreen-Up" },
@@ -189,13 +189,13 @@ function Achievements:CheckRoundAchievements(results)
     end
 
     -- Score
-    if score >= 25000 then
+    if score >= 2500 then
         if self:Unlock("score_25k") then tinsert(newUnlocks, "score_25k") end
     end
-    if score >= 50000 then
+    if score >= 5000 then
         if self:Unlock("score_50k") then tinsert(newUnlocks, "score_50k") end
     end
-    if score >= 100000 then
+    if score >= 10000 then
         if self:Unlock("score_100k") then tinsert(newUnlocks, "score_100k") end
     end
 
@@ -256,12 +256,12 @@ function Achievements:CheckRankAchievements(newUnlocks)
         local best = diffBest[diff]
         if best then
             local rank = self:GetRank(best.highestScore)
-            if rank.threshold >= 6000 then goldCount = goldCount + 1 end
-            if rank.threshold >= 15000 then
+            if rank.threshold >= 600 then goldCount = goldCount + 1 end
+            if rank.threshold >= 1500 then
                 hasDiamond = true
                 diamondCount = diamondCount + 1
             end
-            if rank.threshold >= 25000 then
+            if rank.threshold >= 2500 then
                 hasMythic = true
                 mythicCount = mythicCount + 1
             end
@@ -288,13 +288,13 @@ function Achievements:CheckRankAchievements(newUnlocks)
     local compBest = diffBest.Competitive
     if compBest then
         local compRank = self:GetRank(compBest.highestScore)
-        if compRank.threshold >= 6000 then
+        if compRank.threshold >= 600 then
             if self:Unlock("comp_gold") then tinsert(newUnlocks, "comp_gold") end
         end
-        if compRank.threshold >= 15000 then
+        if compRank.threshold >= 1500 then
             if self:Unlock("comp_diamond") then tinsert(newUnlocks, "comp_diamond") end
         end
-        if compRank.threshold >= 25000 then
+        if compRank.threshold >= 2500 then
             if self:Unlock("comp_mythic") then tinsert(newUnlocks, "comp_mythic") end
         end
     end

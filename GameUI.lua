@@ -10,6 +10,7 @@ local mmin, mmax = Utils.mmin, Utils.mmax
 local mabs       = Utils.mabs
 local mfloor     = Utils.mfloor
 local tinsert    = Utils.tinsert
+local tremove    = Utils.tremove
 local ipairs     = Utils.ipairs
 local CreateFrame = Utils.CreateFrame
 local GetTime    = Utils.GetTime
@@ -775,17 +776,27 @@ local function SongBestProgress(key)
     return (sp and sp[key]) or 0
 end
 
+local SONG_HISTORY_MAX = 8
 function GameUI:RecordSongScore(score)
     local db = BoundToLearn.db.game
     local key, diff = db.songKey, db.difficulty
     if not key or not score then return false end
     db.songScores = db.songScores or {}
     db.songScores[key] = db.songScores[key] or {}
-    if (db.songScores[key][diff] or 0) < score then
-        db.songScores[key][diff] = score
-        return true
-    end
-    return false
+    local prevBest = db.songScores[key][diff] or 0
+    local isNewBest = score > prevBest
+    if isNewBest then db.songScores[key][diff] = score end
+    -- Persisted per-song, per-difficulty attempt history (survives reloads) so the
+    -- results screen can chart this run against previous attempts.
+    db.songHistory = db.songHistory or {}
+    db.songHistory[key] = db.songHistory[key] or {}
+    local hist = db.songHistory[key][diff] or {}
+    hist[#hist + 1] = score
+    while #hist > SONG_HISTORY_MAX do tremove(hist, 1) end
+    db.songHistory[key][diff] = hist
+    -- Snapshot for ShowResultsOnSelect (prevBest is the best before this run).
+    self.songCompare = { prevBest = prevBest, score = score, isNewBest = isNewBest, history = hist }
+    return isNewBest
 end
 
 function GameUI:RecordSongProgress(key, frac)
@@ -1259,7 +1270,7 @@ function GameUI:CreateSongSelect()
 
     -- ESC closes the menu (and stops the preview music when it hides).
     tinsert(UISpecialFrames, "BoundToLearnSongSelect")
-    f:HookScript("OnHide", function() StopMusic() end)
+    f:HookScript("OnHide", function() GameUI:StopSongPreview() end)
 
     songSelect = f
     self:RefreshSongSelect()
@@ -1288,6 +1299,10 @@ function GameUI:CreateResultsPanel(f)
     rp.title:SetFont("Fonts\\FRIZQT__.TTF", 22, "OUTLINE")
     rp.title:SetPoint("TOP", 0, -8)
 
+    -- Difficulty badge in the top-right corner, colored to match the song-select tiers.
+    rp.diffFS = rp:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    rp.diffFS:SetPoint("TOPRIGHT", -12, -10)
+
     rp.scoreFS = rp:CreateFontString(nil, "OVERLAY")
     rp.scoreFS:SetFont("Fonts\\FRIZQT__.TTF", 40, "OUTLINE")
     rp.scoreFS:SetPoint("TOP", 0, -54)
@@ -1300,12 +1315,33 @@ function GameUI:CreateResultsPanel(f)
     rp.statFS = rp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rp.statFS:SetPoint("TOP", rp.scoreLabel, "BOTTOM", 0, -10)
 
-    -- Judgment bar graph in a fixed-width container so the whole group centers.
+    -- Performance row: judgment breakdown (left) and the attempt-history trend
+    -- (right), centered as a pair so the panel height is unchanged.
     local BAR_W, ROWH = 150, 22
-    local graph = CreateFrame("Frame", nil, rp)
-    graph:SetSize(240, #RESULT_JUDGMENTS * ROWH)
-    graph:SetPoint("TOP", rp.statFS, "BOTTOM", 0, -14)
+    local rowH = #RESULT_JUDGMENTS * ROWH
+    local perfRow = CreateFrame("Frame", nil, rp)
+    perfRow:SetSize(500, rowH)
+    perfRow:SetPoint("TOP", rp.statFS, "BOTTOM", 0, -14)
+    rp.perfRow = perfRow
+
+    local graph = CreateFrame("Frame", nil, perfRow)
+    graph:SetSize(240, rowH)
+    graph:SetPoint("TOPLEFT", 0, 0)
     rp.graph = graph
+
+    -- Attempt-history trend (persisted in songHistory, survives reloads): bars run
+    -- oldest -> newest with the newest highlighted. Hidden on a track's first run.
+    local trend = CreateFrame("Frame", nil, perfRow)
+    trend:SetSize(220, rowH)
+    trend:SetPoint("TOPRIGHT", 0, 0)
+    rp.trend = trend
+    rp.trendLabel = trend:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    rp.trendLabel:SetPoint("TOP", 0, 0)
+    rp.trendLabel:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
+    rp.trendBars = {}
+    for i = 1, SONG_HISTORY_MAX do
+        rp.trendBars[i] = trend:CreateTexture(nil, "OVERLAY")
+    end
 
     rp.bars = {}
     for i, j in ipairs(RESULT_JUDGMENTS) do
@@ -1336,7 +1372,7 @@ function GameUI:CreateResultsPanel(f)
 
     -- Played track's art, sitting between the stats and the buttons.
     rp.songImage = rp:CreateTexture(nil, "ARTWORK")
-    rp.songImage:SetPoint("TOP", graph, "BOTTOM", 0, -16)
+    rp.songImage:SetPoint("TOP", perfRow, "BOTTOM", 0, -16)
     rp.songImage:SetSize(300, 68)
     rp.songTitle = rp:CreateFontString(nil, "OVERLAY")
     rp.songTitle:SetFont("Fonts\\FRIZQT__.TTF", 17, "OUTLINE")
@@ -1375,6 +1411,34 @@ function GameUI:CreateResultsPanel(f)
     f.resultsPanel = rp
 end
 
+-- Draw the attempt-history mini bar chart: one bar per stored run (oldest -> newest),
+-- heights normalized to the tallest, newest bar highlighted (green on a new best).
+function GameUI:RenderAttemptTrend(rp, cmp)
+    for i = 1, #rp.trendBars do rp.trendBars[i]:Hide() end
+    local hist = cmp.history
+    local n = hist and #hist or 0
+    if n < 1 then rp.trend:Hide() return end
+    rp.trend:Show()
+    rp.trendLabel:SetText(n == 1 and "First attempt on this track" or sformat("Last %d attempts", n))
+    local maxS = 1
+    for i = 1, n do if hist[i] > maxS then maxS = hist[i] end end
+    local TBW, TBH, GAP = 18, 76, 6
+    for j = 1, n do
+        local bar = rp.trendBars[j]
+        bar:ClearAllPoints()
+        bar:SetWidth(TBW)
+        bar:SetHeight(mmax(2, (hist[j] / maxS) * TBH))
+        bar:SetPoint("BOTTOM", rp.trend, "BOTTOM", (j - (n + 1) / 2) * (TBW + GAP), 4)
+        if j == n then
+            if cmp.isNewBest then bar:SetColorTexture(0.20, 0.90, 0.35, 0.95)
+            else bar:SetColorTexture(1.00, 0.82, 0.00, 0.95) end
+        else
+            bar:SetColorTexture(0.45, 0.55, 0.70, 0.65)
+        end
+        bar:Show()
+    end
+end
+
 function GameUI:ShowResultsOnSelect(results)
     if not songSelect then self:CreateSongSelect() end
     songSelect.statsMode = false
@@ -1411,15 +1475,42 @@ function GameUI:ShowResultsOnSelect(results)
     rp.title:SetText(results.focusFailed and "|cFFFF6666Round Over|r"
         or "|cFF" .. Theme.ACCENT_HEX .. "Round Complete|r")
     rp.scoreFS:SetText(sformat("%d", results.score or 0))
-    rp.statFS:SetText(sformat("Accuracy |cFFFFFFFF%.1f%%|r   Max Combo |cFFFFFFFF%d|r",
-        accuracy, results.maxCombo or 0))
+    local chartTotal = results.chartTotal or 0
+    if chartTotal > 0 then
+        rp.statFS:SetText(sformat(
+            "Accuracy |cFFFFFFFF%.1f%%|r   Song |cFFFFFFFF%.0f%%|r   Max Combo |cFFFFFFFF%d|r",
+            accuracy, (results.notesShown or 0) / chartTotal * 100, results.maxCombo or 0))
+    else
+        rp.statFS:SetText(sformat("Accuracy |cFFFFFFFF%.1f%%|r   Max Combo |cFFFFFFFF%d|r",
+            accuracy, results.maxCombo or 0))
+    end
 
     local diff = results.difficulty
-    local dbb = BoundToLearn.db.stats.difficultyBest
-    local diffBest = dbb and diff and dbb[diff]
-    local bestScore = diffBest and diffBest.highestScore or 0
-    local isNewBest = (results.score or 0) > 0 and results.score >= bestScore
-    rp.scoreLabel:SetText(isNewBest and "Score  |cFF33FF66NEW BEST|r" or "Score")
+    local dcol = DIFF_COLORS[diff] or { 0.8, 0.8, 0.8 }
+    rp.diffFS:SetText((diff or ""):upper())
+    rp.diffFS:SetTextColor(dcol[1], dcol[2], dcol[3])
+
+    -- Per-song comparison: best on THIS track+difficulty plus the attempt trend.
+    -- songCompare is the snapshot RecordSongScore stashed for this run.
+    local cmp = self.songCompare
+    local isNewBest = false
+    if cmp and cmp.score == (results.score or 0) then
+        isNewBest = cmp.isNewBest
+        if cmp.isNewBest then
+            rp.scoreLabel:SetText(cmp.prevBest > 0
+                and sformat("|cFF33FF66NEW BEST!|r  (prev %d)", cmp.prevBest)
+                or "|cFF33FF66NEW BEST!|r")
+        else
+            local gap = cmp.prevBest - cmp.score
+            rp.scoreLabel:SetText(gap > 0
+                and sformat("Best %d  |cFFFFAA88(%d below)|r", cmp.prevBest, gap)
+                or sformat("Best %d  (matched)", cmp.prevBest))
+        end
+        self:RenderAttemptTrend(rp, cmp)
+    else
+        rp.scoreLabel:SetText("Score")
+        rp.trend:Hide()
+    end
 
     local maxCount = 1
     for _, bar in ipairs(rp.bars) do
@@ -1879,7 +1970,26 @@ end
 -- Preview the selected track while the select screen is open. Debounced so fast
 -- scrolling only plays the track the player lands on. PlayMusic overrides the
 -- client's zone music, so no volume muting is needed.
+-- Song keys with a bundled hook-trimmed preview clip in media/previews/, mapped to
+-- the clip's length in seconds. Each clip has a fade-in at the start and fade-out
+-- at the end baked in, so re-starting it every clip length gives a seamless fade
+-- loop. Length varies per clip (shorter tracks give shorter clips).
+local PREVIEW_CLIPS = {
+    s1=60, s2=60, s3=60, s4=60, s5=60, s6=60, s7=60, s8=60, s9=60, s10=60,
+    s11=47, s12=60, s13=60, s14=60, s15=60, s16=60, s17=60, s18=60, s19=60, s20=60,
+    s21=60, s22=60, s23=42, s24=60, s25=60, s26=35, s27=48, s28=60, s29=60, s30=60,
+    s31=58, s32=60, s33=60, s34=60, s35=60, s36=60, s37=60, s38=60, s39=60, s40=60,
+    s41=60, s42=60, s43=60, s44=60, s45=60, s46=60, s47=45, s48=60, s49=60, s50=60,
+    s51=60, s52=47, s53=60, s54=60, s55=60, s56=41, s57=60, s58=58, s59=60, s60=60,
+    s61=60, s62=60, s63=48, s64=26, s65=60, s66=60, s67=48, s68=40,
+}
+
 local previewToken = 0
+function GameUI:StopSongPreview()
+    previewToken = previewToken + 1   -- invalidate any pending debounce or clip loop
+    StopMusic()
+end
+
 function GameUI:PlaySongPreview()
     if not (songSelect and songSelect:IsShown()) then return end
     if not BoundToLearn.db.game.soundEnabled then return end
@@ -1889,7 +1999,26 @@ function GameUI:PlaySongPreview()
         if token ~= previewToken then return end
         if not (songSelect and songSelect:IsShown()) then return end
         local song = ns.SongData and ns.SongData.Get(BoundToLearn.db.game.songKey)
-        if song and song.id then PlayMusic(song.id) end
+        if not song then return end
+        -- The client cannot seek into Blizzard's own music, so a long intro would
+        -- make the preview sit through it. Prefer a short clip bundled with the
+        -- addon, trimmed to the track's hook. PlayMusic (not PlaySoundFile) takes
+        -- over the music channel so the client's zone music is silenced. PlayMusic
+        -- will not loop a short addon file, so re-start it each length for the fade
+        -- loop (fades are baked in). A full track (FileDataID) loops natively.
+        local clipLen = PREVIEW_CLIPS[song.key]
+        if clipLen then
+            local clip = "Interface\\AddOns\\BoundToLearn\\media\\previews\\" .. song.key .. ".ogg"
+            local function loop()
+                if token ~= previewToken then return end
+                if not (songSelect and songSelect:IsShown()) then return end
+                PlayMusic(clip)
+                C_Timer.After(clipLen, loop)
+            end
+            loop()
+        elseif song.id then
+            PlayMusic(song.id)
+        end
     end)
 end
 
@@ -1905,7 +2034,7 @@ end
 function GameUI:HideSongSelect()
     if songSelect then songSelect:Hide() end
     if modifierDropdown then modifierDropdown:Hide() end
-    StopMusic()
+    self:StopSongPreview()
 end
 
 function GameUI:StartFromSongSelect()
@@ -1995,7 +2124,7 @@ function GameUI:CreateHealthBar()
     -- Life gauge on the left, compact combo/score/timer readouts and small
     -- pause/stop controls on the right.
     local hf = CreateFrame("Frame", nil, gameOverlay or UIParent)
-    hf:SetSize(540, 34)
+    hf:SetSize(640, 34)
     hf:SetPoint("TOP", UIParent, "TOP", 0, -22)
     hf:SetFrameStrata("FULLSCREEN")
     hf:SetFrameLevel(80)
@@ -2014,6 +2143,9 @@ function GameUI:CreateHealthBar()
         cap:SetPoint("LEFT", 44 + (i - 1) * (CW + 2), 0)
         self.healthCaps[i] = cap
     end
+
+    hf.diffFS = hf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hf.diffFS:SetPoint("LEFT", self.healthCaps[N], "RIGHT", 16, 0)
 
     local stopBtn = Theme.CreateButton(hf, "Stop", 52, 22)
     stopBtn:SetPoint("RIGHT", -8, 0)
@@ -2184,11 +2316,18 @@ function GameUI:ShowReadyState()
 end
 
 function GameUI:OnGameStart(slots)
+    self.songCompare = nil   -- fresh each round; only a scored run repopulates it
     self:ResetStreakTitle()
     self:HideSongSelect()
     self:CreateHealthBar()
     if self.healthFrame then self.healthFrame:Show() end
     self:UpdateHealthCaps(1)
+    if self.healthFrame and self.healthFrame.diffFS then
+        local diff = BoundToLearn.db.game.difficulty
+        local c = DIFF_COLORS[diff] or { 0.8, 0.8, 0.8 }
+        self.healthFrame.diffFS:SetText((diff or ""):upper())
+        self.healthFrame.diffFS:SetTextColor(c[1], c[2], c[3])
+    end
     if scoreText then scoreText:SetText("0") end
     if comboText then comboText:SetText("") end
     if multiplierText then multiplierText:SetText("") end
@@ -2209,6 +2348,14 @@ function GameUI:OnGameStart(slots)
 
     self:CreateHitZones(slots)
     self:UpdateScoreDisplay(0, 0, 1)
+
+    -- One fixed start line for every note, a set height above the topmost bar in
+    -- use, so notes always drop from the same place (a note highway) instead of a
+    -- fixed gap above each button. GetCenter can return nil before layout settles
+    -- here, so it is retried on the first note update (see UpdateNotePosition).
+    self.gameSlots = slots
+    self.noteHighwayTop = nil
+    self:RefreshHighwayTop()
 
     if dangerOverlay then
         dangerOverlay:Hide()
@@ -2361,6 +2508,28 @@ function GameUI:ReleaseAllNotes()
     end
 end
 
+-- The note start line: a fixed height above the topmost bar's button, in screen
+-- pixels. Recomputed from the live buttons because GetCenter can be nil before the
+-- UI has laid out (so OnGameStart's first attempt may miss).
+function GameUI:RefreshHighwayTop()
+    local slots = self.gameSlots
+    if not slots then return end
+    local topY
+    for _, slotInfo in ipairs(slots) do
+        local btn = slotInfo.button
+        if btn then
+            local _, cy = btn:GetCenter()
+            if cy then
+                local sy = cy * btn:GetEffectiveScale()
+                if not topY or sy > topY then topY = sy end
+            end
+        end
+    end
+    if topY then
+        self.noteHighwayTop = topY + BoundToLearn.db.game.fallDistance
+    end
+end
+
 function GameUI:UpdateNotePosition(note, progress)
     local f = note.noteFrame
     if not f then return end
@@ -2372,10 +2541,20 @@ function GameUI:UpdateNotePosition(note, progress)
     if not bx then return end
     local bScale = btn:GetEffectiveScale()
     local fScale = f:GetEffectiveScale()
+    -- Recompute the start line once per frame from every tracked button, so a taller
+    -- bar can never leave it too low (which would floor its notes near their button).
+    local nowt = GetTime()
+    if self._hwyFrame ~= nowt then
+        self._hwyFrame = nowt
+        self:RefreshHighwayTop()
+    end
 
     local xTarget = (bx * bScale) / fScale
     local yTarget = (by * bScale) / fScale
-    local fallDist = BoundToLearn.db.game.fallDistance / fScale
+    -- Fall from the one fixed start line down to this note's button, so every note
+    -- starts at the same height. Falls back to a fixed gap per button if unset.
+    local fallDist = self.noteHighwayTop and mmax(20, self.noteHighwayTop / fScale - yTarget)
+                     or (BoundToLearn.db.game.fallDistance / fScale)
 
     local mods = note.modifiers or {}
 
@@ -2385,14 +2564,14 @@ function GameUI:UpdateNotePosition(note, progress)
         effectiveProgress = progress * progress  -- quadratic ease-in
     end
 
-    local x, y
+    -- Every note starts on the same line (vertical distance is always fallDist).
+    -- Angled notes slide in from a horizontal offset instead of starting at a
+    -- different height, so the start line stays uniform no matter the angle.
+    local remaining = 1.0 - effectiveProgress
+    local y = yTarget + fallDist * remaining
+    local x = xTarget
     if note.spawnAngle then
-        local remaining = 1.0 - effectiveProgress
-        x = xTarget + math.cos(note.spawnAngle) * fallDist * remaining
-        y = yTarget + math.sin(note.spawnAngle) * fallDist * remaining
-    else
-        x = xTarget
-        y = yTarget + fallDist * (1.0 - effectiveProgress)
+        x = xTarget + (fallDist / math.tan(note.spawnAngle)) * remaining
     end
 
     -- Squiggly: sinusoidal horizontal oscillation

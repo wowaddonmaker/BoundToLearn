@@ -42,6 +42,7 @@ local DB_DEFAULTS = {
         songKey = "s1",            -- selected track for the rhythm game
         songScores = {},           -- [songKey][difficulty] = best score
         songProgress = {},         -- [songKey] = best fraction (0-1) reached
+        songHistory = {},          -- [songKey][difficulty] = { recent scores } for the results trend
         mode = "timed",            -- "timed", "practice", "competitive"
         compBarPos = false,        -- saved competitive lane-bar position (drag setup)
         duration = 90,             -- seconds (timed/competitive)
@@ -219,6 +220,54 @@ local function OnInitialize()
         pt.unlockedBGs.tbc = true
         if pt.background == "orgrimmar" or pt.background == "darnassus" or pt.background == "naxxramas" then
             pt.background = "classic"
+        end
+    end
+
+    -- Migrate: money-score scale dropped 10x (SCORE_CAP 100000 -> 10000). Rescale
+    -- every stored score once so old bests stay comparable to new runs.
+    if not BoundToLearnDB.scoresRescaled10 then
+        BoundToLearnDB.scoresRescaled10 = true
+        local st = BoundToLearnDB.stats
+        if type(st) == "table" then
+            if type(st.personalBest) == "table" and type(st.personalBest.highestScore) == "number" then
+                st.personalBest.highestScore = mfloor(st.personalBest.highestScore / 10)
+            end
+            if type(st.difficultyBest) == "table" then
+                for _, d in pairs(st.difficultyBest) do
+                    if type(d) == "table" and type(d.highestScore) == "number" then
+                        d.highestScore = mfloor(d.highestScore / 10)
+                    end
+                end
+            end
+            if type(st.sessions) == "table" then
+                for _, s in ipairs(st.sessions) do
+                    if type(s) == "table" and type(s.score) == "number" then
+                        s.score = mfloor(s.score / 10)
+                    end
+                end
+            end
+        end
+        local ss = BoundToLearnDB.game and BoundToLearnDB.game.songScores
+        if type(ss) == "table" then
+            for _, perDiff in pairs(ss) do
+                if type(perDiff) == "table" then
+                    for diff, sc in pairs(perDiff) do
+                        if type(sc) == "number" then perDiff[diff] = mfloor(sc / 10) end
+                    end
+                end
+            end
+        end
+        local lb = BoundToLearnDB.leaderboard
+        if type(lb) == "table" then
+            for _, board in pairs(lb) do
+                if type(board) == "table" then
+                    for _, entry in ipairs(board) do
+                        if type(entry) == "table" and type(entry.score) == "number" then
+                            entry.score = mfloor(entry.score / 10)
+                        end
+                    end
+                end
+            end
         end
     end
 

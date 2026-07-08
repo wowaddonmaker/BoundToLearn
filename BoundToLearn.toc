@@ -19,6 +19,7 @@ Achievements.lua
 CompetitiveData.lua
 Modifiers.lua
 SongData.lua
+SongCharts.lua
 Game.lua
 GameUI.lua
 Leaderboard.lua
