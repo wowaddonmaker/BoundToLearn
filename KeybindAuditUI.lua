@@ -369,7 +369,7 @@ function KeybindAuditUI:CreateSetupPage()
     desc:SetText("Select which bars to include by clicking them on screen, or use the checkboxes below.")
 
     -- Bar checkboxes (two columns of 4)
-    local barCheckY = -82
+    local barCheckY = -104
     local barCheckboxes = {}
     local BARS_PER_COL = 4
     for i, barDef in ipairs(BAR_FRAME_MAP) do
@@ -382,6 +382,7 @@ function KeybindAuditUI:CreateSetupPage()
             if overlay and overlay:IsShown() then
                 UpdateBarOverlay(overlay, checked)
             end
+            KeybindAuditUI:UpdateStartButtonState()
         end)
         if col == 1 then
             cb:ClearAllPoints()
@@ -390,6 +391,19 @@ function KeybindAuditUI:CreateSetupPage()
         barCheckboxes[barDef.key] = cb
     end
     setupPage.barCheckboxes = barCheckboxes
+
+    -- Toggle-all button above the bar list.
+    local toggleAllBtn = ns.Theme.CreateButton(setupPage, "Toggle All", 90, 20)
+    toggleAllBtn:SetPoint("TOPLEFT", 20, -76)
+    toggleAllBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        local allOn = true
+        for _, barDef in ipairs(BAR_FRAME_MAP) do
+            if not barToggles[barDef.key] then allOn = false; break end
+        end
+        KeybindAuditUI:SetAllBars(not allOn)
+    end)
+    setupPage.toggleAllBtn = toggleAllBtn
 
     -- Right column options
     local optX = 330
@@ -485,10 +499,42 @@ function KeybindAuditUI:CreateSetupPage()
     local runBtn = ns.Theme.CreateAccentButton(setupPage, "Start Audit", 140, 30)
     runBtn:SetPoint("BOTTOM", 0, 20)
     runBtn:SetScript("OnClick", function()
+        if not KeybindAuditUI:AnyBarEnabled() then return end
         PlayUISound(SOUND_CLICK)
         SaveBarToggles()
         KeybindAuditUI:ShowResults()
     end)
+    setupPage.runBtn = runBtn
+    KeybindAuditUI:UpdateStartButtonState()
+end
+
+function KeybindAuditUI:AnyBarEnabled()
+    for _, barDef in ipairs(BAR_FRAME_MAP) do
+        if barToggles[barDef.key] then return true end
+    end
+    return false
+end
+
+function KeybindAuditUI:UpdateStartButtonState()
+    local runBtn = setupPage and setupPage.runBtn
+    if not runBtn then return end
+    local any = self:AnyBarEnabled()
+    runBtn:SetEnabled(any)
+    runBtn:SetAlpha(any and 1 or 0.4)
+end
+
+function KeybindAuditUI:SetAllBars(on)
+    for _, barDef in ipairs(BAR_FRAME_MAP) do
+        barToggles[barDef.key] = on
+        local cb = setupPage and setupPage.barCheckboxes and setupPage.barCheckboxes[barDef.key]
+        if cb then cb:SetChecked(on) end
+        local overlay = barOverlays[barDef.key]
+        if overlay and overlay:IsShown() then
+            UpdateBarOverlay(overlay, on)
+        end
+    end
+    SaveBarToggles()
+    self:UpdateStartButtonState()
 end
 
 function KeybindAuditUI:CreateResultsPage()
@@ -613,10 +659,10 @@ function KeybindAuditUI:CreateMethodologyPage()
     methodologyPage = CreateFrame("Frame", nil, auditFrame)
     methodologyPage:SetAllPoints()
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, methodologyPage, "UIPanelScrollFrameTemplate")
+    local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditMethScroll", methodologyPage, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 15, -42)
     scrollFrame:SetPoint("BOTTOMRIGHT", -30, 44)
-    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditMethScrollScrollBar"])
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(520)
@@ -901,10 +947,10 @@ function KeybindAuditUI:CreateCategoryDetailPage()
     titleText:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
     categoryDetailPage.titleText = titleText
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, categoryDetailPage, "UIPanelScrollFrameTemplate")
+    local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditCatScroll", categoryDetailPage, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 20, -72)
     scrollFrame:SetPoint("BOTTOMRIGHT", -35, 44)
-    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditCatScrollScrollBar"])
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(510)
@@ -1005,6 +1051,7 @@ function KeybindAuditUI:ShowSetup()
         end
     end
     SaveBarToggles()
+    self:UpdateStartButtonState()
     setupPage.mmoMouseCb:SetChecked(db.mmoMouse)
     setupPage.skipBarsCb:SetChecked(db.skipBarSelection)
     setupPage.groupingCb:SetChecked(db.includeGrouping)
