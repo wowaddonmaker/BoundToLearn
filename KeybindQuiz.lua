@@ -42,14 +42,14 @@ local MODIFIER_KEYS = {
 }
 
 local BAR_MAPPINGS = {
-    { bindPrefix = "ACTIONBUTTON",           btnPrefix = "ActionButton",              startSlot = 1 },
-    { bindPrefix = "MULTIACTIONBAR1BUTTON",  btnPrefix = "MultiBarBottomLeftButton",  startSlot = 61 },
-    { bindPrefix = "MULTIACTIONBAR2BUTTON",  btnPrefix = "MultiBarBottomRightButton", startSlot = 49 },
-    { bindPrefix = "MULTIACTIONBAR3BUTTON",  btnPrefix = "MultiBarRightButton",       startSlot = 25 },
-    { bindPrefix = "MULTIACTIONBAR4BUTTON",  btnPrefix = "MultiBarLeftButton",        startSlot = 37 },
-    { bindPrefix = "MULTIACTIONBAR5BUTTON",  btnPrefix = "MultiBar5Button",           startSlot = 145 },
-    { bindPrefix = "MULTIACTIONBAR6BUTTON",  btnPrefix = "MultiBar6Button",           startSlot = 157 },
-    { bindPrefix = "MULTIACTIONBAR7BUTTON",  btnPrefix = "MultiBar7Button",           startSlot = 169 },
+    { bindPrefix = "ACTIONBUTTON",           btnPrefix = "ActionButton",              startSlot = 1,   barFrame = "MainMenuBar" },
+    { bindPrefix = "MULTIACTIONBAR1BUTTON",  btnPrefix = "MultiBarBottomLeftButton",  startSlot = 61,  barFrame = "MultiBarBottomLeft" },
+    { bindPrefix = "MULTIACTIONBAR2BUTTON",  btnPrefix = "MultiBarBottomRightButton", startSlot = 49,  barFrame = "MultiBarBottomRight" },
+    { bindPrefix = "MULTIACTIONBAR3BUTTON",  btnPrefix = "MultiBarRightButton",       startSlot = 25,  barFrame = "MultiBarRight" },
+    { bindPrefix = "MULTIACTIONBAR4BUTTON",  btnPrefix = "MultiBarLeftButton",        startSlot = 37,  barFrame = "MultiBarLeft" },
+    { bindPrefix = "MULTIACTIONBAR5BUTTON",  btnPrefix = "MultiBar5Button",           startSlot = 145, barFrame = "MultiBar5" },
+    { bindPrefix = "MULTIACTIONBAR6BUTTON",  btnPrefix = "MultiBar6Button",           startSlot = 157, barFrame = "MultiBar6" },
+    { bindPrefix = "MULTIACTIONBAR7BUTTON",  btnPrefix = "MultiBar7Button",           startSlot = 169, barFrame = "MultiBar7" },
 }
 
 -- State
@@ -64,7 +64,7 @@ local quizFinished = false
 local waitingForNext = false
 local advanceTimer
 local wrongFlyTimer
-local hiddenHotkeys = {}
+local hiddenBars = {}
 local roundNumber = 1
 local isReviewRound = false
 local isPractice = false
@@ -145,24 +145,46 @@ local function DiscoverCards()
     end
 end
 
-local function HideBarKeybinds()
-    wipe(hiddenHotkeys)
-    for _, bar in ipairs(BAR_MAPPINGS) do
-        for i = 1, 12 do
-            local hotkey = _G[bar.btnPrefix .. i .. "HotKey"]
-            if hotkey and hotkey:IsShown() then
-                hotkey:Hide()
-                tinsert(hiddenHotkeys, hotkey)
-            end
+-- Class bars that aren't quizzed but should still be hidden so nothing is referenceable.
+local EXTRA_BARS = {
+    { barFrame = "PetActionBar", btnPrefix = "PetActionButton", count = 10 },
+    { barFrame = "StanceBar",    btnPrefix = "StanceButton",    count = 10 },
+}
+
+-- Hide the action bars entirely for the duration of the quiz so there is nothing to
+-- reference. Alpha (not Hide) keeps this out of protected-frame territory and is fully
+-- reversible; both the bar frame and its buttons are dimmed so bar art disappears too.
+-- Hiding the buttons directly guarantees they vanish even if the frame name is wrong.
+local function DimBar(frameName, btnPrefix, count)
+    local frame = frameName and _G[frameName]
+    if frame then
+        hiddenBars[#hiddenBars + 1] = { region = frame, alpha = frame:GetAlpha() }
+        frame:SetAlpha(0)
+    end
+    for i = 1, count do
+        local btn = _G[btnPrefix .. i]
+        if btn then
+            hiddenBars[#hiddenBars + 1] = { region = btn, alpha = btn:GetAlpha() }
+            btn:SetAlpha(0)
         end
     end
 end
 
-local function RestoreBarKeybinds()
-    for _, hotkey in ipairs(hiddenHotkeys) do
-        hotkey:Show()
+local function HideActionBars()
+    wipe(hiddenBars)
+    for _, bar in ipairs(BAR_MAPPINGS) do
+        DimBar(bar.barFrame, bar.btnPrefix, 12)
     end
-    wipe(hiddenHotkeys)
+    for _, bar in ipairs(EXTRA_BARS) do
+        DimBar(bar.barFrame, bar.btnPrefix, bar.count)
+    end
+end
+
+local function RestoreActionBars()
+    for _, entry in ipairs(hiddenBars) do
+        entry.region:SetAlpha(entry.alpha)
+    end
+    wipe(hiddenBars)
 end
 
 local function CancelAdvanceTimer()
@@ -903,6 +925,16 @@ function KeybindQuiz:BeginRound()
         local secs = mfloor(elapsed % 60)
         timerText:SetText(sformat("%d:%02d", mins, secs))
     end)
+
+    -- The action bars are hidden during the quiz, so end it if combat starts: the
+    -- player needs their bars back to fight.
+    quizFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    quizFrame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" and isRunning then
+            BoundToLearn:Print("Combat started, ending the quiz.")
+            KeybindQuiz:Stop()
+        end
+    end)
     cardFrame:Show()
     roundText:SetText("Round 1")
     progressText:SetTextColor(0.8, 0.8, 0.8)
@@ -914,7 +946,7 @@ function KeybindQuiz:BeginRound()
     wrongCountText:SetText("0")
     UpdateCounts()
 
-    HideBarKeybinds()
+    HideActionBars()
     inputFrame:Show()
 
     self:NextCard()
@@ -928,7 +960,7 @@ function KeybindQuiz:Stop()
     if wasRunning then
         CancelAdvanceTimer()
         CancelWrongFlyTimer()
-        RestoreBarKeybinds()
+        RestoreActionBars()
     end
     pendingFly = nil
     pendingWrongIcon = nil
@@ -945,6 +977,8 @@ function KeybindQuiz:Stop()
     end
     if quizFrame then
         quizFrame:SetScript("OnUpdate", nil)
+        quizFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        quizFrame:SetScript("OnEvent", nil)
         quizFrame.readyFrame:Hide()
         quizFrame:Hide()
     end
