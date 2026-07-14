@@ -43,6 +43,7 @@ local DB_DEFAULTS = {
         songScores = {},           -- [songKey][difficulty] = best score
         songProgress = {},         -- [songKey] = best fraction (0-1) reached
         songHistory = {},          -- [songKey][difficulty] = { recent scores } for the results trend
+        songStats = {},            -- [songKey][difficulty] = { plays, bestAccuracy, bestCombo }
         mode = "timed",            -- "timed", "practice", "competitive"
         compBarPos = false,        -- saved competitive lane-bar position (drag setup)
         duration = 90,             -- seconds (timed/competitive)

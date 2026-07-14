@@ -638,7 +638,8 @@ function Game:Stop()
     end
 
     if ns.GameUI and totalNotes > 0 and currentMode ~= "practice" then
-        ns.GameUI:RecordSongScore(score)
+        local songAcc = totalNotes > 0 and ((totalNotes - hitCounts.miss) / totalNotes * 100) or 0
+        ns.GameUI:RecordSongScore(score, songAcc, maxCombo)
         local key = BoundToLearn.db.game.songKey
         local song = ns.SongData and ns.SongData.Get(key)
         local songLen = song and ns.SongData.PlayLength(song) or 0
