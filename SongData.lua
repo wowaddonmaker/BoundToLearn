@@ -209,6 +209,10 @@ SongData.RADAR_LABELS = { "Speed", "Density", "Offbeat", "Bursts", "Stamina" }
 -- Per-song groove from the actual baked chart: note rate, plus the share of off-beat
 -- (eighth) and burst (sixteenth) subdivisions from the level mix. Distinct per track.
 local DIFF_GROOVE_SCALE = { Easy = 0.55, Medium = 0.75, Hard = 0.9, Extreme = 1.0 }
+-- Mirrors the game's per-difficulty note fall speed (Easy ~96 -> Extreme ~240): Easy
+-- notes crawl, Extreme fly. Hard and Extreme share the fall speed, so Extreme only
+-- edges ahead on the extra density it also brings.
+local DIFF_SPEED_SCALE = { Easy = 0.40, Medium = 0.72, Hard = 0.92, Extreme = 1.0 }
 local function chartGroove(key)
     local chart = ns.SongCharts and ns.SongCharts[key]
     if not (chart and chart.notes and #chart.notes > 0) then return nil end
@@ -231,9 +235,13 @@ function SongData.Radar(song, difficulty)
     -- Speed and Stamina come from the track's real tempo and length. Density, Offbeat
     -- and Bursts come from the track's own chart (so they differ per track), scaled by
     -- the difficulty so a harder chart reads busier.
-    local speed   = ((SongData.BPM(song) - 80) / 80)
-    local stamina = (((song.length or 200) - 120) / 640)
     local dscale  = DIFF_GROOVE_SCALE[difficulty] or 0.75
+    local sscale  = DIFF_SPEED_SCALE[difficulty] or 0.8
+    -- Speed is dominated by the difficulty's fall speed, nudged by the track tempo;
+    -- Stamina rises with difficulty too (a harder chart sustains more effort). Neither
+    -- is the same for Easy and Extreme any more.
+    local speed   = sscale * (0.8 + 0.35 * ((SongData.BPM(song) - 90) / 70))
+    local stamina = (((song.length or 200) - 120) / 640) * (0.55 + 0.45 * dscale)
     local density, offbeat, bursts
     local g = chartGroove(song.key)
     if g then
