@@ -11,3 +11,6 @@ target/
 
 # Local demo/media, never shipped
 docs/
+
+# Dev/build scripts, run releases locally, never committed
+release.sh
