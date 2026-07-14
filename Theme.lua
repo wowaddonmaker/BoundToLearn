@@ -682,6 +682,418 @@ function Theme.StyleScrollBar(scrollBar)
 end
 
 --------------------------------------------------------------------------
+-- Sidebar navigation: a left rail of stacked nav buttons plus a fixed
+-- content region. One tab is shown at a time; picking a nav button swaps
+-- the visible content frame. Fixed-size window model, no scrolling.
+--------------------------------------------------------------------------
+local IsMouseButtonDown = IsMouseButtonDown
+local tostring = tostring
+
+local function PaintNavButton(btn, state)
+    if state == "active" then
+        Theme.SetFill(btn, C.BTN_NORMAL[1], C.BTN_NORMAL[2], C.BTN_NORMAL[3], 1)
+        btn.label:SetTextColor(RGB(C.TEXT_PRIMARY, 1))
+    elseif state == "hover" then
+        Theme.SetFill(btn, 1, 1, 1, 0.06)
+        btn.label:SetTextColor(RGB(C.TEXT_BODY, 1))
+    else
+        Theme.SetFill(btn, 1, 1, 1, 0)
+        btn.label:SetTextColor(RGB(C.TEXT_DIM, 1))
+    end
+end
+
+function Theme.CreateSidebar(parent, opts)
+    opts = opts or {}
+    local width = opts.width or 132
+    local inset = opts.inset or 10
+    local contentTop = opts.contentTopInset or 46
+    local contentRight = opts.contentRightInset or 14
+    local contentBottom = opts.contentBottomInset or 14
+
+    local nav = { buttons = {}, tabs = {}, current = 0 }
+
+    local sidebar = CreateFrame("Frame", nil, parent)
+    sidebar:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, -inset)
+    sidebar:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", inset, inset)
+    sidebar:SetWidth(width)
+    Theme.Round(sidebar)
+    Theme.SetBarHeight(sidebar, 14)
+    Theme.SetBorderShown(sidebar, false)
+    Theme.SetFill(sidebar, 0.020, 0.019, 0.017, 1)
+    nav.sidebar = sidebar
+
+    local divider = parent:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 8, -2)
+    divider:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMRIGHT", 8, 2)
+    divider:SetWidth(1)
+    divider:SetColorTexture(1, 1, 1, 0.08)
+
+    if opts.title then
+        local title = sidebar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        title:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 10, -10)
+        title:SetText(opts.title)
+        title:SetTextColor(RGB(C.TEXT_PRIMARY, 1))
+        nav.title = title
+    end
+
+    local content = CreateFrame("Frame", nil, parent)
+    content:SetPoint("TOPLEFT", parent, "TOPLEFT", width + 32, -contentTop)
+    content:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -contentRight, contentBottom)
+    nav.content = content
+
+    function nav:SwitchToTab(index)
+        self.current = index
+        for i = 1, #self.tabs do
+            self.tabs[i]:SetShown(i == index)
+            PaintNavButton(self.buttons[i], i == index and "active" or "clear")
+        end
+    end
+
+    function nav:AddTab(label)
+        local index = #self.tabs + 1
+        local btn = CreateFrame("Button", nil, sidebar)
+        btn:SetSize(width - 16, 28)
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 8, -34 - (index - 1) * 32)
+        Theme.Round(btn)
+        Theme.SetBarHeight(btn, 10)
+        Theme.SetBorderShown(btn, false)
+        btn._navIndex = index
+
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", btn, "LEFT", 10, 0)
+        lbl:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetText(label or "")
+        btn.label = lbl
+        PaintNavButton(btn, "clear")
+
+        btn:SetScript("OnEnter", function(self)
+            if nav.current ~= self._navIndex then PaintNavButton(self, "hover") end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            if nav.current ~= self._navIndex then PaintNavButton(self, "clear") end
+        end)
+        btn:SetScript("OnClick", function()
+            if Utils.PlayUISound then Utils.PlayUISound(Utils.SOUND_TAB) end
+            nav:SwitchToTab(index)
+        end)
+        self.buttons[index] = btn
+
+        local tabContent = CreateFrame("Frame", nil, content)
+        tabContent:SetAllPoints(content)
+        tabContent:Hide()
+        self.tabs[index] = tabContent
+        return tabContent
+    end
+
+    return nav
+end
+
+--------------------------------------------------------------------------
+-- Flyout dropdown: a pill selector button that drops a rounded panel of
+-- option rows. A shared registry keeps only one open at a time; an open
+-- panel closes on any click outside itself.
+--------------------------------------------------------------------------
+local openFlyouts = {}
+
+local function FindWindow(frame)
+    local f = frame
+    while f do
+        local p = f:GetParent()
+        if not p or p == UIParent then return f end
+        f = p
+    end
+    return frame
+end
+
+function Theme.CreateFlyoutSelector(parent, width, rightInset)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(width or 160, 22)
+    btn:SetPoint("RIGHT", parent, "RIGHT", -(rightInset or 8), 0)
+    Theme.Round(btn)
+    Theme.SetBarHeight(btn, 11)
+    Theme.SetBorderShown(btn, false)
+    Theme.SetFillColor(btn, C.BTN_NORMAL)
+
+    local text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("LEFT", btn, "LEFT", 8, 0)
+    text:SetPoint("RIGHT", btn, "RIGHT", -18, 0)
+    text:SetJustifyH("CENTER")
+    text:SetTextColor(RGB(C.TEXT_PRIMARY, 1))
+    btn.text = text
+
+    local caret = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    caret:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+    caret:SetText("v")
+    caret:SetTextColor(RGB(C.TEXT_DIM, 1))
+    btn.caret = caret
+
+    btn:SetScript("OnEnter", function(self) if self:IsEnabled() then Theme.SetFillColor(self, C.BTN_HOVER) end end)
+    btn:SetScript("OnLeave", function(self) if self:IsEnabled() then Theme.SetFillColor(self, C.BTN_NORMAL) end end)
+    return btn, text
+end
+
+function Theme.CreateFlyoutPanel(btnFrame, width, numRows)
+    local flyout = CreateFrame("Frame", nil, btnFrame)
+    openFlyouts[#openFlyouts + 1] = flyout
+    flyout:SetSize(width or 160, (numRows or 1) * 20 + 6)
+    flyout:SetPoint("TOPRIGHT", btnFrame, "BOTTOMRIGHT", 0, -2)
+    local win = FindWindow(btnFrame)
+    flyout:SetFrameStrata(win:GetFrameStrata())
+    flyout:SetFrameLevel(win:GetFrameLevel() + 20)
+    Theme.Round(flyout)
+    Theme.SetBarHeight(flyout, 10)
+    Theme.SetBorderShown(flyout, true)
+    Theme.SetBorderColor(flyout, C.BORDER[1], C.BORDER[2], C.BORDER[3], 0.6)
+    Theme.SetFill(flyout, 0.07, 0.065, 0.06, 1)
+    flyout:Hide()
+
+    btnFrame:SetScript("OnClick", function()
+        local opening = not flyout:IsShown()
+        if opening then
+            for i = 1, #openFlyouts do
+                if openFlyouts[i] ~= flyout then openFlyouts[i]:Hide() end
+            end
+        end
+        flyout:SetShown(opening)
+        if btnFrame.caret then btnFrame.caret:SetText(opening and "^" or "v") end
+    end)
+    flyout:SetScript("OnShow", function(self)
+        self:SetFrameLevel(FindWindow(btnFrame):GetFrameLevel() + 20)
+        self:SetScript("OnUpdate", function(self)
+            if not self:IsMouseOver() and not btnFrame:IsMouseOver()
+               and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
+                self:Hide()
+            end
+        end)
+    end)
+    flyout:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+        if btnFrame.caret then btnFrame.caret:SetText("v") end
+    end)
+    return flyout
+end
+
+function Theme.AddFlyoutOptions(flyout, choices, itemWidth, onSelect, labelFn, styleFn)
+    local rows = {}
+    for i = 1, #choices do
+        local choice = choices[i]
+        local optBtn = CreateFrame("Button", nil, flyout)
+        optBtn:SetSize(itemWidth, 18)
+        optBtn:SetPoint("TOPLEFT", flyout, "TOPLEFT", 3, -3 - (i - 1) * 20)
+        local rowBg = CreateFrame("Frame", nil, optBtn)
+        rowBg:SetAllPoints()
+        rowBg:EnableMouse(false)
+        Theme.Round(rowBg)
+        Theme.SetBarHeight(rowBg, 9)
+        Theme.SetBorderShown(rowBg, false)
+        Theme.SetFill(rowBg, 1, 1, 1, 0)
+
+        local lbl = optBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", optBtn, "LEFT", 6, 0)
+        lbl:SetPoint("RIGHT", optBtn, "RIGHT", -6, 0)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetText(labelFn and labelFn(choice) or choice.label)
+        lbl:SetTextColor(RGB(C.TEXT_BODY, 1))
+        optBtn._label = lbl
+        if styleFn then styleFn(optBtn, choice, lbl) end
+
+        optBtn:SetScript("OnEnter", function() Theme.SetFill(rowBg, 1, 1, 1, 0.08); lbl:SetTextColor(1, 1, 1, 1) end)
+        optBtn:SetScript("OnLeave", function() Theme.SetFill(rowBg, 1, 1, 1, 0); lbl:SetTextColor(RGB(C.TEXT_BODY, 1)) end)
+        optBtn:SetScript("OnClick", function()
+            onSelect(choice)
+            flyout:Hide()
+        end)
+        rows[i] = optBtn
+    end
+
+    local contentW = 0
+    for i = 1, #rows do
+        local lbl = rows[i]._label
+        local getW = lbl.GetUnboundedStringWidth or lbl.GetStringWidth
+        local w = 6 + getW(lbl) + 6 + (rows[i]._rightIconW or 0)
+        if w > contentW then contentW = w end
+    end
+    local rowW = mmax(itemWidth, mfloor(contentW + 0.5))
+    if rowW > itemWidth then
+        for i = 1, #rows do rows[i]:SetWidth(rowW) end
+        flyout:SetWidth(rowW + 6)
+    end
+    return rows
+end
+
+-- Labeled preset row: caption on the left, a flyout dropdown on the right.
+-- choices are { {label=, value=}, ... }. opts: width, btnWidth, defaultValue,
+-- tooltip, styleFn, format. Returns the row, which carries :SetValue for refresh.
+function Theme.CreateFlyoutRow(parent, labelText, choices, getter, setter, opts)
+    opts = opts or {}
+    local rowW = opts.width or 330
+    local btnW = opts.btnWidth or 170
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(rowW, 24)
+
+    local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("LEFT", row, "LEFT", 8, 0)
+    label:SetPoint("RIGHT", row, "RIGHT", -btnW - 18, 0)
+    label:SetJustifyH("LEFT")
+    label:SetTextColor(RGB(C.TEXT_BODY, 1))
+    label:SetText(labelText or "")
+    row.label = label
+
+    local function LabelFor(value)
+        for i = 1, #choices do
+            if choices[i].value == value then return choices[i].label end
+        end
+        if opts.format then return opts.format(value) end
+        return tostring(value)
+    end
+    local function FlyoutLabelFor(choice)
+        if opts.defaultValue ~= nil and choice.value == opts.defaultValue then
+            return choice.label .. " (" .. (_G["DEFAULT"] or "Default") .. ")"
+        end
+        return choice.label
+    end
+
+    local btn, btnText = Theme.CreateFlyoutSelector(row, btnW)
+    btnText:SetText(LabelFor(getter()))
+    local flyout = Theme.CreateFlyoutPanel(btn, btnW, #choices)
+    Theme.AddFlyoutOptions(flyout, choices, btnW - 6, function(choice)
+        setter(choice.value)
+        btnText:SetText(LabelFor(choice.value))
+    end, FlyoutLabelFor, opts.styleFn)
+
+    if opts.tooltip then
+        row:EnableMouse(true)
+        Theme.AttachTooltip(row, labelText, opts.tooltip)
+    end
+
+    row.flyout = flyout
+    row.SetValue = function(_, value) btnText:SetText(LabelFor(value)) end
+    return row
+end
+
+--------------------------------------------------------------------------
+-- Stepper row: label + [-] [numeric field] [+]. The field is typeable and
+-- clamps to [minVal, maxVal] on commit. Exposes SetValue and SetGroupEnabled.
+--------------------------------------------------------------------------
+function Theme.CreateStepperRow(parent, labelText, minVal, maxVal, getter, setter, opts)
+    opts = opts or {}
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(opts.width or 330, 28)
+    row.enabled = true
+
+    local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("LEFT", row, "LEFT", 8, 0)
+    label:SetPoint("RIGHT", row, "RIGHT", -112, 0)
+    label:SetJustifyH("LEFT")
+    label:SetTextColor(RGB(C.TEXT_BODY, 1))
+    label:SetText(labelText or "")
+
+    local plusBtn = Theme.CreateButton(row, "+", 24, 20)
+    plusBtn:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+
+    local shell = CreateFrame("Frame", nil, row)
+    shell:SetSize(38, 20)
+    shell:SetPoint("RIGHT", plusBtn, "LEFT", -4, 0)
+    Theme.Round(shell)
+    Theme.SetBarHeight(shell, 10)
+    Theme.SetBorderShown(shell, false)
+    Theme.SetFillColor(shell, C.INSET_FILL)
+
+    local field = CreateFrame("EditBox", nil, shell)
+    field:SetPoint("TOPLEFT", shell, "TOPLEFT", 4, 0)
+    field:SetPoint("BOTTOMRIGHT", shell, "BOTTOMRIGHT", -4, 0)
+    field:SetFontObject("GameFontHighlightSmall")
+    field:SetJustifyH("CENTER")
+    field:SetAutoFocus(false)
+    field:SetNumeric(true)
+    field:SetMaxLetters(5)
+    shell:EnableMouse(true)
+    shell:SetScript("OnMouseDown", function() if row.enabled then field:SetFocus() end end)
+
+    local minusBtn = Theme.CreateButton(row, "-", 24, 20)
+    minusBtn:SetPoint("RIGHT", shell, "LEFT", -4, 0)
+
+    local function clamp(v)
+        v = mfloor((v or minVal) + 0.5)
+        if v < minVal then v = minVal end
+        if v > maxVal then v = maxVal end
+        return v
+    end
+    local function commit(v)
+        v = clamp(v)
+        setter(v)
+        field:SetText(tostring(v))
+    end
+    local function stepBy(delta)
+        if row.enabled then commit((getter() or minVal) + delta) end
+    end
+    minusBtn:SetScript("OnClick", function() stepBy(-1) end)
+    plusBtn:SetScript("OnClick", function() stepBy(1) end)
+    field:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    field:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    field:SetScript("OnEscapePressed", function(self)
+        self._cancel = true
+        self:ClearFocus()
+    end)
+    field:SetScript("OnEditFocusLost", function(self)
+        if self._cancel then
+            self._cancel = nil
+            self:SetText(tostring(clamp(getter())))
+            return
+        end
+        if row.enabled then commit(self:GetNumber()) else self:SetText(tostring(clamp(getter()))) end
+        self:HighlightText(0, 0)
+    end)
+
+    row.SetValue = function(_, v) field:SetText(tostring(clamp(v))) end
+    row.SetGroupEnabled = function(self, enabled)
+        self.enabled = enabled
+        self:SetAlpha(enabled and 1 or 0.35)
+        label:SetTextColor(RGB(enabled and C.TEXT_BODY or C.TEXT_DISABLED, 1))
+        if enabled then
+            minusBtn:Enable(); plusBtn:Enable(); field:Enable()
+        else
+            minusBtn:Disable(); plusBtn:Disable(); field:ClearFocus(); field:Disable()
+        end
+    end
+
+    if opts.tooltip then
+        row:EnableMouse(true)
+        Theme.AttachTooltip(row, labelText, opts.tooltip)
+    end
+    field:SetText(tostring(clamp(getter())))
+    return row
+end
+
+--------------------------------------------------------------------------
+-- Settings-group card: a rounded fill card that owns a list of controls
+-- and cascades enable/disable to them.
+--------------------------------------------------------------------------
+function Theme.CreateSettingsGroup(parent, width, height, color)
+    local group = CreateFrame("Frame", nil, parent)
+    group:SetSize(width, height)
+    Theme.StyleCard(group, color or C.SECTION_FILL)
+    group.controls = {}
+    group.AddControl = function(self, control)
+        if control then self.controls[#self.controls + 1] = control end
+        return control
+    end
+    group.SetGroupEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.35)
+        for i = 1, #self.controls do
+            local control = self.controls[i]
+            if control.SetGroupEnabled then
+                control:SetGroupEnabled(enabled)
+            elseif control.Enable and control.Disable then
+                if enabled then control:Enable() else control:Disable() end
+            end
+        end
+    end
+    return group
+end
+
+--------------------------------------------------------------------------
 -- Color themes: a preset accent hue drives the whole interactive palette.
 -- Each preset gives the accent RGB + a text-safe hex; the button/toggle/gloss
 -- tints are derived, so adding a theme is one line. Applied once on load from
