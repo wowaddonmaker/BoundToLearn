@@ -103,15 +103,15 @@ local playerFaction
 local BACKGROUNDS = {
     { id = "classic",      tier = 1,  nameKey = "EXPANSION_NAME0" },
     { id = "tbc",          tier = 2,  nameKey = "EXPANSION_NAME1" },
-    { id = "wrath",        tier = 3,  nameKey = "EXPANSION_NAME2", unlock = { type = "score", value = 500,  label = "Score 500+" } },
-    { id = "cataclysm",    tier = 4,  nameKey = "EXPANSION_NAME3", unlock = { type = "combo", value = 10,   label = "10+ combo" } },
-    { id = "pandaria",     tier = 5,  nameKey = "EXPANSION_NAME4", unlock = { type = "score", value = 1000, label = "Score 1000+" } },
-    { id = "draenor",      tier = 6,  nameKey = "EXPANSION_NAME5", unlock = { type = "combo", value = 15,   label = "15+ combo" } },
-    { id = "legion",       tier = 7,  nameKey = "EXPANSION_NAME6", unlock = { type = "score", value = 2000, label = "Score 2000+" } },
-    { id = "bfa",          tier = 8,  nameKey = "EXPANSION_NAME7", unlock = { type = "combo", value = 20,   label = "20+ combo" } },
-    { id = "shadowlands",  tier = 9,  nameKey = "EXPANSION_NAME8", unlock = { type = "score", value = 3500, label = "Score 3500+" } },
-    { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 5000, label = "Score 5000+" } },
-    { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 25, label = "25+ combo" } },
+    { id = "wrath",        tier = 3,  nameKey = "EXPANSION_NAME2", unlock = { type = "score", value = 1500,  label = "Score 1500+" } },
+    { id = "cataclysm",    tier = 4,  nameKey = "EXPANSION_NAME3", unlock = { type = "combo", value = 12,    label = "12+ combo" } },
+    { id = "pandaria",     tier = 5,  nameKey = "EXPANSION_NAME4", unlock = { type = "score", value = 3000,  label = "Score 3000+" } },
+    { id = "draenor",      tier = 6,  nameKey = "EXPANSION_NAME5", unlock = { type = "combo", value = 20,    label = "20+ combo" } },
+    { id = "legion",       tier = 7,  nameKey = "EXPANSION_NAME6", unlock = { type = "score", value = 5000,  label = "Score 5000+" } },
+    { id = "bfa",          tier = 8,  nameKey = "EXPANSION_NAME7", unlock = { type = "combo", value = 30,    label = "30+ combo" } },
+    { id = "shadowlands",  tier = 9,  nameKey = "EXPANSION_NAME8", unlock = { type = "score", value = 8000,  label = "Score 8000+" } },
+    { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 12000, label = "Score 12000+" } },
+    { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 45, label = "45+ combo" } },
 }
 for i = 1, #BACKGROUNDS do
     local bg = BACKGROUNDS[i]
@@ -638,7 +638,7 @@ function PingGameUI:CreateUI()
     comboText:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT))
 
     -- Sound toggle helpers for HUD
-    local function CreateSoundToggle(parent, label, getState, setState, xOff)
+    local function CreateSoundToggle(parent, label, getState, setState, xOff, tooltip)
         local btn = CreateFrame("Button", nil, parent)
         btn:SetSize(36, 14)
         btn:SetPoint("RIGHT", xOff, 0)
@@ -657,13 +657,31 @@ function PingGameUI:CreateUI()
             setState(not getState())
             Refresh()
         end)
+        if tooltip then
+            btn:SetScript("OnEnter", function(self)
+                self.hovering = true
+                C_Timer.After(0.4, function()
+                    if not self.hovering then return end
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    GameTooltip:AddLine(label)
+                    GameTooltip:AddLine(tooltip, 0.8, 0.8, 0.8, true)
+                    GameTooltip:Show()
+                end)
+            end)
+            btn:SetScript("OnLeave", function(self)
+                self.hovering = false
+                GameTooltip:Hide()
+            end)
+        end
         btn.Refresh = Refresh
         Refresh()
         return btn
     end
 
-    local hudMusicBtn = CreateSoundToggle(hudFrame, "Music", IsMusicMuted, ToggleMuteMusic, -130)
-    local hudPingBtn = CreateSoundToggle(hudFrame, "SFX", IsPingSoundMuted, ToggleMutePingSounds, -90)
+    local hudMusicBtn = CreateSoundToggle(hudFrame, "Music", IsMusicMuted, ToggleMuteMusic, -130,
+        "Background music while you play.")
+    local hudPingBtn = CreateSoundToggle(hudFrame, "SFX", IsPingSoundMuted, ToggleMutePingSounds, -90,
+        "Sound effects: the ping and alert sounds during play. Music is a separate toggle.")
     hudFrame.musicBtn = hudMusicBtn
     hudFrame.pingBtn = hudPingBtn
 
@@ -1624,6 +1642,11 @@ function PingGameUI:OnGameStart()
     scoreText:SetText("0")
     timerText:SetText("")
     comboText:SetText("")
+    -- Release any frames left over from the previous round so old pings do not
+    -- linger on the map before the new round spawns anything.
+    for _, frame in pairs(activeTargetFrames) do
+        ReleaseTarget(frame)
+    end
     wipe(activeTargetFrames)
 end
 
@@ -1840,6 +1863,9 @@ function PingGameUI:OnTargetSpawned(target)
 
         local npcID = npcIDs[math.random(#npcIDs)]
         local facing = (math.random() - 0.5) * 1.05  -- -30 to +30 degrees
+        -- Show before feeding the creature: SetCreature on a hidden model (fresh from
+        -- the pool) can render blank on first appearance, matching the showcase re-feed.
+        frame.model:Show()
         frame.model:ClearModel()
         frame.model:SetPortraitZoom(0)
         frame.model:SetCamDistanceScale(1.4)
@@ -1862,7 +1888,6 @@ function PingGameUI:OnTargetSpawned(target)
             end
             self:SetScript("OnModelLoaded", nil)
         end)
-        frame.model:Show()
         frame.modelHit:Show()
     else
         -- Portraits (default): race icon atlas for enemy/ally, hazard icon for hazards
