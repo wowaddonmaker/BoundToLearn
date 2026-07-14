@@ -48,7 +48,7 @@ function Stats:RecordGameSession(gameData)
                      + gameData.hitCounts.good + gameData.hitCounts.miss
     if totalNotes == 0 then return end
 
-    local accuracy = ((totalNotes - gameData.hitCounts.miss) / totalNotes) * 100
+    local accuracy = ns.Utils.HitAccuracy(gameData.hitCounts)
 
     local summary = {
         timestamp = time(),
@@ -66,7 +66,7 @@ function Stats:RecordGameSession(gameData)
 
     local db = BoundToLearn.db.stats
     db.lifetimeGameNotes = db.lifetimeGameNotes + totalNotes
-    db.lifetimeGameHits = db.lifetimeGameHits + (totalNotes - gameData.hitCounts.miss)
+    db.lifetimeGameHits = db.lifetimeGameHits + ns.Utils.WeightedHits(gameData.hitCounts)
 
     local pb = db.personalBest
     if summary.score > pb.highestScore then
@@ -175,4 +175,26 @@ function Stats:GetLifetimeGameAccuracy()
     local db = BoundToLearn.db.stats
     if db.lifetimeGameNotes == 0 then return 0 end
     return (db.lifetimeGameHits / db.lifetimeGameNotes) * 100
+end
+
+-- Full stats wipe shared by the options panel and the in-game stats page: lifetime
+-- tallies, personal bests, the session log, and per-difficulty and per-song records.
+function Stats:ResetAll()
+    local db = BoundToLearn.db.stats
+    wipe(db.sessions)
+    db.personalBest.longestCombo = 0
+    db.personalBest.highestScore = 0
+    db.personalBest.bestAccuracy = 0
+    db.personalBest.bestKeybindRatio = 0
+    db.lifetimeClicks = 0
+    db.lifetimeKeybinds = 0
+    db.lifetimeGameNotes = 0
+    db.lifetimeGameHits = 0
+    if db.difficultyBest then wipe(db.difficultyBest) end
+    local g = BoundToLearn.db.game
+    if g then
+        if g.songScores then wipe(g.songScores) end
+        if g.songStats then wipe(g.songStats) end
+        if g.songProgress then wipe(g.songProgress) end
+    end
 end

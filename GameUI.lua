@@ -819,54 +819,6 @@ function GameUI:RecordSongProgress(key, frac)
     if songSelect then songSelect.donutDirty = true end
 end
 
--- Keycap widget: a little keyboard-key shape (front lip + top face) whose face
--- fills bottom-up by a fraction. Used for the difficulty meters and the in-game
--- health gauge, tying the visuals to the addon's keybind theme.
--- A physical keyboard keycap: rounded body with a dark rim (depth), a bottom-up
--- coloured fill for the meter, and a soft top sheen. Built from the shared
--- rounded-rect toolkit so it matches the rest of the UI instead of flat squares.
-local function MakeKeycap(parent, w, h)
-    local cap = CreateFrame("Frame", nil, parent)
-    cap:SetSize(w, h)
-    Theme.Round(cap)
-    Theme.SetBarHeight(cap, mmin(10, h))          -- ~5px corner radius, not a pill
-    Theme.SetFill(cap, 0.13, 0.13, 0.15, 1)
-    Theme.SetBorderColor(cap, 0, 0, 0, 0.95)      -- dark rim reads as key depth
-    cap:SetClipsChildren(true)
-
-    local fill = cap:CreateTexture(nil, "ARTWORK")
-    fill:SetPoint("BOTTOMLEFT", 1, 2)             -- 2px front lip at the bottom
-    fill:SetPoint("BOTTOMRIGHT", -1, 2)
-    fill:SetColorTexture(1, 1, 1, 1)
-    fill:Hide()
-    cap.fill = fill
-
-    local gloss = cap:CreateTexture(nil, "OVERLAY")
-    gloss:SetPoint("TOPLEFT", 2, -2)
-    gloss:SetPoint("TOPRIGHT", -2, -2)
-    gloss:SetHeight(mmax(2, (h - 4) * 0.42))
-    gloss:SetColorTexture(1, 1, 1, 1)
-    gloss:SetGradient("VERTICAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, 0.14))
-    cap.gloss = gloss
-
-    cap.faceH = h - 3
-    return cap
-end
-
-local function SetKeycap(cap, r, g, b, frac, dim)
-    frac = frac or 0
-    if frac <= 0 then
-        cap.fill:Hide()
-        Theme.SetFill(cap, 0.12, 0.12, 0.14, dim and 0.5 or 0.95)
-        cap.gloss:SetAlpha(dim and 0.4 or 0.8)
-        return
-    end
-    Theme.SetFill(cap, r * 0.22, g * 0.22, b * 0.22, 1)
-    cap.fill:SetHeight(mmax(1, cap.faceH * mmin(1, frac)))
-    cap.fill:SetColorTexture(r, g, b, dim and 0.6 or 1)
-    cap.fill:Show()
-    cap.gloss:SetAlpha(dim and 0.5 or 1)
-end
 
 -- Fill colour ramps with how full the bar is: green when barely filled (easy) through
 -- yellow and orange to red when nearly full (hard).
@@ -921,6 +873,20 @@ local function SetDiffBar(frame, rating, dim)
     frame.bar:SetValue(rating)
     frame.bar:SetStatusBarColor(DiffRampColor(rating / 10))
     frame:SetAlpha(dim and 0.55 or 1)
+end
+
+-- In-round life gauge: the same rounded cast-bar track as the difficulty meter, but the
+-- fill is the remaining life and the ramp runs the other way (full = green, empty = red).
+local function MakeLifeBar(parent, w, h)
+    local frame = MakeDiffBar(parent, w, h)
+    frame.bar:SetMinMaxValues(0, 1)
+    return frame
+end
+
+local function SetLifeBar(frame, frac)
+    frac = mmax(0, mmin(1, frac))
+    frame.bar:SetValue(frac)
+    frame.bar:SetStatusBarColor(DiffRampColor(1 - frac))
 end
 
 -- A renown-style progress donut: a dim circular track with a coloured arc that
@@ -1634,7 +1600,7 @@ function GameUI:ShowResultsOnSelect(results)
 
     local rp = songSelect.resultsPanel
     local totalNotes = results.totalNotes or 0
-    local accuracy = totalNotes > 0 and ((totalNotes - (hc.miss or 0)) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(hc)
 
     rp.title:SetText(results.focusFailed and "|cFFFF6666Round Over|r"
         or "|cFF" .. Theme.ACCENT_HEX .. "Round Complete|r")
@@ -1739,6 +1705,21 @@ end
 -- the carousel with aggregate lifetime numbers; Back returns to track selection.
 local STATS_SONG_DIFFS = { "Easy", "Medium", "Hard", "Extreme" }
 
+-- Shared by the in-game stats page's Reset button and the options panel's reset button.
+StaticPopupDialogs["BOUNDTOLEARN_RESET_STATS"] = {
+    text = "Reset all BoundToLearn statistics? This cannot be undone.",
+    button1 = "Reset",
+    button2 = "Cancel",
+    OnAccept = function()
+        if ns.Stats then ns.Stats:ResetAll() end
+        if ns.GameUI then ns.GameUI:RefreshStatsPanel() end
+        if BoundToLearn then BoundToLearn:Print("Statistics reset.") end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
 function GameUI:CreateStatsPanel(f)
     local sp = CreateFrame("Frame", nil, f)
     sp:SetPoint("TOPLEFT", 12, -12)
@@ -1754,6 +1735,13 @@ function GameUI:CreateStatsPanel(f)
     backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:HideStatsPage()
+    end)
+
+    local resetBtn = MakeBubbleButton(sp, "Reset Stats", 92, 22)
+    resetBtn:SetPoint("LEFT", backBtn, "RIGHT", 6, 0)
+    resetBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        StaticPopup_Show("BOUNDTOLEARN_RESET_STATS")
     end)
 
     local title = sp:CreateFontString(nil, "OVERLAY")
@@ -2579,16 +2567,11 @@ function GameUI:CreateHealthBar()
     label:SetText("LIFE")
     label:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
 
-    self.healthCaps = {}
-    local N, CW = 10, 15
-    for i = 1, N do
-        local cap = MakeKeycap(hf, CW, 18)
-        cap:SetPoint("LEFT", 44 + (i - 1) * (CW + 2), 0)
-        self.healthCaps[i] = cap
-    end
+    hf.lifeBar = MakeLifeBar(hf, 176, 14)
+    hf.lifeBar:SetPoint("LEFT", 44, 0)
 
     hf.diffFS = hf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hf.diffFS:SetPoint("LEFT", self.healthCaps[N], "RIGHT", 16, 0)
+    hf.diffFS:SetPoint("LEFT", hf.lifeBar, "RIGHT", 16, 0)
 
     local stopBtn = Theme.CreateButton(hf, "Stop", 52, 22)
     stopBtn:SetPoint("RIGHT", -8, 0)
@@ -2630,25 +2613,13 @@ function GameUI:PlaceHealthBarAtLine(screenY)
     hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / hf:GetEffectiveScale())
 end
 
-function GameUI:UpdateHealthCaps(pct)
-    if not self.healthCaps then return end
-    local r, g, b
-    if pct > 0.6 then
-        r, g, b = 0.35, 0.85, 0.45
-    elseif pct > 0.3 then
-        r, g, b = 0.98, 0.62, 0.18
-    else
-        r, g, b = 0.85, 0.32, 0.32
-    end
-    local N = #self.healthCaps
-    for i = 1, N do
-        local frac = mmax(0, mmin(1, (pct - (i - 1) / N) * N))
-        SetKeycap(self.healthCaps[i], r, g, b, frac, false)
-    end
+function GameUI:UpdateLifeBar(pct)
+    local hf = self.healthFrame
+    if hf and hf.lifeBar then SetLifeBar(hf.lifeBar, pct or 0) end
 end
 
 function GameUI:UpdateFocusBar(current, max)
-    self:UpdateHealthCaps(max > 0 and (current / max) or 0)
+    self:UpdateLifeBar(max > 0 and (current / max) or 0)
     if not dangerOverlay then return end
     local pct = current / max
 
@@ -2790,7 +2761,7 @@ function GameUI:OnGameStart(slots)
     self:HideSongSelect()
     self:CreateHealthBar()
     if self.healthFrame then self.healthFrame:Show() end
-    self:UpdateHealthCaps(1)
+    self:UpdateLifeBar(1)
     if self.healthFrame and self.healthFrame.diffFS then
         local diff = BoundToLearn.db.game.difficulty
         local c = DIFF_COLORS[diff] or { 0.8, 0.8, 0.8 }
@@ -3369,7 +3340,7 @@ function GameUI:ShowSummary(results)
     self.lastResults = results
     local sf = self.summaryFrame
     local totalNotes = results.totalNotes
-    local accuracy = totalNotes > 0 and ((totalNotes - results.hitCounts.miss) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(results.hitCounts)
 
     if sf.title then
         if results.focusFailed then
@@ -3609,8 +3580,7 @@ function GameUI:CreateSummaryFrame()
 end
 
 function GameUI:FormatShareMessage(results)
-    local totalNotes = results.totalNotes
-    local accuracy = totalNotes > 0 and ((totalNotes - results.hitCounts.miss) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(results.hitCounts)
     local diff = results.difficulty or "?"
     local mode = results.mode or "timed"
     local modeLabel = mode == "practice" and "Practice" or mode == "competitive" and "Competitive" or "Timed"

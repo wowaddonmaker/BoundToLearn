@@ -70,3 +70,21 @@ function Utils.DebugPrint(...)
         print("|cff33ff99[BTL Debug]|r", ...)
     end
 end
+
+-- Hit quality weights for accuracy: perfect counts full, great and good count partially,
+-- miss zero. So an all-"good" run no longer reads 100% -- only an all-perfect run does.
+local ACC_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.5 }
+
+function Utils.WeightedHits(hc)
+    if not hc then return 0 end
+    return (hc.perfect or 0) * ACC_WEIGHT.perfect
+         + (hc.great or 0) * ACC_WEIGHT.great
+         + (hc.good or 0) * ACC_WEIGHT.good
+end
+
+function Utils.HitAccuracy(hc)
+    if not hc then return 0 end
+    local total = (hc.perfect or 0) + (hc.great or 0) + (hc.good or 0) + (hc.miss or 0)
+    if total <= 0 then return 0 end
+    return Utils.WeightedHits(hc) / total * 100
+end

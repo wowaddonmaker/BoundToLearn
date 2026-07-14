@@ -85,7 +85,7 @@ function Leaderboard:BroadcastScore(results)
 
     local totalNotes = results.totalNotes or 0
     if totalNotes == 0 then return end
-    local accuracy = mfloor(((totalNotes - results.hitCounts.miss) / totalNotes) * 100)
+    local accuracy = mfloor(ns.Utils.HitAccuracy(results.hitCounts))
 
     local msg = Pack("SC",
         results.difficulty or "Medium",
@@ -422,7 +422,7 @@ function Leaderboard:AddOwnScore(results)
 
     local totalNotes = results.totalNotes or 0
     if totalNotes == 0 then return end
-    local accuracy = mfloor(((totalNotes - results.hitCounts.miss) / totalNotes) * 100)
+    local accuracy = mfloor(ns.Utils.HitAccuracy(results.hitCounts))
 
     local entry = {
         name = playerName,
