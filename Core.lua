@@ -73,7 +73,7 @@ local DB_DEFAULTS = {
         randomBG = false,           -- randomize from unlocked backgrounds
         unlockedBGs = { classic = true, tbc = true },
         muteMusic = false,
-        mutePingSounds = true,      -- ping sounds off by default
+        mutePingSounds = false,     -- ping SFX on by default
     },
     stats = {
         sessions = {},
@@ -269,6 +269,37 @@ local function OnInitialize()
                     end
                 end
             end
+        end
+    end
+
+    -- Migrate: accuracy now weights hit quality (perfect/great/good) instead of only
+    -- subtracting misses, so old accuracy bests would sit unbeatable. Reset the accuracy
+    -- bests and the lifetime hit tally once so they rebuild on the new formula.
+    if not BoundToLearnDB.accuracyWeighted then
+        BoundToLearnDB.accuracyWeighted = true
+        local st = BoundToLearnDB.stats
+        if type(st) == "table" then
+            st.lifetimeGameHits = 0
+            st.lifetimeGameNotes = 0
+            if type(st.personalBest) == "table" then st.personalBest.bestAccuracy = 0 end
+        end
+        local g = BoundToLearnDB.game
+        if type(g) == "table" and type(g.songStats) == "table" then
+            for _, byDiff in pairs(g.songStats) do
+                if type(byDiff) == "table" then
+                    for _, s in pairs(byDiff) do
+                        if type(s) == "table" then s.bestAccuracy = 0 end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Migrate: ping SFX now defaults on; enable it once for installs from when it was off.
+    if not BoundToLearnDB.pingSfxDefaultOn then
+        BoundToLearnDB.pingSfxDefaultOn = true
+        if type(BoundToLearnDB.pingTrainer) == "table" then
+            BoundToLearnDB.pingTrainer.mutePingSounds = false
         end
     end
 
@@ -584,6 +615,9 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:EnableMouse(true)
         ns.Theme.StylePanel(minimapMenu, 0.97)
         minimapMenu:Hide()
+        -- Register with the escape stack so Esc closes the menu instead of falling
+        -- through and opening the game menu.
+        tinsert(UISpecialFrames, "BoundToLearnMinimapMenu")
 
         local menuEntries = {
             { header = "Games" },

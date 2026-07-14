@@ -313,11 +313,25 @@ function Options:CreateGeneralPanel()
     local updateModeState
     local modeCBs = {}
     local blacklistBox
+    local clickBlockSec
 
     local function UpdateBlacklistBox()
         if not blacklistBox then return end
-        blacklistBox:SetShown(BoundToLearn.db.clickBlock.mode == "custom"
-            and BoundToLearn.db.clickBlock.enabled)
+        local show = BoundToLearn.db.clickBlock.mode == "custom"
+            and BoundToLearn.db.clickBlock.enabled
+        blacklistBox:SetShown(show)
+        -- The section reserves room for the box; reclaim it when the box is hidden so
+        -- non-custom modes do not leave a gap under the radios.
+        if clickBlockSec and clickBlockSec.fullHeight then
+            local reserve = blacklistBox:GetHeight() + 6
+            if show then
+                clickBlockSec.contentHeight = clickBlockSec.fullHeight
+            else
+                clickBlockSec.contentHeight = clickBlockSec.fullHeight - reserve
+            end
+            clickBlockSec.content:SetHeight(clickBlockSec.contentHeight)
+            ReflowSections(sections)
+        end
     end
 
     local function RefreshBlacklistContent()
@@ -395,7 +409,7 @@ function Options:CreateGeneralPanel()
         RefreshBlacklistContent()
     end
 
-    AddSection(sections, panel, "Click Blocking", function(content)
+    clickBlockSec = AddSection(sections, panel, "Click Blocking", function(content)
         local y = 0
         y = self:AddCheckbox(content, "Enable Click Blocking", y,
             function() return BoundToLearn.db.clickBlock.enabled end,
@@ -558,8 +572,9 @@ function Options:CreateGeneralPanel()
             hideOnEscape = true,
             preferredIndex = 3,
         }
-        return boxY - 126
+        return boxY - (blacklistBox:GetHeight() + 6)
     end)
+    clickBlockSec.fullHeight = clickBlockSec.contentHeight
 
     updateModeState = UpdateModeRadios
     UpdateModeRadios()
@@ -801,28 +816,6 @@ function Options:CreateResetButtons()
     resetDefaults:SetScript("OnClick", function()
         StaticPopup_Show("BOUNDTOLEARN_RESET_DEFAULTS")
     end)
-
-    StaticPopupDialogs["BOUNDTOLEARN_RESET_STATS"] = {
-        text = "Reset all BoundToLearn statistics? This cannot be undone.",
-        button1 = "Reset",
-        button2 = "Cancel",
-        OnAccept = function()
-            local db = BoundToLearn.db.stats
-            wipe(db.sessions)
-            db.personalBest.longestCombo = 0
-            db.personalBest.highestScore = 0
-            db.personalBest.bestAccuracy = 0
-            db.personalBest.bestKeybindRatio = 0
-            db.lifetimeClicks = 0
-            db.lifetimeKeybinds = 0
-            db.lifetimeGameNotes = 0
-            db.lifetimeGameHits = 0
-            BoundToLearn:Print("Statistics reset.")
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-    }
 
     StaticPopupDialogs["BOUNDTOLEARN_RESET_DEFAULTS"] = {
         text = "Reset all BoundToLearn settings to defaults?",
