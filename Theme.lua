@@ -672,6 +672,13 @@ function Theme.StyleScrollBar(scrollBar)
         local b = scrollBar[part] or _G[(scrollBar:GetName() or "") .. part]
         if b and b.Hide then b:Hide() end
     end
+    -- Catch arrow buttons the named lookups miss (anonymous scrollbars): the classic
+    -- thumb is a texture, so hiding Button children removes the arrows but keeps the thumb.
+    for _, child in ipairs({ scrollBar:GetChildren() }) do
+        if child.GetObjectType and child:GetObjectType() == "Button" then
+            child:Hide()
+        end
+    end
 end
 
 --------------------------------------------------------------------------

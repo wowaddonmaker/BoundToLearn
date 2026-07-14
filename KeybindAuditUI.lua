@@ -480,7 +480,7 @@ function KeybindAuditUI:CreateSetupPage()
     -- Keyboard layout selector (under bar checkboxes)
     local layoutLabel = setupPage:CreateFontString(nil, "OVERLAY")
     layoutLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    layoutLabel:SetPoint("TOPLEFT", 20, -210)
+    layoutLabel:SetPoint("TOPLEFT", 20, -234)
     layoutLabel:SetTextColor(0.8, 0.8, 0.8)
     layoutLabel:SetText("Keyboard layout:")
 
@@ -602,11 +602,12 @@ function KeybindAuditUI:RefreshUniqueBinds()
 end
 
 function KeybindAuditUI:ShowUniqueBindsPanel()
+    GetDb().uniqueBinds = GetDb().uniqueBinds or {}
     if not uniqueBindsPanel then
         local p = CreateFrame("Frame", nil, auditFrame)
         p:SetPoint("TOPLEFT", 20, -46)
         p:SetPoint("BOTTOMRIGHT", -20, 18)
-        p:SetFrameStrata("DIALOG")
+        p:SetFrameStrata("FULLSCREEN_DIALOG")
         p:SetFrameLevel(auditFrame:GetFrameLevel() + 20)
         ns.Theme.StylePanel(p, 0.98)
         p:EnableMouse(true)
@@ -831,7 +832,7 @@ function KeybindAuditUI:CreateMethodologyPage()
     text:SetWidth(520)
     text:SetJustifyH("LEFT")
     text:SetTextColor(0.75, 0.75, 0.75)
-    text:SetText(
+    local methBody =
         "|cFFFF8A33Overview|r\n"
         .. "The audit scans your action bars and scores your keybind setup on a 0-100 scale "
         .. "across four categories.\n\n"
@@ -869,7 +870,7 @@ function KeybindAuditUI:CreateMethodologyPage()
         .. "|cFFFF8A33MMO Mouse|r\n"
         .. "When enabled, number row keys (6-0, -, =) are treated as prime keys "
         .. "since they map to your thumb grid."
-    )
+    text:SetText((methBody:gsub("FF8A33", ns.Theme.ACCENT_HEX)))
     content:SetHeight(text:GetStringHeight() + 10)
 
     local backBtn = ns.Theme.CreateButton(methodologyPage, "Back", 80, 24)
