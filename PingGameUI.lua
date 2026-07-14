@@ -1745,15 +1745,19 @@ end
 
 function PingGameUI:OnTargetSpawned(target)
     local frame = AcquireTarget()
+    local sizeScale = target.sizeScale or 1
+    frame.sizeScale = sizeScale
+    frame.icon:SetSize((TARGET_SIZE - 8) * sizeScale, (TARGET_SIZE - 8) * sizeScale)
+    frame.model:SetSize(TARGET_SIZE * 2.25 * sizeScale, TARGET_SIZE * 3.4 * sizeScale)
 
     -- Compute spawn bounds based on target style
     -- Model extends from button center: ~50px left/right, ~32px below, ~118px above
     local style = self:GetTargetStyle()
     local marginL, marginR, marginB, marginT
     if style == "3d" then
-        local halfModelW = (TARGET_SIZE * 2.25) / 2
-        local modelH = TARGET_SIZE * 3.4
-        local halfBtn = TARGET_SIZE / 2
+        local halfModelW = (TARGET_SIZE * 2.25 * sizeScale) / 2
+        local modelH = TARGET_SIZE * 3.4 * sizeScale
+        local halfBtn = TARGET_SIZE * sizeScale / 2
         marginL = halfModelW
         marginR = halfModelW
         marginB = halfBtn + 10
@@ -1918,16 +1922,17 @@ function PingGameUI:OnTargetSpawned(target)
     local spawnElapsed = 0
     frame:SetScript("OnUpdate", function(self, dt)
         spawnElapsed = spawnElapsed + dt
+        local sc = self.sizeScale or 1
         if spawnElapsed < 0.15 then
             local p = spawnElapsed / 0.15
             self:SetAlpha(p)
-            local scale = 0.5 + 0.5 * p
+            local scale = (0.5 + 0.5 * p) * sc
             self:SetSize(TARGET_SIZE * scale, TARGET_SIZE * scale)
             self.ring:SetSize((TARGET_SIZE + 8) * scale, (TARGET_SIZE + 8) * scale)
         else
             self:SetAlpha(1)
-            self:SetSize(TARGET_SIZE, TARGET_SIZE)
-            self.ring:SetSize(TARGET_SIZE + 8, TARGET_SIZE + 8)
+            self:SetSize(TARGET_SIZE * sc, TARGET_SIZE * sc)
+            self.ring:SetSize((TARGET_SIZE + 8) * sc, (TARGET_SIZE + 8) * sc)
             self:SetScript("OnUpdate", nil)
         end
     end)
