@@ -216,6 +216,92 @@ function Theme.SetFillAlpha(frame, alpha)
 end
 
 --------------------------------------------------------------------------
+-- Rounded art overlay: crop an arbitrary texture (a real image) to the same
+-- rounded-rect silhouette via a nine-slice. Only the four fixed-size corner
+-- cells carry a circle-disc mask, so a wide bubble never stretches a mask
+-- across its middle (which shatters the art); edge and centre cells are plain
+-- crops. Masks are a standalone disc file, not an atlas region -- a MaskTexture
+-- samples its whole file, so an atlas region mask samples the entire sheet.
+--------------------------------------------------------------------------
+local ART_MASK_TEX = "Interface\\AddOns\\BoundToLearn\\media\\FilterButtonCircle"
+local ART_ANCHORS = { tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" }
+
+local function UpdateArtCrop(frame)
+    local art = frame.art
+    if not art then return end
+    local w, h = frame:GetWidth() or 0, frame:GetHeight() or 0
+    if w <= 0 or h <= 0 then return end
+    local c = art.corner or h * 0.3
+    if c > h / 2 then c = h / 2 end
+    if c > w / 2 then c = w / 2 end
+    AnchorNineSlice(art.cells, c)
+    local d = c * 2
+    for _, mask in pairs(art.masks) do mask:SetSize(d, d) end
+    -- Divide the base crop region across the nine cells in proportion to each
+    -- cell's share of the frame, so the source image fills the bubble exactly.
+    local tc = art.tc
+    local bx1, bx2, by1, by2 = tc[1], tc[2], tc[3], tc[4]
+    local fx, fy = c / w, c / h
+    local ax1, ax2 = bx1 + (bx2 - bx1) * fx, bx2 - (bx2 - bx1) * fx
+    local ay1, ay2 = by1 + (by2 - by1) * fy, by2 - (by2 - by1) * fy
+    local n = art.cells
+    n.tl:SetTexCoord(bx1, ax1, by1, ay1); n.tm:SetTexCoord(ax1, ax2, by1, ay1); n.tr:SetTexCoord(ax2, bx2, by1, ay1)
+    n.ml:SetTexCoord(bx1, ax1, ay1, ay2); n.mm:SetTexCoord(ax1, ax2, ay1, ay2); n.mr:SetTexCoord(ax2, bx2, ay1, ay2)
+    n.bl:SetTexCoord(bx1, ax1, ay2, by2); n.bm:SetTexCoord(ax1, ax2, ay2, by2); n.br:SetTexCoord(ax2, bx2, ay2, by2)
+end
+
+local function OnArtSizeChanged(frame)
+    if frame.art and frame.art.cells.mm:IsShown() then UpdateArtCrop(frame) end
+end
+
+-- Attach the art nine-slice + corner masks to a frame. Idempotent.
+function Theme.CreateArt(frame)
+    if frame.art then return frame end
+    local cells, masks = {}, {}
+    for name in pairs(TC9) do
+        local cell = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+        cell:Hide()
+        local anchor = ART_ANCHORS[name]
+        if anchor then
+            local mask = frame:CreateMaskTexture()
+            mask:SetTexture(ART_MASK_TEX, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            mask:SetPoint(anchor, cell, anchor)
+            cell:AddMaskTexture(mask)
+            masks[name] = mask
+        end
+        cells[name] = cell
+    end
+    frame.art = { cells = cells, masks = masks, tc = { 0, 1, 0, 1 } }
+    frame:HookScript("OnSizeChanged", OnArtSizeChanged)
+    return frame
+end
+
+-- Set the art texture and base crop (texcoords into the source), then reflow.
+function Theme.SetArt(frame, tex, l, r, t, b)
+    local art = frame.art
+    if not art then return end
+    for _, cell in pairs(art.cells) do cell:SetTexture(tex) end
+    art.tc[1], art.tc[2], art.tc[3], art.tc[4] = l or 0, r or 1, t or 0, b or 1
+    UpdateArtCrop(frame)
+end
+
+function Theme.SetArtCorner(frame, c)
+    if not frame.art then return end
+    frame.art.corner = c
+    UpdateArtCrop(frame)
+end
+
+function Theme.SetArtVertexColor(frame, r, g, b, a)
+    if not frame.art then return end
+    for _, cell in pairs(frame.art.cells) do cell:SetVertexColor(r, g, b, a or 1) end
+end
+
+function Theme.ShowArt(frame, shown)
+    if not frame.art then return end
+    for _, cell in pairs(frame.art.cells) do cell:SetShown(shown) end
+end
+
+--------------------------------------------------------------------------
 -- Panel gloss: single vertical gradient sampled per 9-slice cell, brightness
 -- ramp packed into the bottom 10% so banding collapses to a few pixels.
 --------------------------------------------------------------------------
@@ -421,19 +507,28 @@ end
 --------------------------------------------------------------------------
 function Theme.CreateCloseButton(parent, onClose)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(22, 22)
-    Theme.Round(btn)
-    Theme.SetBarHeight(btn, 8)
-    Theme.SetBorderShown(btn, false)
-    -- Just the x until hovered; the button shape only appears on hover.
-    Theme.SetFillColor(btn, C.MISS)
-    Theme.SetFillAlpha(btn, 0)
-    local x = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    x:SetPoint("CENTER", 0, 0)
-    x:SetText("\195\151") -- multiplication sign glyph
-    x:SetTextColor(RGB(C.TEXT_BODY, 1))
-    btn:SetScript("OnEnter", function() Theme.SetFillAlpha(btn, 1); x:SetTextColor(1, 1, 1, 1) end)
-    btn:SetScript("OnLeave", function() Theme.SetFillAlpha(btn, 0); x:SetTextColor(RGB(C.TEXT_BODY, 1)) end)
+    btn:SetSize(18, 18)
+    -- Two rotated strokes make the x; no button shape, just the mark itself,
+    -- faint at rest and lighting up on hover. Strokes track the button size so
+    -- callers can resize freely.
+    local function MakeStroke()
+        local t = btn:CreateTexture(nil, "OVERLAY")
+        t:SetTexture("Interface\\Buttons\\WHITE8x8")
+        t:SetPoint("CENTER")
+        return t
+    end
+    local s1 = MakeStroke(); s1:SetRotation(math.pi / 4)
+    local s2 = MakeStroke(); s2:SetRotation(-math.pi / 4)
+    local function SizeStrokes(w, h)
+        local len = mmin(w, h) * 0.62   -- smaller mark with padding, not edge-to-edge
+        s1:SetSize(len, 1.6); s2:SetSize(len, 1.6)
+    end
+    SizeStrokes(btn:GetSize())
+    btn:HookScript("OnSizeChanged", function(_, w, h) SizeStrokes(w, h) end)
+    local function setX(r, g, b, a) s1:SetVertexColor(r, g, b, a); s2:SetVertexColor(r, g, b, a) end
+    setX(RGB(C.TEXT_DIM, 1))
+    btn:SetScript("OnEnter", function() setX(1, 1, 1, 1) end)
+    btn:SetScript("OnLeave", function() setX(RGB(C.TEXT_DIM, 1)) end)
     btn:SetScript("OnClick", function()
         if Utils.PlayUISound then Utils.PlayUISound(Utils.SOUND_CLOSE) end
         if onClose then onClose() end
@@ -621,5 +716,9 @@ function Theme.ApplyTheme(name)
     Theme.ACCENT_HEX = preset[2]
     GLOSS_TOP[1], GLOSS_TOP[2], GLOSS_TOP[3] = r * 0.22, g * 0.22, b * 0.22
 end
+
+-- Blue is the addon's default look, so the factory colours are blue too (not the orange
+-- literals above); Core re-applies the player's saved theme on login.
+Theme.ApplyTheme("Blue")
 
 ns.Theme = Theme
