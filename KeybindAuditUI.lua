@@ -208,7 +208,18 @@ local function SetScoreBar(bar, score)
     bar.fill:SetWidth(mmax(1, 110 * clamped / 100))
     local r, g, b = GetBarColor(score)
     bar.fill:SetColorTexture(r, g, b, 1)
+    bar.fill:Show()
+    bar.value:SetTextColor(0.9, 0.9, 0.9)
     bar.value:SetText(tostring(mfloor(score)))
+end
+
+-- Grouping can't be scored without at least one role holding two bound abilities.
+-- Show N/A rather than a bare 0 (which reads as a failing grade); the reason lands
+-- in the recommendations list.
+local function SetScoreBarNA(bar)
+    bar.fill:Hide()
+    bar.value:SetTextColor(0.5, 0.5, 0.5)
+    bar.value:SetText("N/A")
 end
 
 local function CreateIssueRow(parent, index)
@@ -805,7 +816,11 @@ end
 
 local function BuildGroupingDetail(results)
     local lines = {}
-    tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.grouping))
+    if results.scoredGroups and results.scoredGroups > 0 then
+        tinsert(lines, sformat("|cFFFF8A33Score: %d / 100|r", results.scores.grouping))
+    else
+        tinsert(lines, "|cFFFF8A33Score: N/A|r  |cFFAAAAAA(not enough classified abilities to measure)|r")
+    end
     if not results.includeGrouping then
         tinsert(lines, "\n|cFFFF8800This category is not included in your overall score.|r")
         tinsert(lines, "Enable it in Settings to factor it into your grade.")
@@ -1046,7 +1061,11 @@ function KeybindAuditUI:RefreshResults()
     -- Grouping bar (conditional)
     local groupingShift = 0
     if results.includeGrouping then
-        SetScoreBar(categoryBars[5], results.scores.grouping)
+        if results.scoredGroups and results.scoredGroups > 0 then
+            SetScoreBar(categoryBars[5], results.scores.grouping)
+        else
+            SetScoreBarNA(categoryBars[5])
+        end
         categoryBars[5]:Show()
         groupingShift = 22
     else
@@ -1102,9 +1121,16 @@ function KeybindAuditUI:RefreshResults()
 
     -- Hide scroll bar when nothing to scroll
     local scrollBar = issueContainer.ScrollBar or _G["BoundToLearnAuditScrollScrollBar"]
+    local hasScroll = #issues > 10
     if scrollBar then
-        scrollBar:SetShown(#issues > 10)
+        scrollBar:SetShown(hasScroll)
     end
+
+    -- Width the recommendation rows to fill the column, reserving scrollbar room only
+    -- when it shows, so text wraps against the card edge instead of a narrow fixed box.
+    -- 305 = right column left inset (290) + right margin (15).
+    local rowW = (auditFrame:GetWidth() - 305) - (hasScroll and 20 or 2)
+    issueScrollChild:SetWidth(rowW)
 
     for i = 1, 20 do
         local row = issueRows[i]
@@ -1112,16 +1138,21 @@ function KeybindAuditUI:RefreshResults()
         if issue then
             local sc = SEVERITY_COLORS[issue.severity] or SEVERITY_COLORS.low
             row.strip:SetColorTexture(sc[1], sc[2], sc[3], 1)
+            row:SetWidth(rowW)
 
             if issue.icon then
                 row.icon:SetTexture(issue.icon)
                 row.icon:Show()
                 row.text:SetPoint("TOPLEFT", 34, -3)
                 row.detail:SetPoint("TOPLEFT", 34, -17)
+                row.text:SetWidth(rowW - 40)
+                row.detail:SetWidth(rowW - 40)
             else
                 row.icon:Hide()
                 row.text:SetPoint("TOPLEFT", 12, -3)
                 row.detail:SetPoint("TOPLEFT", 12, -17)
+                row.text:SetWidth(rowW - 18)
+                row.detail:SetWidth(rowW - 18)
             end
 
             row.text:SetText(issue.text)
@@ -1133,6 +1164,14 @@ function KeybindAuditUI:RefreshResults()
     end
 
     issueScrollChild:SetHeight(mmax(1, #issues * ISSUE_ROW_HEIGHT))
+
+    -- Fit the card height to whichever column runs longer, so short results don't
+    -- leave a baggy empty band. Bottom-anchored elements (buttons, skipped note,
+    -- issue list) ride the frame's bottom edge and stay put as the frame shrinks.
+    local leftBottom = 252 + groupingShift + mmax(0, barIdx - 1) * 16 + 14
+    local visibleIssues = mmin(#issues, 8)
+    local rightBottom = #issues == 0 and 150 or (64 + visibleIssues * ISSUE_ROW_HEIGHT + 6)
+    auditFrame:SetHeight(mmax(360, mmin(480, mmax(leftBottom, rightBottom) + 54)))
 end
 
 function KeybindAuditUI:Toggle()

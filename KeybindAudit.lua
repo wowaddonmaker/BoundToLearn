@@ -502,19 +502,39 @@ function KeybindAudit:Scan(options)
 
     groupingScore = scoredGroups > 0 and (groupScoreSum / scoredGroups) or 0
 
-    -- Generate issues for scattered role groups
+    -- Generate issues for scattered role groups; explain when nothing was scoreable
+    -- (so a 0 grouping bar reads as "couldn't measure" rather than a failing grade).
     if includeGrouping then
-        for role, info in pairs(roleScores) do
-            if info.score <= 40 then
-                local label = ROLE_LABELS[role] or role
-                tinsert(issues, {
-                    severity = "low",
-                    icon = nil,
-                    text = sformat("%s are spread across distant keys", label),
-                    detail = sformat("Group your %d %s on nearby keys or modifier variants of the same key.",
-                        info.count, slower(label)),
-                })
+        if scoredGroups > 0 then
+            for role, info in pairs(roleScores) do
+                if info.score <= 40 then
+                    local label = ROLE_LABELS[role] or role
+                    tinsert(issues, {
+                        severity = "low",
+                        icon = nil,
+                        text = sformat("%s are spread across distant keys", label),
+                        detail = sformat("Group your %d %s on nearby keys or modifier variants of the same key.",
+                            info.count, slower(label)),
+                    })
+                end
             end
+        else
+            local classifiedCount = 0
+            for _, group in pairs(roleGroups) do
+                classifiedCount = classifiedCount + #group.slots
+            end
+            local detail
+            if classifiedCount == 0 then
+                detail = "None of your keybound abilities are recognized by the role list yet, so there are no groups to compare. This score is experimental and its spell data is still growing."
+            else
+                detail = "No single role (defensives, CCs, cooldowns) has two or more keybound abilities, so there are no pairs to measure. This score is experimental."
+            end
+            tinsert(issues, {
+                severity = "low",
+                icon = nil,
+                text = "Grouping not scored",
+                detail = detail,
+            })
         end
     end
 
@@ -523,9 +543,12 @@ function KeybindAudit:Scan(options)
         return (sevOrder[a.severity] or 9) < (sevOrder[b.severity] or 9)
     end)
 
-    -- Overall score: when grouping is included, redistribute weights
+    -- Overall score: only fold grouping in when it actually produced a score.
+    -- If it's N/A (no role has 2+ bound abilities), counting it as 0 would penalize
+    -- the whole grade for something we couldn't measure, so fall back to the
+    -- four-category weighting instead.
     local overall
-    if includeGrouping then
+    if includeGrouping and scoredGroups > 0 then
         -- Coverage 35%, Reachability 25%, Modifiers 12%, Anti-patterns 13%, Grouping 15%
         overall = coverageScore * 0.35 + reachScore * 0.25 + modScore * 0.12 + antiScore * 0.13 + groupingScore * 0.15
     else
@@ -547,6 +570,7 @@ function KeybindAudit:Scan(options)
             grouping = mfloor(groupingScore + 0.5),
             overall = overall,
         },
+        scoredGroups = scoredGroups,
         issues = issues,
         grade = grade,
         gradeColor = gradeColor,
