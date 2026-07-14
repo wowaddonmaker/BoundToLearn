@@ -129,6 +129,8 @@ local DB_DEFAULTS = {
         },
         skipBarSelection = false,
         mmoMouse = false,
+        hasUniqueBinds = false,
+        uniqueBinds = {},   -- [BASEKEY] = "mouse" | "numpad" | "function" | "other"
         includeGrouping = false,
         keyboardLayout = "QWERTY",
     },

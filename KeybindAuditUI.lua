@@ -36,7 +36,7 @@ local SEVERITY_COLORS = {
 }
 
 local auditFrame, dimmer
-local setupPage, resultsPage, methodologyPage, categoryDetailPage
+local setupPage, resultsPage, methodologyPage, categoryDetailPage, uniqueBindsPanel
 local barOverlays = {}
 local barToggles = {}
 local lastResults
@@ -424,8 +424,28 @@ function KeybindAuditUI:CreateSetupPage()
     mmoHint:SetTextColor(0.55, 0.55, 0.55)
     mmoHint:SetText("Number keys won't be penalized as distant since they're on your thumb.")
 
+    -- FN / other unique binds: declare keys the player physically has on their mouse.
+    local fnBindsCb = ns.Theme.CreateToggle(setupPage, "I have FN or other unique binds", nil, 230)
+    fnBindsCb:SetPoint("TOPLEFT", optX, -132)
+    fnBindsCb:SetScript("OnClick", function(self)
+        PlayUISound(SOUND_CLICK)
+        local on = self:GetChecked()
+        GetDb().hasUniqueBinds = on
+        if setupPage.setKeysBtn then setupPage.setKeysBtn:SetShown(on) end
+    end)
+    setupPage.fnBindsCb = fnBindsCb
+
+    local setKeysBtn = ns.Theme.CreateButton(setupPage, "Set unique keys", 130, 20)
+    setKeysBtn:SetPoint("TOPLEFT", optX + 20, -158)
+    setKeysBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        KeybindAuditUI:ShowUniqueBindsPanel()
+    end)
+    setKeysBtn:Hide()
+    setupPage.setKeysBtn = setKeysBtn
+
     local skipBarsCb = ns.Theme.CreateToggle(setupPage, "Skip this setup next time", nil, 230)
-    skipBarsCb:SetPoint("TOPLEFT", optX, -138)
+    skipBarsCb:SetPoint("TOPLEFT", optX, -186)
     skipBarsCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().skipBarSelection = self:GetChecked()
@@ -434,7 +454,7 @@ function KeybindAuditUI:CreateSetupPage()
 
     local skipBarsHint = setupPage:CreateFontString(nil, "OVERLAY")
     skipBarsHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -164)
+    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -212)
     skipBarsHint:SetWidth(200)
     skipBarsHint:SetJustifyH("LEFT")
     skipBarsHint:SetTextColor(0.55, 0.55, 0.55)
@@ -442,7 +462,7 @@ function KeybindAuditUI:CreateSetupPage()
 
     -- Grouping checkbox (experimental)
     local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 240)
-    groupingCb:SetPoint("TOPLEFT", optX, -198)
+    groupingCb:SetPoint("TOPLEFT", optX, -242)
     groupingCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().includeGrouping = self:GetChecked()
@@ -451,7 +471,7 @@ function KeybindAuditUI:CreateSetupPage()
 
     local groupingHint = setupPage:CreateFontString(nil, "OVERLAY")
     groupingHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    groupingHint:SetPoint("TOPLEFT", optX + 30, -224)
+    groupingHint:SetPoint("TOPLEFT", optX + 30, -268)
     groupingHint:SetWidth(200)
     groupingHint:SetJustifyH("LEFT")
     groupingHint:SetTextColor(0.55, 0.55, 0.55)
@@ -535,6 +555,143 @@ function KeybindAuditUI:SetAllBars(on)
     end
     SaveBarToggles()
     self:UpdateStartButtonState()
+end
+
+-- Unique-bind entry: declare keys in unusual spots and where they live, so a key the
+-- player keeps on their mouse scores as reachable instead of a far function-row stretch.
+local UNIQUE_LOCATIONS = { "mouse", "numpad", "function", "other" }
+local UNIQUE_LOC_LABEL = { mouse = "Mouse", numpad = "Numpad", ["function"] = "Fn row", other = "Other" }
+
+local function NextLocation(loc)
+    for i = 1, #UNIQUE_LOCATIONS do
+        if UNIQUE_LOCATIONS[i] == loc then
+            return UNIQUE_LOCATIONS[(i % #UNIQUE_LOCATIONS) + 1]
+        end
+    end
+    return UNIQUE_LOCATIONS[1]
+end
+
+local function NormalizeUniqueKey(text)
+    local key = (text or ""):upper():gsub("%s", "")
+    if key == "" then return nil end
+    if key:match("^[A-Z0-9]$") then return nil end   -- reject plain single letters/numbers
+    return key
+end
+
+function KeybindAuditUI:RefreshUniqueBinds()
+    local p = uniqueBindsPanel
+    if not p then return end
+    local binds = GetDb().uniqueBinds or {}
+    local keys = {}
+    for k in pairs(binds) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for i = 1, #p.rows do
+        local row = p.rows[i]
+        local key = keys[i]
+        if key then
+            row.keyFS:SetText(key)
+            row.locBtn:SetText(UNIQUE_LOC_LABEL[binds[key]] or binds[key])
+            row.locBtn.key = key
+            row.rm.key = key
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+    p.overflow:SetShown(#keys > #p.rows)
+end
+
+function KeybindAuditUI:ShowUniqueBindsPanel()
+    if not uniqueBindsPanel then
+        local p = CreateFrame("Frame", nil, auditFrame)
+        p:SetPoint("TOPLEFT", 20, -46)
+        p:SetPoint("BOTTOMRIGHT", -20, 18)
+        p:SetFrameStrata("DIALOG")
+        p:SetFrameLevel(auditFrame:GetFrameLevel() + 20)
+        ns.Theme.StylePanel(p, 0.98)
+        p:EnableMouse(true)
+
+        local title = p:CreateFontString(nil, "OVERLAY")
+        title:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
+        title:SetPoint("TOP", 0, -10)
+        title:SetText("Unique keys and where they are")
+        title:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT_BRIGHT))
+
+        local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
+        hint:SetWidth(500)
+        hint:SetJustifyH("CENTER")
+        hint:SetText("Type a key such as F11 or NUMPAD4 (plain letters and numbers are not allowed), pick where it lives, then Add. Mouse counts as fully reachable; the rest count as a far reach.")
+
+        local edit = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
+        edit:SetSize(120, 20)
+        edit:SetPoint("TOPLEFT", 40, -70)
+        edit:SetAutoFocus(false)
+
+        p.newLoc = "mouse"
+        local locBtn = ns.Theme.CreateButton(p, "Mouse", 80, 20)
+        locBtn:SetPoint("LEFT", edit, "RIGHT", 14, 0)
+        locBtn:SetScript("OnClick", function()
+            p.newLoc = NextLocation(p.newLoc)
+            locBtn:SetText(UNIQUE_LOC_LABEL[p.newLoc])
+        end)
+
+        local addBtn = ns.Theme.CreateAccentButton(p, "Add", 60, 22)
+        addBtn:SetPoint("LEFT", locBtn, "RIGHT", 14, 0)
+        local function doAdd()
+            local key = NormalizeUniqueKey(edit:GetText())
+            if not key then return end
+            GetDb().uniqueBinds[key] = p.newLoc
+            edit:SetText("")
+            KeybindAuditUI:RefreshUniqueBinds()
+        end
+        addBtn:SetScript("OnClick", doAdd)
+        edit:SetScript("OnEnterPressed", function() doAdd(); edit:ClearFocus() end)
+        edit:SetScript("OnEscapePressed", function() edit:ClearFocus() end)
+
+        p.rows = {}
+        for i = 1, 8 do
+            local row = CreateFrame("Frame", nil, p)
+            row:SetSize(320, 20)
+            row:SetPoint("TOPLEFT", 40, -100 - (i - 1) * 24)
+            local keyFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            keyFS:SetPoint("LEFT", 0, 0)
+            keyFS:SetWidth(90)
+            keyFS:SetJustifyH("LEFT")
+            row.keyFS = keyFS
+            local rowLoc = ns.Theme.CreateButton(row, "Mouse", 80, 18)
+            rowLoc:SetPoint("LEFT", 96, 0)
+            rowLoc:SetScript("OnClick", function(self)
+                local newLoc = NextLocation(GetDb().uniqueBinds[self.key])
+                GetDb().uniqueBinds[self.key] = newLoc
+                self:SetText(UNIQUE_LOC_LABEL[newLoc])
+            end)
+            row.locBtn = rowLoc
+            local rm = ns.Theme.CreateButton(row, "Remove", 70, 18)
+            rm:SetPoint("LEFT", rowLoc, "RIGHT", 12, 0)
+            rm:SetScript("OnClick", function(self)
+                GetDb().uniqueBinds[self.key] = nil
+                KeybindAuditUI:RefreshUniqueBinds()
+            end)
+            row.rm = rm
+            row:Hide()
+            p.rows[i] = row
+        end
+
+        local overflow = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        overflow:SetPoint("TOPLEFT", 40, -100 - 8 * 24)
+        overflow:SetText("Showing the first 8 keys.")
+        overflow:Hide()
+        p.overflow = overflow
+
+        local doneBtn = ns.Theme.CreateButton(p, "Done", 90, 24)
+        doneBtn:SetPoint("BOTTOM", 0, 14)
+        doneBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); p:Hide() end)
+
+        uniqueBindsPanel = p
+    end
+    self:RefreshUniqueBinds()
+    uniqueBindsPanel:Show()
 end
 
 function KeybindAuditUI:CreateResultsPage()
@@ -1053,6 +1210,8 @@ function KeybindAuditUI:ShowSetup()
     SaveBarToggles()
     self:UpdateStartButtonState()
     setupPage.mmoMouseCb:SetChecked(db.mmoMouse)
+    setupPage.fnBindsCb:SetChecked(db.hasUniqueBinds)
+    setupPage.setKeysBtn:SetShown(db.hasUniqueBinds)
     setupPage.skipBarsCb:SetChecked(db.skipBarSelection)
     setupPage.groupingCb:SetChecked(db.includeGrouping)
     local currentLayout = db.keyboardLayout or "QWERTY"
@@ -1065,9 +1224,10 @@ function KeybindAuditUI:ShowSetup()
     methodologyPage:Hide()
     categoryDetailPage:Hide()
     resultsPage:Hide()
+    if uniqueBindsPanel then uniqueBindsPanel:Hide() end
     setupPage:Show()
     self:ShowBarOverlays()
-    auditFrame:SetSize(580, 330)
+    auditFrame:SetSize(580, 380)
 end
 
 function KeybindAuditUI:ShowResults()
@@ -1088,6 +1248,7 @@ function KeybindAuditUI:RefreshResults()
     local results = audit:Scan({
         barFilter = db.bars,
         mmoMouse = db.mmoMouse,
+        uniqueBinds = db.hasUniqueBinds and db.uniqueBinds or nil,
         includeGrouping = db.includeGrouping,
         keyboardLayout = db.keyboardLayout,
     })

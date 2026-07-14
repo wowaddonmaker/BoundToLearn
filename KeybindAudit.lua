@@ -224,10 +224,17 @@ local function StripModifiers(bind)
     return base, hasModifier
 end
 
-local function ClassifyKey(bind, mmoMouse)
+local function ClassifyKey(bind, mmoMouse, uniqueBinds)
     local base, hasModifier = StripModifiers(bind)
+    -- A key the player has declared on their mouse is fully reachable; any other
+    -- declared location (numpad, function row, other) is a far reach.
+    local declared = uniqueBinds and uniqueBinds[base]
     local tier
-    if PRIME_KEYS[base] then
+    if declared == "mouse" then
+        tier = "prime"
+    elseif declared then
+        tier = "poor"
+    elseif PRIME_KEYS[base] then
         tier = "prime"
     elseif mmoMouse and MMO_MOUSE_PRIME[base] then
         tier = "prime"
@@ -284,6 +291,7 @@ function KeybindAudit:Scan(options)
     options = options or {}
     local barFilter = options.barFilter
     local mmoMouse = options.mmoMouse
+    local uniqueBinds = options.uniqueBinds
     local ShouldIgnoreAction = ns.Tracker and ns.Tracker.ShouldIgnoreAction
 
     local bars = {}
@@ -333,7 +341,7 @@ function KeybindAudit:Scan(options)
 
                         local tier, hasModifier, base
                         if keybind then
-                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse)
+                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse, uniqueBinds)
                         end
 
                         -- Resolve spell role for grouping
