@@ -136,14 +136,17 @@ function SongData.DifficultyProfile(difficulty)
     return DIFFICULTY[difficulty] or DIFFICULTY.Medium
 end
 
--- A 1-10 rating for the carousel meter, per song AND difficulty: it blends the
--- difficulty profile with the song's tempo, so faster tracks read as harder and
--- every song shows a distinct bar per tier.
+-- A 1-10 rating for the carousel meter, per song AND difficulty. Each tier gets its
+-- own even band (Easy 1-2, Medium 3-5, Hard 6-8, Extreme 9-10) so the spread between
+-- difficulties is uniform, and the track's tempo slides the rating within that band so
+-- faster tracks read as harder and every song shows a distinct bar per tier.
+local RATING_BASE   = { Easy = 1.5, Medium = 4.0, Hard = 7.0, Extreme = 9.4 }
+local RATING_SPREAD = { Easy = 0.9, Medium = 1.8, Hard = 1.8, Extreme = 1.0 }
 function SongData.Rating(song, difficulty)
-    local prof = SongData.DifficultyProfile(difficulty)
-    local density = prof.subdiv * prof.fill * (1 + prof.jump)   -- ~0.55 .. 3.5
-    local tempo = (SongData.BPM(song) - 96) / 70                -- 0 .. 1
-    local raw = density * (1.7 + tempo * 1.3)
+    local base = RATING_BASE[difficulty] or 4.0
+    local spread = RATING_SPREAD[difficulty] or 1.4
+    local tempo = mmax(0, mmin(1, (SongData.BPM(song) - 90) / 65))   -- 0 (slow) .. 1 (fast)
+    local raw = base + (tempo - 0.5) * spread
     return mmax(1, mmin(10, mfloor(raw + 0.5)))
 end
 
@@ -203,17 +206,46 @@ end
 -- emphasis. Bursts: peak subdivision. Stamina: track length / endurance.
 SongData.RADAR_LABELS = { "Speed", "Density", "Offbeat", "Bursts", "Stamina" }
 
+-- Per-song groove from the actual baked chart: note rate, plus the share of off-beat
+-- (eighth) and burst (sixteenth) subdivisions from the level mix. Distinct per track.
+local DIFF_GROOVE_SCALE = { Easy = 0.55, Medium = 0.75, Hard = 0.9, Extreme = 1.0 }
+local function chartGroove(key)
+    local chart = ns.SongCharts and ns.SongCharts[key]
+    if not (chart and chart.notes and #chart.notes > 0) then return nil end
+    local notes, l2, l34 = chart.notes, 0, 0
+    local total = #notes
+    for i = 1, total do
+        local lv = notes[i][3] or 1
+        if lv == 2 then l2 = l2 + 1
+        elseif lv >= 3 then l34 = l34 + 1 end
+    end
+    return {
+        density = total / mmax(1, chart.duration or 1),
+        offbeat = (l2 + l34) / total,     -- everything off the strong beat
+        bursts  = l34 / total,            -- sixteenth-note content
+    }
+end
+
 function SongData.Radar(song, difficulty)
     local function clampAxis(v) return mmax(0.12, mmin(1, v)) end
-    -- Per-song shape: Speed and Stamina come from the track's real tempo and
-    -- length; Density, Offbeat and Bursts come from the difficulty profile, so the
-    -- radar differs both between tracks and between difficulties of one track.
-    local prof = SongData.DifficultyProfile(difficulty)
+    -- Speed and Stamina come from the track's real tempo and length. Density, Offbeat
+    -- and Bursts come from the track's own chart (so they differ per track), scaled by
+    -- the difficulty so a harder chart reads busier.
     local speed   = ((SongData.BPM(song) - 80) / 80)
-    local density = (prof.subdiv * prof.fill / 3.2)
-    local offbeat = (prof.jump / 0.22)
-    local bursts  = (prof.subdiv / 4)
     local stamina = (((song.length or 200) - 120) / 640)
+    local dscale  = DIFF_GROOVE_SCALE[difficulty] or 0.75
+    local density, offbeat, bursts
+    local g = chartGroove(song.key)
+    if g then
+        density = (g.density / 3.2) * dscale
+        offbeat = g.offbeat * (0.5 + 0.7 * dscale)
+        bursts  = g.bursts  * (0.4 + 1.2 * dscale)
+    else
+        local prof = SongData.DifficultyProfile(difficulty)
+        density = (prof.subdiv * prof.fill / 3.2)
+        offbeat = (prof.jump / 0.22)
+        bursts  = (prof.subdiv / 4)
+    end
     return {
         clampAxis(speed), clampAxis(density), clampAxis(offbeat),
         clampAxis(bursts), clampAxis(stamina),
@@ -226,11 +258,11 @@ end
 -- button images. EJ_SelectTier mutates the guide's current tier, so it is saved
 -- and restored. All returned button images share the same crop as the live grid.
 local instanceList          -- flat { {img=, tier=, lname=, words=}, ... } across all tiers
--- The Adventure Guide art sits in the top-left ~0.684 x 0.742 of its texture (the
--- rest is padding). The selected bubble is wide and short (~4.3:1), so instead of
--- squishing the whole tall chunk into it, sample a matching-aspect horizontal band
--- from the middle of the art: full art width, a thin strip centred vertically.
-local INSTANCE_TEXCOORD = { 0, 0.68359, 0.29, 0.45 }
+-- bgImage's art sits in roughly the top-left ~0.80 x 0.74 of its texture (the right
+-- edge and bottom are black padding). Sample a wide, short band from the lower-middle
+-- of that region for the bubble's ~4.3:1 art, staying clear of the hazy sky up top and
+-- the right/bottom padding. Nudge the band if an instance's art still sits off.
+local INSTANCE_TEXCOORD = { 0, 0.77, 0.40, 0.72 }
 
 -- Words too generic to tie a song to a specific instance on their own (they
 -- recur across many instance names), plus common song-title noise. A match must
@@ -278,9 +310,11 @@ local function buildInstanceImages()
             local isRaid = (r == 2)
             local i = 1
             while true do
-                local instanceID, name, _, _, buttonImage1, buttonImage2 = EJ_GetInstanceByIndex(i, isRaid)
+                -- bgImage (position 4) is the full-size instance background: far
+                -- higher resolution than the small button art, so prefer it.
+                local instanceID, name, _, bgImage, buttonImage1, loreImage = EJ_GetInstanceByIndex(i, isRaid)
                 if not instanceID then break end
-                local img = buttonImage1 or buttonImage2
+                local img = bgImage or buttonImage1 or loreImage
                 if img and name then
                     instanceList[#instanceList + 1] = {
                         img = img, tier = tier,

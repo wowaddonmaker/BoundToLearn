@@ -65,11 +65,11 @@ local COMBO_THRESHOLDS = { 5, 10, 20, 35 }
 local MAX_FOCUS = 100
 local focus = MAX_FOCUS
 local focusFailed = false
-local FOCUS_DRAIN = { miss = 15, redHerring = 20 }
-local FOCUS_RECOVER = { perfect = 8, great = 5, good = 2 }
+local FOCUS_DRAIN = { miss = 17, redHerring = 22 }
+local FOCUS_RECOVER = { perfect = 6, great = 4, good = 2 }
 local FOCUS_DIFF_SCALE = { Easy = 0.6, Medium = 1.0, Hard = 1.2, Extreme = 1.5 }
 local lastBooTime = 0
-local savedAmbienceVol
+local savedAmbienceVol, savedMusicVol
 local isPlayingGameMusic = false
 
 local DIFFICULTY_MUSIC = {
@@ -114,6 +114,9 @@ local BIND_COVERAGE    = 2
 -- tiers layer on up to this, so density ramps smoothly instead of jumping at Medium.
 local TARGET_DENSITY   = { Easy = 1.0, Medium = 1.6, Hard = 2.2, Extreme = 2.8 }
 local RAPID_GAP = 0.22
+-- Extra screen-pixel lift of the shared note start line above the topmost bar, so
+-- notes (and the health bar sitting on the line) start higher for more reaction time.
+local START_LINE_LIFT = 180
 
 local function bindMods(keybind)
     local m = ""
@@ -393,13 +396,20 @@ end
 local function MuteGameAudio()
     savedAmbienceVol = tonumber(GetCVar("Sound_AmbienceVolume")) or 0.5
     SetCVar("Sound_AmbienceVolume", 0)
+    -- Silence the music channel too, so the zone track cannot leak in during the
+    -- countdown and lead-in before BeginGameMusic takes the channel. Persisted so a
+    -- crash before the music starts still restores it on next load.
+    savedMusicVol = tonumber(GetCVar("Sound_MusicVolume")) or 0.4
+    BoundToLearn.db.pendingMusicRestore = savedMusicVol
+    SetCVar("Sound_MusicVolume", 0)
 end
 
 -- Play the round's track, fading up from silence so the start is not abrupt. The
 -- target volume is persisted so a crash mid-fade still restores it on next load
 -- (Core clears pendingMusicRestore once applied).
 local function BeginGameMusic(track)
-    local target = tonumber(GetCVar("Sound_MusicVolume")) or 0.4
+    -- Fade up to the player's saved level (the channel is muted by MuteGameAudio).
+    local target = savedMusicVol or tonumber(GetCVar("Sound_MusicVolume")) or 0.4
     if target < 0.05 then target = 0.4 end
     gameMusicTarget = target
     BoundToLearn.db.pendingMusicRestore = target
@@ -417,9 +427,13 @@ local function RestoreGameAudio()
         isPlayingGameMusic = false
         -- Do not stop the track: the round-over screen keeps it playing. Just
         -- make sure the volume is back at the player's level and clear the guard.
-        SetCVar("Sound_MusicVolume", gameMusicTarget or 0.4)
-        BoundToLearn.db.pendingMusicRestore = nil
+        SetCVar("Sound_MusicVolume", savedMusicVol or gameMusicTarget or 0.4)
+    elseif savedMusicVol then
+        -- Cancelled before the music started (e.g. during the countdown); un-mute.
+        SetCVar("Sound_MusicVolume", savedMusicVol)
     end
+    BoundToLearn.db.pendingMusicRestore = nil
+    savedMusicVol = nil
 end
 
 local function ResetGameState()
@@ -490,6 +504,7 @@ function Game:Start()
 
     if ns.GameUI then
         ns.GameUI:OnGameStart(availableSlots)
+        self:PlaceNoteLine()   -- put the start line + health bar in place before the countdown
     end
 
     local countdownDuration = 3
@@ -552,6 +567,7 @@ function Game:StartCompetitive()
 
     if ns.GameUI then
         ns.GameUI:OnGameStart(availableSlots)
+        self:PlaceNoteLine()   -- put the start line + health bar in place before the countdown
     end
 
     local difficulty = db.difficulty
@@ -798,15 +814,20 @@ function Game:OnUpdate(elapsed)
     end
 
     if self.chartNotes then
-        -- Chart-driven: spawn each onset so it reaches the target exactly when the
-        -- music is at that onset (gameStartTime is when the track began playing).
-        local fallTime = settings.fallDistance / settings.fallSpeed
-        local notes = self.chartNotes
-        while self.chartCursor <= #notes do
-            local cn = notes[self.chartCursor]
-            if gameElapsed < cn.t - fallTime then break end
-            self:SpawnNote(now, settings, cn.slotInfo, gameStartTime + cn.t)
-            self.chartCursor = self.chartCursor + 1
+        -- Chart-driven: every note falls from one shared start line at a constant
+        -- speed, so notes bound for lower bars have farther to fall and take longer.
+        -- Per-note fall times (and the sort into spawn order) are set up once the
+        -- buttons have laid out, in PrepChart. Each note still reaches its button at
+        -- gameStartTime + cn.t (on the beat).
+        if not self.chartPrepped then self.chartPrepped = self:PrepChart(settings) end
+        if self.chartPrepped then
+            local notes = self.chartNotes
+            while self.chartCursor <= #notes do
+                local cn = notes[self.chartCursor]
+                if gameElapsed < cn.spawnT then break end
+                self:SpawnNote(now, settings, cn.slotInfo, gameStartTime + cn.t, cn.fallTime)
+                self.chartCursor = self.chartCursor + 1
+            end
         end
     else
         spawnAccumulator = spawnAccumulator + elapsed
@@ -842,7 +863,7 @@ function Game:OnUpdate(elapsed)
         end
         -- Only keep updating position for unevaluated notes and misses (fall through)
         if note.noteFrame and (not note.evaluated or note.result == "miss" or note.result == "avoided") then
-            local fallTime = settings.fallDistance / settings.fallSpeed
+            local fallTime = note.fallTime or (settings.fallDistance / settings.fallSpeed)
             local timeToTarget = note.targetTime - now
             local progress = 1.0 - (timeToTarget / fallTime)
             progress = mmax(progress, 0)
@@ -867,6 +888,7 @@ local buildBuckets = { {}, {}, {}, {} }
 function Game:BuildChart(key, diff)
     self.chartNotes = nil
     self.chartCursor = 1
+    self.chartPrepped = nil
     local chart = ns.SongCharts and key and ns.SongCharts[key]
     if not (chart and chart.notes and #chart.notes > 0) then return false end
     if #availableSlots == 0 then return false end
@@ -914,6 +936,71 @@ function Game:BuildChart(key, diff)
     for i = 1, #chosen do notes[i] = { t = chosen[i] } end
     self:AssignChartBinds(notes, diff)
     self.chartNotes = notes
+    self.chartCursor = 1
+    return true
+end
+
+-- Set up the shared-start-line fall. Every note falls from one screen line (the
+-- topmost bar's button + the configured drop) at a constant speed, so a note bound for
+-- a lower bar has farther to go and takes proportionally longer. Computes each note's
+-- fall time and the moment it must appear at the line, sorts them into that appear
+-- order (a later beat on a far bar can appear before an earlier beat on a near one),
+-- and hands the line to the UI. Runs once live button positions exist; false = retry.
+local function bySpawnT(a, b) return a.spawnT < b.spawnT end
+
+-- Screen-pixel Y of the shared start line: topmost bar's button + the drop + the lift.
+-- nil if the buttons have not laid out yet.
+function Game:ComputeNoteLine(settings)
+    local topY
+    for i = 1, #availableSlots do
+        local btn = availableSlots[i].button
+        if btn then
+            local _, cy = btn:GetCenter()
+            if cy then
+                local sy = cy * btn:GetEffectiveScale()
+                if not topY or sy > topY then topY = sy end
+            end
+        end
+    end
+    if not topY then return nil end
+    return topY + settings.fallDistance + START_LINE_LIFT
+end
+
+-- Place the start line + health bar up front (at game start) so neither jumps into
+-- place when the first notes spawn.
+function Game:PlaceNoteLine()
+    local lineY = self:ComputeNoteLine(self:GetSettings())
+    if lineY and ns.GameUI then
+        ns.GameUI.noteHighwayTop = lineY
+        ns.GameUI:PlaceHealthBarAtLine(lineY)
+    end
+end
+
+function Game:PrepChart(settings)
+    local lineY = ns.GameUI and ns.GameUI.noteHighwayTop
+    if not lineY then
+        lineY = self:ComputeNoteLine(settings)
+        if not lineY then return false end
+        if ns.GameUI then
+            ns.GameUI.noteHighwayTop = lineY
+            ns.GameUI:PlaceHealthBarAtLine(lineY)
+        end
+    end
+    local fallSpeed = settings.fallSpeed
+    local defaultFT = settings.fallDistance / fallSpeed
+    local notes = self.chartNotes
+    for i = 1, #notes do
+        local cn = notes[i]
+        local btn = cn.slotInfo and cn.slotInfo.button
+        local ft
+        if btn then
+            local _, cy = btn:GetCenter()
+            if cy then ft = mmax(0.2, (lineY - cy * btn:GetEffectiveScale()) / fallSpeed) end
+        end
+        cn.fallTime = ft or defaultFT
+        cn.spawnT = cn.t - cn.fallTime
+    end
+    tsort(notes, bySpawnT)
     self.chartCursor = 1
     return true
 end
@@ -995,7 +1082,7 @@ function Game:ChartRandInt(n)
     return 1 + (self.chartState % n)
 end
 
-function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime)
+function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime, forcedFallTime)
     local activeCount = 0
     for _, n in ipairs(activeNotes) do
         if not n.evaluated then activeCount = activeCount + 1 end
@@ -1070,6 +1157,7 @@ function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime)
         slotInfo = chosen,
         spawnTime = now,
         targetTime = forcedTargetTime or (now + fallTime),
+        fallTime = forcedFallTime or fallTime,
         evaluated = false,
         evaluatedAt = nil,
         result = nil,

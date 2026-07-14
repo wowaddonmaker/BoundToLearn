@@ -33,7 +33,8 @@ local pauseOverlay, pauseText
 local notePool = {}
 local resultPool = {}
 local hitZonePool = {}
-local countdownFrame, countdownText
+local countdownFrame, countdownText, countdownPop, countdownPopAG
+local usingNativeCountdown = false
 local compBarFrame
 local compBarButtons = {}
 local dangerOverlay
@@ -1169,6 +1170,16 @@ function GameUI:CreateSongSelect()
         dur:SetJustifyH("RIGHT")
         slot.durFS = dur
 
+        -- Artist/composer: shown only on the enlarged selected bubble, where there
+        -- is room. Kept clear of the duration on the right.
+        local art = slot:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        art:SetPoint("TOPLEFT", st, "BOTTOMLEFT", 0, -2)
+        art:SetPoint("RIGHT", dur, "LEFT", -8, 0)
+        art:SetJustifyH("LEFT")
+        art:SetWordWrap(false)
+        art:Hide()
+        slot.artistFS = art
+
         slot:SetScript("OnClick", function(self)
             if self.dist then GameUI:CycleSong(self.dist) end
         end)
@@ -1335,6 +1346,10 @@ function GameUI:CreateResultsPanel(f)
     trend:SetSize(220, rowH)
     trend:SetPoint("TOPRIGHT", 0, 0)
     rp.trend = trend
+    -- Baseline for the trend bars: the bottom of the Miss row (4th of 5) relative to
+    -- the frame top, so the histogram sits on the same line as the judgment bars
+    -- instead of the frame floor (the hidden Fake row leaves a gap below Miss).
+    rp.trendBaseY = -(3 * ROWH + 13)
     rp.trendLabel = trend:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     rp.trendLabel:SetPoint("TOP", 0, 0)
     rp.trendLabel:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
@@ -1361,7 +1376,10 @@ function GameUI:CreateResultsPanel(f)
         local fill = graph:CreateTexture(nil, "OVERLAY")
         fill:SetPoint("TOPLEFT", 52, y - 1)
         fill:SetSize(1, 12)
-        fill:SetColorTexture(j.r, j.g, j.b, 0.9)
+        -- Glossy top-to-bottom gradient instead of a flat fill.
+        fill:SetColorTexture(1, 1, 1, 1)
+        fill:SetGradient("VERTICAL", CreateColor(j.r * 0.6, j.g * 0.6, j.b * 0.6, 0.95),
+            CreateColor(mmin(1, j.r * 1.12), mmin(1, j.g * 1.12), mmin(1, j.b * 1.12), 0.95))
 
         local cnt = graph:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         cnt:SetPoint("LEFT", track, "RIGHT", 6, 0)
@@ -1376,8 +1394,12 @@ function GameUI:CreateResultsPanel(f)
     rp.songImage:SetSize(300, 68)
     rp.songTitle = rp:CreateFontString(nil, "OVERLAY")
     rp.songTitle:SetFont("Fonts\\FRIZQT__.TTF", 17, "OUTLINE")
-    rp.songTitle:SetPoint("CENTER", rp.songImage, "CENTER", 0, 0)
+    rp.songTitle:SetPoint("CENTER", rp.songImage, "CENTER", 0, 7)
     rp.songTitle:SetTextColor(1, 1, 1)
+    -- Artist under the title, matching the selected-song bubble's title/artist stack.
+    rp.songArtist = rp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    rp.songArtist:SetPoint("TOP", rp.songTitle, "BOTTOM", 0, -1)
+    rp.songArtist:SetTextColor(1, 1, 1, 0.7)
 
     -- Back to Tracks sits top-left like a return button (with a left arrow); Try
     -- Again and Share are the primary actions, centered as a pair along the bottom.
@@ -1422,19 +1444,24 @@ function GameUI:RenderAttemptTrend(rp, cmp)
     rp.trendLabel:SetText(n == 1 and "First attempt on this track" or sformat("Last %d attempts", n))
     local maxS = 1
     for i = 1, n do if hist[i] > maxS then maxS = hist[i] end end
-    local TBW, TBH, GAP = 18, 76, 6
+    local TBW, TBH, GAP = 18, 58, 6
     for j = 1, n do
         local bar = rp.trendBars[j]
         bar:ClearAllPoints()
         bar:SetWidth(TBW)
         bar:SetHeight(mmax(2, (hist[j] / maxS) * TBH))
-        bar:SetPoint("BOTTOM", rp.trend, "BOTTOM", (j - (n + 1) / 2) * (TBW + GAP), 4)
+        -- Grow up from the Miss-row baseline so the histogram lines up with the
+        -- judgment bars' bottom.
+        bar:SetPoint("BOTTOM", rp.trend, "TOP", (j - (n + 1) / 2) * (TBW + GAP), rp.trendBaseY)
+        local r, g, b, a
         if j == n then
-            if cmp.isNewBest then bar:SetColorTexture(0.20, 0.90, 0.35, 0.95)
-            else bar:SetColorTexture(1.00, 0.82, 0.00, 0.95) end
+            if cmp.isNewBest then r, g, b, a = 0.20, 0.90, 0.35, 0.95
+            else r, g, b, a = 1.00, 0.82, 0.00, 0.95 end
         else
-            bar:SetColorTexture(0.45, 0.55, 0.70, 0.65)
+            r, g, b, a = 0.45, 0.55, 0.70, 0.72
         end
+        bar:SetColorTexture(1, 1, 1, 1)
+        bar:SetGradient("VERTICAL", CreateColor(r * 0.5, g * 0.5, b * 0.5, a), CreateColor(r, g, b, a))
         bar:Show()
     end
 end
@@ -1535,12 +1562,13 @@ function GameUI:ShowResultsOnSelect(results)
     if img then
         rp.songImage:SetTexture(img)
         if tc then rp.songImage:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) end
-        rp.songImage:SetVertexColor(1, 1, 1, 1)
+        rp.songImage:SetVertexColor(0.62, 0.63, 0.67, 1)   -- lower gamma to match the wheel bubble
     else
         rp.songImage:SetTexture(nil)
         rp.songImage:SetColorTexture(0.10, 0.09, 0.08, 0.9)
     end
     rp.songTitle:SetText(song and song.title or "")
+    rp.songArtist:SetText(song and song.artist or "")
 
     rp:Show()
     songSelect:Show()
@@ -1793,6 +1821,12 @@ function GameUI:PositionWheel()
         slot:SetSize(mmax(24, mfloor(252 + near * 18)), h)
         slot.titleFS:SetFont("Fonts\\FRIZQT__.TTF", mmax(11, mfloor(14 + near * 4)), "")
         slot.titleFS:SetText(sg.title)
+        -- Lift the title as a bubble grows (the artist is anchored below it and
+        -- follows), so both sit above the duration instead of centred over the art.
+        local ty = mfloor(near * 8)
+        slot.titleFS:ClearAllPoints()
+        slot.titleFS:SetPoint("LEFT", 40, ty)
+        slot.titleFS:SetPoint("RIGHT", -14, ty)
         local secs = mfloor(ns.SongData.PlayLength(sg) + 0.5)
         slot.durFS:SetText(mfloor(secs / 60) .. ":" .. (secs % 60 < 10 and "0" or "") .. (secs % 60))
         slot.durFS:SetTextColor(Theme.RGB(Theme.C.TEXT_PRIMARY, mmax(0.4, 0.85 - ae * 0.12)))
@@ -1814,7 +1848,7 @@ function GameUI:PositionWheel()
                 slot.bg:SetAtlas("UI-Journeys-Renown-Button-pressed")
             end
             slot.bg:SetDesaturated(false)
-            slot.bg:SetVertexColor(1, 1, 1, 1)
+            slot.bg:SetVertexColor(0.62, 0.63, 0.67, 1)   -- lower gamma: ground the hazy EJ backdrop
             slot.titleFS:SetTextColor(1, 1, 1)
         else
             slot.bg:SetAtlas("UI-Journeys-Renown-Button")
@@ -1829,6 +1863,13 @@ function GameUI:PositionWheel()
             end
         end
         slot.bg:SetRotation(0)
+        if ae < 0.5 and sg.artist then
+            slot.artistFS:SetText(sg.artist)
+            slot.artistFS:SetTextColor(1, 1, 1, 0.7)
+            slot.artistFS:Show()
+        else
+            slot.artistFS:Hide()
+        end
         if songSelect.donutDirty or slot.donutKey ~= slot.songKey then
             slot.donutKey = slot.songKey
             SetDonut(slot.donut, SongBestProgress(sg.key), ar, ag, ab)
@@ -2147,6 +2188,15 @@ function GameUI:CreateHealthBar()
     self.healthFrame = hf
 end
 
+-- Sit the health bar just above the note start line, so notes appear to fall out from
+-- under it. screenY is the shared start line in screen pixels (from PrepChart).
+function GameUI:PlaceHealthBarAtLine(screenY)
+    local hf = self.healthFrame
+    if not hf or not screenY then return end
+    hf:ClearAllPoints()
+    hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / hf:GetEffectiveScale())
+end
+
 function GameUI:UpdateHealthCaps(pct)
     if not self.healthCaps then return end
     local r, g, b
@@ -2259,10 +2309,26 @@ function GameUI:CreateCountdown()
     countdownFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     countdownFrame:Hide()
 
-    countdownText = countdownFrame:CreateFontString(nil, "OVERLAY")
-    countdownText:SetFont("Fonts\\FRIZQT__.TTF", 72, "OUTLINE")
+    -- Big centered numeral that pops in each tick, like Blizzard's pull/BG countdown.
+    countdownPop = CreateFrame("Frame", nil, countdownFrame)
+    countdownPop:SetSize(260, 260)
+    countdownPop:SetPoint("CENTER", 0, 50)
+
+    countdownText = countdownPop:CreateFontString(nil, "OVERLAY")
+    countdownText:SetFont("Fonts\\FRIZQT__.TTF", 110, "THICKOUTLINE")
     countdownText:SetPoint("CENTER")
     countdownText:SetTextColor(1, 0.84, 0)
+
+    countdownPopAG = countdownPop:CreateAnimationGroup()
+    local sc = countdownPopAG:CreateAnimation("Scale")
+    sc:SetScaleFrom(1.7, 1.7)
+    sc:SetScaleTo(1.0, 1.0)
+    sc:SetDuration(0.35)
+    sc:SetSmoothing("OUT")
+    local al = countdownPopAG:CreateAnimation("Alpha")
+    al:SetFromAlpha(0.0)
+    al:SetToAlpha(1.0)
+    al:SetDuration(0.22)
 end
 
 -- Public methods called by Game.lua
@@ -2286,6 +2352,7 @@ end
 
 function GameUI:OnGameStart(slots)
     self.songCompare = nil   -- fresh each round; only a scored run repopulates it
+    self.noteHighwayTop = nil   -- recomputed by PrepChart once buttons lay out
     self:ResetStreakTitle()
     self:HideSongSelect()
     self:CreateHealthBar()
@@ -2317,14 +2384,6 @@ function GameUI:OnGameStart(slots)
 
     self:CreateHitZones(slots)
     self:UpdateScoreDisplay(0, 0, 1)
-
-    -- One fixed start line for every note, a set height above the topmost bar in
-    -- use, so notes always drop from the same place (a note highway) instead of a
-    -- fixed gap above each button. GetCenter can return nil before layout settles
-    -- here, so it is retried on the first note update (see UpdateNotePosition).
-    self.gameSlots = slots
-    self.noteHighwayTop = nil
-    self:RefreshHighwayTop()
 
     if dangerOverlay then
         dangerOverlay:Hide()
@@ -2477,28 +2536,6 @@ function GameUI:ReleaseAllNotes()
     end
 end
 
--- The note start line: a fixed height above the topmost bar's button, in screen
--- pixels. Recomputed from the live buttons because GetCenter can be nil before the
--- UI has laid out (so OnGameStart's first attempt may miss).
-function GameUI:RefreshHighwayTop()
-    local slots = self.gameSlots
-    if not slots then return end
-    local topY
-    for _, slotInfo in ipairs(slots) do
-        local btn = slotInfo.button
-        if btn then
-            local _, cy = btn:GetCenter()
-            if cy then
-                local sy = cy * btn:GetEffectiveScale()
-                if not topY or sy > topY then topY = sy end
-            end
-        end
-    end
-    if topY then
-        self.noteHighwayTop = topY + BoundToLearn.db.game.fallDistance
-    end
-end
-
 function GameUI:UpdateNotePosition(note, progress)
     local f = note.noteFrame
     if not f then return end
@@ -2510,20 +2547,14 @@ function GameUI:UpdateNotePosition(note, progress)
     if not bx then return end
     local bScale = btn:GetEffectiveScale()
     local fScale = f:GetEffectiveScale()
-    -- Recompute the start line once per frame from every tracked button, so a taller
-    -- bar can never leave it too low (which would floor its notes near their button).
-    local nowt = GetTime()
-    if self._hwyFrame ~= nowt then
-        self._hwyFrame = nowt
-        self:RefreshHighwayTop()
-    end
 
     local xTarget = (bx * bScale) / fScale
     local yTarget = (by * bScale) / fScale
-    -- Fall from the one fixed start line down to this note's button, so every note
-    -- starts at the same height. Falls back to a fixed gap per button if unset.
-    local fallDist = self.noteHighwayTop and mmax(20, self.noteHighwayTop / fScale - yTarget)
-                     or (BoundToLearn.db.game.fallDistance / fScale)
+    -- Fall from the one shared start line (set by PrepChart) down to this note's
+    -- button. The per-note fall time keeps the speed constant, so a lower bar just
+    -- takes longer. Falls back to a fixed drop until the line is known.
+    local nHT = self.noteHighwayTop
+    local fallDist = nHT and mmax(20, nHT / fScale - yTarget) or (BoundToLearn.db.game.fallDistance / fScale)
 
     local mods = note.modifiers or {}
 
@@ -2806,15 +2837,56 @@ end
 
 local countdownCancelFlag = false
 
+-- Drive Blizzard's TimerTracker so the countdown shows the big fiery numerals from the
+-- default UI (BG/arena starts, /pull). There's no public API to trigger it solo, so we
+-- call the event handler directly, guarded: if anything is missing on this client the
+-- pcall fails and ShowCountdown falls back to the in-house numeral.
+function GameUI:TryNativeCountdown(seconds)
+    local tt = _G.TimerTracker
+    local st = Enum and Enum.StartTimerType
+    local timerType = st and (st.PlayerCountdown or st.PvPBeginTimer)
+    if not tt or not timerType then return false end
+    return pcall(function()
+        if tt.timerList then
+            for _, timer in pairs(tt.timerList) do
+                if FreeTimerTrackerTimer then
+                    FreeTimerTrackerTimer(timer)
+                elseif timer.bar then
+                    timer.bar:Hide()
+                end
+            end
+        end
+        if TimerTracker_OnEvent then
+            TimerTracker_OnEvent(tt, "START_TIMER", timerType, seconds, seconds)
+        else
+            tt:OnEvent("START_TIMER", timerType, seconds, seconds)
+        end
+    end)
+end
+
 function GameUI:ShowCountdown(seconds, onComplete)
-    countdownFrame:Show()
     countdownCancelFlag = false
+
+    -- Native fiery countdown first; the custom numeral is the fallback.
+    if self:TryNativeCountdown(seconds) then
+        usingNativeCountdown = true
+        if onComplete then
+            C_Timer.After(seconds, function()
+                if not countdownCancelFlag then onComplete() end
+            end)
+        end
+        return
+    end
+    usingNativeCountdown = false
+
+    countdownFrame:Show()
     local remaining = seconds
     local function Tick()
         if countdownCancelFlag then return end
         if remaining > 0 then
             countdownText:SetText(tostring(remaining))
             countdownText:SetTextColor(1, 0.84, 0)
+            if countdownPopAG then countdownPopAG:Stop() countdownPopAG:Play() end
             -- SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_TIMER is nil on some clients, which
             -- silently plays nothing; 3332 (raid-warning ding) is a confirmed fallback.
             PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_TIMER or 3332)
@@ -2823,6 +2895,7 @@ function GameUI:ShowCountdown(seconds, onComplete)
         else
             countdownText:SetText("GO!")
             countdownText:SetTextColor(0.2, 1.0, 0.2)
+            if countdownPopAG then countdownPopAG:Stop() countdownPopAG:Play() end
             PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_FINISHED or 8960)
             if onComplete then onComplete() end
             C_Timer.After(0.5, function()
@@ -2837,6 +2910,21 @@ end
 
 function GameUI:CancelCountdown()
     countdownCancelFlag = true
+    if usingNativeCountdown then
+        usingNativeCountdown = false
+        local tt = _G.TimerTracker
+        if tt and tt.timerList then
+            pcall(function()
+                for _, timer in pairs(tt.timerList) do
+                    if FreeTimerTrackerTimer then
+                        FreeTimerTrackerTimer(timer)
+                    elseif timer.bar then
+                        timer.bar:Hide()
+                    end
+                end
+            end)
+        end
+    end
     if countdownFrame then countdownFrame:Hide() end
 end
 
