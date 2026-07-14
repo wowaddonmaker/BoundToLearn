@@ -1737,9 +1737,6 @@ end
 
 -- Game stats overlay, reached from the Stats button on the select screen. Covers
 -- the carousel with aggregate lifetime numbers; Back returns to track selection.
--- Fuzzy track matcher shared by both song search boxes; assigned further below (it
--- lives near ApplySongSearch, but StatsSongSearch above also calls it).
-local BestSongMatch
 local STATS_SONG_DIFFS = { "Easy", "Medium", "Hard", "Extreme" }
 
 function GameUI:CreateStatsPanel(f)
@@ -1993,13 +1990,6 @@ function GameUI:CycleStatsSong(dir)
     self:RefreshStatsSongView()
 end
 
-function GameUI:StatsSongSearch(query)
-    local best = BestSongMatch(query)
-    if not best then return end
-    songSelect.statsSongKey = ns.SongData.songs[best].key
-    self:RefreshStatsSongView()
-end
-
 function GameUI:ShowStatsPage(songKey)
     if not songSelect then self:CreateSongSelect() end
     if not songSelect.statsPanel then self:CreateStatsPanel(songSelect) end
@@ -2115,20 +2105,6 @@ local function SongMatchScore(song, query, qlen)
     return 0
 end
 
-function BestSongMatch(query)
-    query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if query == "" then return nil end
-    local qlen = #query
-    local songs = ns.SongData and ns.SongData.songs
-    if not songs then return nil end
-    local best, bestScore = nil, 0
-    for i = 1, #songs do
-        local s = SongMatchScore(songs[i], query, qlen)
-        if s > bestScore then bestScore, best = s, i end
-    end
-    return best
-end
-
 -- All tracks that match the query, ranked best-first: { key, score, title, artist }.
 local rankTmp = {}
 local function rankDesc(a, b) return a[2] > b[2] end
@@ -2217,20 +2193,6 @@ function GameUI:AttachSongSearchDropdown(editBox, onSelect)
     end)
     editBox:HookScript("OnEscapePressed", function() dd:Hide() end)
     return dd
-end
-
--- Scroll the carousel to the best fuzzy match for the query.
-function GameUI:ApplySongSearch(query)
-    if not songSelect then return end
-    local best = BestSongMatch(query)
-    if not best then return end
-    local songs = ns.SongData.songs
-    songSelect.selIndex = best
-    BoundToLearn.db.game.songKey = songs[best].key
-    songSelect.animOffset = 0
-    songSelect.donutDirty = true
-    self:RefreshSongSelect()
-    self:PlaySongPreview()
 end
 
 function GameUI:CycleSong(step)
