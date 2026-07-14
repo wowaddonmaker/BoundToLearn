@@ -287,7 +287,7 @@ function GameUI:CreateScoreDisplay()
         end
         scoreFrame:Hide()
     end)
-    closeBtn:SetSize(16, 16)
+    closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -6, -8)
 
     -- SCORE label (left) and Timer (right) on top row
@@ -778,7 +778,7 @@ local function SongBestProgress(key)
 end
 
 local SONG_HISTORY_MAX = 8
-function GameUI:RecordSongScore(score)
+function GameUI:RecordSongScore(score, accuracy, maxCombo)
     local db = BoundToLearn.db.game
     local key, diff = db.songKey, db.difficulty
     if not key or not score then return false end
@@ -795,6 +795,15 @@ function GameUI:RecordSongScore(score)
     hist[#hist + 1] = score
     while #hist > SONG_HISTORY_MAX do tremove(hist, 1) end
     db.songHistory[key][diff] = hist
+    -- Richer per-track, per-difficulty stats for the Tracks stats view: play count and
+    -- best accuracy / combo (best score already lives in songScores).
+    db.songStats = db.songStats or {}
+    db.songStats[key] = db.songStats[key] or {}
+    local st = db.songStats[key][diff] or { plays = 0, bestAccuracy = 0, bestCombo = 0 }
+    st.plays = (st.plays or 0) + 1
+    if accuracy and accuracy > (st.bestAccuracy or 0) then st.bestAccuracy = accuracy end
+    if maxCombo and maxCombo > (st.bestCombo or 0) then st.bestCombo = maxCombo end
+    db.songStats[key][diff] = st
     -- Snapshot for ShowResultsOnSelect (prevBest is the best before this run).
     self.songCompare = { prevBest = prevBest, score = score, isNewBest = isNewBest, history = hist }
     return isNewBest
@@ -857,6 +866,61 @@ local function SetKeycap(cap, r, g, b, frac, dim)
     cap.fill:SetColorTexture(r, g, b, dim and 0.6 or 1)
     cap.fill:Show()
     cap.gloss:SetAlpha(dim and 0.5 or 1)
+end
+
+-- Fill colour ramps with how full the bar is: green when barely filled (easy) through
+-- yellow and orange to red when nearly full (hard).
+local DIFF_RAMP = {
+    { 0.00, 0.35, 0.82, 0.35 },  -- green
+    { 0.38, 0.92, 0.86, 0.22 },  -- yellow
+    { 0.68, 0.96, 0.52, 0.14 },  -- orange
+    { 1.00, 0.95, 0.20, 0.14 },  -- red
+}
+local function DiffRampColor(frac)
+    frac = mmax(0, mmin(1, frac))
+    for i = 2, #DIFF_RAMP do
+        local a, b = DIFF_RAMP[i - 1], DIFF_RAMP[i]
+        if frac <= b[1] then
+            local t = (frac - a[1]) / (b[1] - a[1])
+            return a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t, a[4] + (b[4] - a[4]) * t
+        end
+    end
+    local last = DIFF_RAMP[#DIFF_RAMP]
+    return last[2], last[3], last[4]
+end
+
+-- Difficulty meter: a dark rounded track holding Blizzard's cast-bar fill, revealed to
+-- the rating (fuller = harder) and coloured by the ramp above. The rounded track IS the
+-- edge -- no ornate cast-bar frame, whose fixed padding leaves an extra ring on a small bar.
+local CAST_FILL_TEX = "Interface\\CastingBar\\UI-CastingBar-Fill"
+local function MakeDiffBar(parent, w, h)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(w, h)
+    Theme.Round(frame)
+    Theme.SetBarHeight(frame, h)
+    Theme.SetFill(frame, 0.10, 0.04, 0.04, 1)         -- dark ember track
+    Theme.SetBorderColor(frame, 0, 0, 0, 0.85)
+    frame:SetClipsChildren(true)
+
+    local bar = CreateFrame("StatusBar", nil, frame)
+    bar:SetPoint("TOPLEFT", 4, -2)
+    bar:SetPoint("BOTTOMRIGHT", -4, 2)
+    bar:SetMinMaxValues(0, 10)
+    if C_Texture.GetAtlasInfo("ui-castingbar-filling-standard") then
+        bar:SetStatusBarTexture(bar:CreateTexture())
+        bar:GetStatusBarTexture():SetAtlas("ui-castingbar-filling-standard")
+    else
+        bar:SetStatusBarTexture(CAST_FILL_TEX)
+    end
+    bar:SetStatusBarColor(1, 0.18, 0.13)              -- interrupt red
+    frame.bar = bar
+    return frame
+end
+
+local function SetDiffBar(frame, rating, dim)
+    frame.bar:SetValue(rating)
+    frame.bar:SetStatusBarColor(DiffRampColor(rating / 10))
+    frame:SetAlpha(dim and 0.55 or 1)
 end
 
 -- A renown-style progress donut: a dim circular track with a coloured arc that
@@ -998,6 +1062,58 @@ local function SetRadar(rf, values)
     end
 end
 
+-- Right-click menu for a wheel song: a small popup with a Stats button that opens the
+-- stats window straight to that track. A fullscreen catcher behind it closes the menu
+-- on any outside click.
+function GameUI:ShowSongContextMenu(slot)
+    local key = slot and slot.songKey
+    if not key then return end
+    local menu = self.songMenu
+    if not menu then
+        local catcher = CreateFrame("Button", nil, UIParent)
+        catcher:SetAllPoints(UIParent)
+        catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+        catcher:RegisterForClicks("AnyUp")
+        catcher:Hide()
+        catcher:SetScript("OnClick", function(self) self:Hide() end)
+
+        menu = CreateFrame("Frame", nil, catcher)
+        menu:SetSize(150, 62)
+        menu:SetFrameLevel(catcher:GetFrameLevel() + 10)
+        menu:SetClampedToScreen(true)
+        Theme.StylePanel(menu, 0.98)
+        menu:EnableMouse(true)
+
+        local title = menu:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOPLEFT", 8, -8)
+        title:SetPoint("TOPRIGHT", -8, -8)
+        title:SetJustifyH("CENTER")
+        title:SetWordWrap(false)
+        menu.title = title
+
+        local statsBtn = Theme.CreateButton(menu, "Stats", 130, 22)
+        statsBtn:SetPoint("BOTTOM", 0, 8)
+        statsBtn:SetScript("OnClick", function()
+            PlayUISound(SOUND_CLICK)
+            catcher:Hide()
+            if menu.songKey then GameUI:ShowStatsPage(menu.songKey) end
+        end)
+
+        menu.catcher = catcher
+        self.songMenu = menu
+    end
+
+    menu.songKey = key
+    local song = ns.SongData and ns.SongData.Get(key)
+    menu.title:SetText((song and song.title) or key)
+
+    local scale = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    menu:ClearAllPoints()
+    menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
+    menu.catcher:Show()
+end
+
 function GameUI:CreateSongSelect()
     if songSelect then return end
 
@@ -1025,12 +1141,12 @@ function GameUI:CreateSongSelect()
 
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
-    title:SetPoint("TOPLEFT", 18, -14)
+    title:SetPoint("TOPLEFT", 18, -17)
     title:SetText("Select Music")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     local closeBtn = Theme.CreateCloseButton(f, function() GameUI:HideSongSelect() end)
-    closeBtn:SetSize(16, 16)
+    closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
 
     local statsBtn = MakeBubbleButton(f, "Stats", 62, 22)
@@ -1068,8 +1184,9 @@ function GameUI:CreateSongSelect()
 
     -- Search box above the wheel: filters the carousel by title or artist.
     local search = CreateFrame("EditBox", nil, f)
-    search:SetPoint("TOPLEFT", 250, -20)
-    search:SetPoint("TOPRIGHT", -24, -20)
+    -- Vertical center aligned with the title/Stats header row (same top, both ~22px).
+    search:SetPoint("TOPLEFT", 250, -17)
+    search:SetPoint("TOPRIGHT", -24, -17)
     search:SetHeight(22)
     search:SetAutoFocus(false)
     search:SetFontObject("GameFontHighlightSmall")
@@ -1112,13 +1229,27 @@ function GameUI:CreateSongSelect()
     search:SetScript("OnEditFocusLost", function(self)
         if self:GetText() == "" then self.placeholder:Show() end
     end)
-    search:SetScript("OnTextChanged", function(self, userInput)
+    search:SetScript("OnTextChanged", function(self)
         local has = self:GetText() ~= ""
         self.placeholder:SetShown(not has)
         self.clearBtn:SetShown(has)
-        if userInput then GameUI:ApplySongSearch(self:GetText()) end
     end)
     f.searchBox = search
+    -- Results dropdown: pick a track instead of auto-jumping to the nearest as you type.
+    self:AttachSongSearchDropdown(search, function(key)
+        local songs = ns.SongData.songs
+        for i = 1, #songs do
+            if songs[i].key == key then
+                f.selIndex = i
+                BoundToLearn.db.game.songKey = key
+                f.animOffset = 0
+                f.donutDirty = true
+                GameUI:RefreshSongSelect()
+                GameUI:PlaySongPreview()
+                return
+            end
+        end
+    end)
 
     f.wheelCenter = 5
     f.wheelSpacing = 38
@@ -1131,13 +1262,14 @@ function GameUI:CreateSongSelect()
         slot:SetScript("OnMouseWheel", function(_, delta) GameUI:CycleSong(-delta) end)
 
         -- Solid backing behind the bubble art. The wheel bubbles are distance-faded
-        -- (translucent), so without this the busy backdrop shows through them and
-        -- looks like it is slicing the bubble. Inset slightly to stay inside the
-        -- button's rounded frame. Fades with the slot like everything else.
+        -- (translucent), so without this the busy backdrop shows through them. Uses
+        -- the same rounded button atlas as the art so it fills the bubble shape
+        -- instead of a square box around it. Fades with the slot like everything else.
         local backing = slot:CreateTexture(nil, "BACKGROUND")
-        backing:SetPoint("TOPLEFT", 2, -2)
-        backing:SetPoint("BOTTOMRIGHT", -2, 2)
-        backing:SetColorTexture(0.06, 0.055, 0.05, 1)
+        backing:SetAllPoints()
+        backing:SetAtlas("UI-Journeys-Renown-Button")
+        backing:SetDesaturated(true)
+        backing:SetVertexColor(0.06, 0.055, 0.05, 1)
         slot.backing = backing
 
         local bg = slot:CreateTexture(nil, "ARTWORK")
@@ -1145,12 +1277,17 @@ function GameUI:CreateSongSelect()
         bg:SetColorTexture(1, 1, 1, 1)
         slot.bg = bg
 
+        -- Nine-slice art overlay: shows the selected track's real image clipped to
+        -- the rounded bubble shape (bg stays for the atlas bubbles).
+        Theme.CreateArt(slot)
+
         -- Additive hover glow so hovering a track clearly lights up.
         local hl = slot:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
         hl:SetAtlas("UI-Journeys-Renown-Button")
         hl:SetBlendMode("ADD")
         hl:SetAlpha(0.22)
+        slot.hl = hl
 
         local donut = MakeDonut(slot, 20)      -- resized per-row to ~55% of bubble height
         donut:SetPoint("LEFT", 10, 0)
@@ -1180,8 +1317,13 @@ function GameUI:CreateSongSelect()
         art:Hide()
         slot.artistFS = art
 
-        slot:SetScript("OnClick", function(self)
-            if self.dist then GameUI:CycleSong(self.dist) end
+        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        slot:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                GameUI:ShowSongContextMenu(self)
+            elseif self.dist then
+                GameUI:CycleSong(self.dist)
+            end
         end)
         slot:HookScript("OnEnter", function(self) self.hover = true; GameUI:PositionWheel() end)
         slot:HookScript("OnLeave", function(self) self.hover = false; GameUI:PositionWheel() end)
@@ -1221,14 +1363,9 @@ function GameUI:CreateSongSelect()
         dl:SetText(name)
         drow.label = dl
 
-        local segs = {}
-        local SEGN, SEGW, SEGGAP = 10, 12, 2
-        for s = 1, SEGN do
-            local cap = MakeKeycap(drow, SEGW, 16)
-            cap:SetPoint("RIGHT", drow, "RIGHT", -16 - (SEGN - s) * (SEGW + SEGGAP), 0)
-            segs[s] = cap
-        end
-        f.diffSegs[i] = segs
+        local dbar = MakeDiffBar(drow, 140, 11)
+        dbar:SetPoint("RIGHT", drow, "RIGHT", -18, 0)
+        f.diffSegs[i] = dbar
 
         drow:SetScript("OnClick", function(self)
             PlayUISound(SOUND_CLICK)
@@ -1600,6 +1737,11 @@ end
 
 -- Game stats overlay, reached from the Stats button on the select screen. Covers
 -- the carousel with aggregate lifetime numbers; Back returns to track selection.
+-- Fuzzy track matcher shared by both song search boxes; assigned further below (it
+-- lives near ApplySongSearch, but StatsSongSearch above also calls it).
+local BestSongMatch
+local STATS_SONG_DIFFS = { "Easy", "Medium", "Hard", "Extreme" }
+
 function GameUI:CreateStatsPanel(f)
     local sp = CreateFrame("Frame", nil, f)
     sp:SetPoint("TOPLEFT", 12, -12)
@@ -1623,46 +1765,148 @@ function GameUI:CreateStatsPanel(f)
     title:SetText("Your Stats")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
+    -- Summary / By Song toggle.
+    sp.summaryBtn = MakeBubbleButton(sp, "Summary", 78, 20)
+    sp.summaryBtn:SetPoint("TOPRIGHT", -102, -5)
+    sp.summaryBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("summary") end)
+    sp.songBtn = MakeBubbleButton(sp, "By Song", 78, 20)
+    sp.songBtn:SetPoint("TOPRIGHT", -20, -5)
+    sp.songBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("song") end)
+
+    -- ===== Summary view: lifetime / overall stats =====
+    local sum = CreateFrame("Frame", nil, sp)
+    sum:SetAllPoints()
+    sp.summaryGroup = sum
     sp.values = {}
     local function stat(offsetX, y, key, label, big)
-        local val = sp:CreateFontString(nil, "OVERLAY")
+        local val = sum:CreateFontString(nil, "OVERLAY")
         val:SetFont("Fonts\\FRIZQT__.TTF", big and 28 or 19, "OUTLINE")
-        val:SetPoint("TOP", sp, "TOP", offsetX, y)
+        val:SetPoint("TOP", sum, "TOP", offsetX, y)
         val:SetTextColor(1, 1, 1)
-        local lbl = sp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        local lbl = sum:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("TOP", val, "BOTTOM", 0, -2)
         lbl:SetText(label)
         lbl:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
         sp.values[key] = val
     end
     local function header(y, text)
-        local h = sp:CreateFontString(nil, "OVERLAY")
+        local h = sum:CreateFontString(nil, "OVERLAY")
         h:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
         h:SetPoint("TOP", 0, y)
         h:SetText(text)
         h:SetTextColor(1, 0.82, 0)
-        local line = sp:CreateTexture(nil, "ARTWORK")
+        local line = sum:CreateTexture(nil, "ARTWORK")
         line:SetPoint("TOP", h, "BOTTOM", 0, -3)
         line:SetSize(360, 1)
         line:SetColorTexture(1, 1, 1, 0.12)
     end
 
-    stat(-175, -54, "completed", "Tracks Completed", true)
-    stat(0,    -54, "accuracy",  "Lifetime Accuracy", true)
-    stat(175,  -54, "hits",      "Notes Hit", true)
+    stat(-175, -72, "completed", "Tracks Completed", true)
+    stat(0,    -72, "accuracy",  "Lifetime Accuracy", true)
+    stat(175,  -72, "hits",      "Notes Hit", true)
 
-    header(-118, "Personal Bests")
-    stat(-175, -142, "highscore", "High Score", false)
-    stat(0,    -142, "combo",     "Longest Combo", false)
-    stat(175,  -142, "bestacc",   "Best Accuracy", false)
+    header(-168, "Personal Bests")
+    stat(-175, -196, "highscore", "High Score", false)
+    stat(0,    -196, "combo",     "Longest Combo", false)
+    stat(175,  -196, "bestacc",   "Best Accuracy", false)
 
-    header(-206, "Best Score by Difficulty")
-    stat(-198, -230, "Easy",    "Easy", false)
-    stat(-66,  -230, "Medium",  "Medium", false)
-    stat(66,   -230, "Hard",    "Hard", false)
-    stat(198,  -230, "Extreme", "Extreme", false)
+    header(-284, "Best Score by Difficulty")
+    stat(-198, -308, "Easy",    "Easy", false)
+    stat(-66,  -308, "Medium",  "Medium", false)
+    stat(66,   -308, "Hard",    "Hard", false)
+    stat(198,  -308, "Extreme", "Extreme", false)
 
+    -- ===== Song view: per-track stats =====
+    local sg = CreateFrame("Frame", nil, sp)
+    sg:SetAllPoints()
+    sg:Hide()
+    sp.songGroup = sg
+    self:BuildStatsSongView(sg, sp)
+
+    sp.statsView = "summary"
     f.statsPanel = sp
+end
+
+-- The per-track view inside the stats page: a search box, prev/next track picker, and a
+-- per-difficulty table (best / accuracy / combo / plays) for the picked track.
+function GameUI:BuildStatsSongView(sg, sp)
+    local search = CreateFrame("EditBox", nil, sg)
+    search:SetSize(240, 22)
+    search:SetPoint("TOP", 0, -54)
+    search:SetAutoFocus(false)
+    search:SetFontObject("GameFontHighlight")
+    search:SetTextInsets(10, 10, 0, 0)
+    Theme.StylePanel(search, 0.9)
+    local ph = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ph:SetPoint("LEFT", 10, 0)
+    ph:SetText("Search a track...")
+    search.placeholder = ph
+    search:SetScript("OnTextChanged", function(self)
+        self.placeholder:SetShown(self:GetText() == "")
+    end)
+    search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    search:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    sp.songSearch = search
+    self:AttachSongSearchDropdown(search, function(key)
+        songSelect.statsSongKey = key
+        GameUI:RefreshStatsSongView()
+    end)
+
+    local prev = MakeBubbleButton(sg, "<", 26, 22)
+    prev:SetPoint("TOPLEFT", 20, -104)
+    prev:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:CycleStatsSong(-1) end)
+    local nxt = MakeBubbleButton(sg, ">", 26, 22)
+    nxt:SetPoint("TOPRIGHT", -20, -104)
+    nxt:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:CycleStatsSong(1) end)
+
+    local nameFS = sg:CreateFontString(nil, "OVERLAY")
+    nameFS:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
+    nameFS:SetPoint("LEFT", prev, "RIGHT", 6, 1)
+    nameFS:SetPoint("RIGHT", nxt, "LEFT", -6, 1)
+    nameFS:SetJustifyH("CENTER")
+    nameFS:SetWordWrap(false)
+    sp.songName = nameFS
+    local artistFS = sg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    artistFS:SetPoint("TOP", nameFS, "BOTTOM", 0, -1)
+    sp.songArtistFS = artistFS
+
+    local COLS, CW = { best = 190, acc = 300, combo = 395, plays = 485 }, 92
+    local headY = -166
+    local function hdr(text, rightX, leftAt)
+        local h = sg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        if leftAt then
+            h:SetPoint("TOPLEFT", leftAt, headY)
+        else
+            h:SetPoint("TOPLEFT", rightX - CW, headY); h:SetWidth(CW); h:SetJustifyH("RIGHT")
+        end
+        h:SetText(text); h:SetTextColor(1, 0.82, 0)
+    end
+    hdr("Difficulty", nil, 22)
+    hdr("Best", COLS.best); hdr("Accuracy", COLS.acc); hdr("Combo", COLS.combo); hdr("Plays", COLS.plays)
+
+    local ln = sg:CreateTexture(nil, "ARTWORK")
+    ln:SetPoint("TOPLEFT", 20, headY - 16); ln:SetPoint("TOPRIGHT", -20, headY - 16)
+    ln:SetHeight(1); ln:SetColorTexture(1, 1, 1, 0.12)
+
+    sp.songRows = {}
+    for i, diff in ipairs(STATS_SONG_DIFFS) do
+        local ry = headY - 26 - (i - 1) * 30
+        local row = {}
+        row.diff = sg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.diff:SetPoint("TOPLEFT", 22, ry); row.diff:SetText(diff)
+        local function cell(rightX)
+            local fs = sg:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            fs:SetPoint("TOPLEFT", rightX - CW, ry); fs:SetWidth(CW); fs:SetJustifyH("RIGHT")
+            return fs
+        end
+        row.score = cell(COLS.best); row.acc = cell(COLS.acc)
+        row.combo = cell(COLS.combo); row.plays = cell(COLS.plays)
+        sp.songRows[i] = row
+    end
+
+    local prog = sg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    prog:SetPoint("TOPLEFT", 22, headY - 26 - 4 * 30 - 14)
+    sp.songProgFS = prog
 end
 
 function GameUI:RefreshStatsPanel()
@@ -1695,9 +1939,68 @@ function GameUI:RefreshStatsPanel()
     sp.values.Medium:SetText(sformat("%d", (dbest.Medium and dbest.Medium.highestScore) or 0))
     sp.values.Hard:SetText(sformat("%d", (dbest.Hard and dbest.Hard.highestScore) or 0))
     sp.values.Extreme:SetText(sformat("%d", (dbest.Extreme and dbest.Extreme.highestScore) or 0))
+
+    if sp.songRows then self:RefreshStatsSongView() end
 end
 
-function GameUI:ShowStatsPage()
+function GameUI:SetStatsView(view)
+    local sp = songSelect and songSelect.statsPanel
+    if not sp then return end
+    sp.statsView = view
+    sp.summaryGroup:SetShown(view ~= "song")
+    sp.songGroup:SetShown(view == "song")
+    sp.summaryBtn:SetAlpha(view ~= "song" and 1 or 0.55)
+    sp.songBtn:SetAlpha(view == "song" and 1 or 0.55)
+    self:RefreshStatsPanel()
+end
+
+function GameUI:RefreshStatsSongView()
+    local sp = songSelect and songSelect.statsPanel
+    if not sp or not sp.songRows then return end
+    local g = BoundToLearn.db.game
+    local key = songSelect.statsSongKey or g.songKey
+    songSelect.statsSongKey = key
+    local song = ns.SongData and ns.SongData.Get(key)
+    sp.songName:SetText((song and song.title) or key or "-")
+    sp.songArtistFS:SetText((song and song.artist) or "")
+    local scores = g.songScores and g.songScores[key]
+    local stats  = g.songStats and g.songStats[key]
+    for i, diff in ipairs(STATS_SONG_DIFFS) do
+        local row = sp.songRows[i]
+        local best = (scores and scores[diff]) or 0
+        local st = stats and stats[diff]
+        local plays = (st and st.plays) or 0
+        row.score:SetText(best > 0 and sformat("%d", best) or "-")
+        row.acc:SetText((st and st.bestAccuracy and st.bestAccuracy > 0) and sformat("%.1f%%", st.bestAccuracy) or "-")
+        row.combo:SetText((st and st.bestCombo and st.bestCombo > 0) and sformat("%d", st.bestCombo) or "-")
+        row.plays:SetText(plays > 0 and sformat("%d", plays) or "-")
+        row.diff:SetAlpha((plays > 0 or best > 0) and 1 or 0.45)
+    end
+    local prog = (g.songProgress and g.songProgress[key]) or 0
+    sp.songProgFS:SetText(sformat("Best progress: |cFFFFCC00%d%%|r", mfloor(prog * 100 + 0.5)))
+end
+
+function GameUI:CycleStatsSong(dir)
+    local songs = ns.SongData and ns.SongData.songs
+    if not songs or #songs == 0 then return end
+    local key = (songSelect and songSelect.statsSongKey) or BoundToLearn.db.game.songKey
+    local idx = 1
+    for i, s in ipairs(songs) do
+        if s.key == key then idx = i; break end
+    end
+    idx = ((idx - 1 + dir) % #songs) + 1
+    songSelect.statsSongKey = songs[idx].key
+    self:RefreshStatsSongView()
+end
+
+function GameUI:StatsSongSearch(query)
+    local best = BestSongMatch(query)
+    if not best then return end
+    songSelect.statsSongKey = ns.SongData.songs[best].key
+    self:RefreshStatsSongView()
+end
+
+function GameUI:ShowStatsPage(songKey)
     if not songSelect then self:CreateSongSelect() end
     if not songSelect.statsPanel then self:CreateStatsPanel(songSelect) end
     if songSelect.resultsMode then self:ExitResultsMode() end
@@ -1710,8 +2013,9 @@ function GameUI:ShowStatsPage()
         songSelect.searchBox:Hide()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Hide() end
     end
-    self:RefreshStatsPanel()
     songSelect.statsPanel:Show()
+    if songKey then songSelect.statsSongKey = songKey end
+    self:SetStatsView(songKey and "song" or (songSelect.statsPanel.statsView or "summary"))
     self:RefreshSongSelect()
 end
 
@@ -1742,29 +2046,185 @@ end
 
 -- Scroll the carousel to the track that best matches the query: a title prefix
 -- wins over a title substring, which wins over an artist match.
-function GameUI:ApplySongSearch(query)
-    if not songSelect then return end
-    query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if query == "" then return end
-    local songs = ns.SongData.songs
-    local best, bestRank
-    for i, sg in ipairs(songs) do
-        local title = sg.title:lower()
-        local at = title:find(query, 1, true)
-        local rank
-        if at == 1 then
-            rank = 1
-        elseif at then
-            rank = 2
-        elseif sg.artist and sg.artist:lower():find(query, 1, true) then
-            rank = 3
-        end
-        if rank and (not bestRank or rank < bestRank) then
-            best, bestRank = i, rank
-            if rank == 1 then break end
+-- Fuzzy track matching for the search boxes (carousel + stats), in the spirit of the
+-- main search bar: substring/prefix beats a subsequence beats a small typo, title before
+-- artist. Reuses one scratch row for the edit distance to stay allocation-free.
+local sbyte = string.byte
+local fuzzRow = {}
+local function EditDistance(a, la, b, lb)
+    for j = 0, lb do fuzzRow[j] = j end
+    for i = 1, la do
+        local prev = fuzzRow[0]
+        fuzzRow[0] = i
+        local ac = sbyte(a, i)
+        for j = 1, lb do
+            local tmp = fuzzRow[j]
+            local cost = (ac == sbyte(b, j)) and 0 or 1
+            local m = fuzzRow[j] + 1
+            local d = fuzzRow[j - 1] + 1
+            if d < m then m = d end
+            d = prev + cost
+            if d < m then m = d end
+            fuzzRow[j] = m
+            prev = tmp
         end
     end
+    return fuzzRow[lb]
+end
+
+local function IsSubseq(word, query, qlen)
+    local wi, wl = 1, #word
+    for qi = 1, qlen do
+        local qc = sbyte(query, qi)
+        local found = false
+        while wi <= wl do
+            if sbyte(word, wi) == qc then wi = wi + 1; found = true; break end
+            wi = wi + 1
+        end
+        if not found then return false end
+    end
+    return true
+end
+
+local function SongMatchScore(song, query, qlen)
+    local title = song.title:lower()
+    local at = title:find(query, 1, true)
+    if at then return 200 - mmin(at, 40) end               -- substring; prefix scores highest
+    for word in title:gmatch("[%w']+") do
+        if #word >= qlen and IsSubseq(word, query, qlen) then return 120 end
+    end
+    if IsSubseq(title, query, qlen) then return 90 end
+    if qlen >= 3 then
+        local budget = qlen >= 6 and 2 or 1
+        for word in title:gmatch("[%w']+") do
+            local wl = #word
+            local diff = wl - qlen
+            if diff < 0 then diff = -diff end
+            if diff <= budget and sbyte(word, 1) == sbyte(query, 1)
+               and EditDistance(query, qlen, word, wl) <= budget then
+                return 70
+            end
+        end
+    end
+    local artist = song.artist and song.artist:lower()
+    if artist then
+        local aa = artist:find(query, 1, true)
+        if aa then return 40 - mmin(aa, 20) end
+        if IsSubseq(artist, query, qlen) then return 25 end
+    end
+    return 0
+end
+
+function BestSongMatch(query)
+    query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if query == "" then return nil end
+    local qlen = #query
+    local songs = ns.SongData and ns.SongData.songs
+    if not songs then return nil end
+    local best, bestScore = nil, 0
+    for i = 1, #songs do
+        local s = SongMatchScore(songs[i], query, qlen)
+        if s > bestScore then bestScore, best = s, i end
+    end
+    return best
+end
+
+-- All tracks that match the query, ranked best-first: { key, score, title, artist }.
+local rankTmp = {}
+local function rankDesc(a, b) return a[2] > b[2] end
+local function RankedSongMatches(query)
+    query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if query == "" then return nil end
+    local qlen = #query
+    local songs = ns.SongData and ns.SongData.songs
+    if not songs then return nil end
+    for i = #rankTmp, 1, -1 do rankTmp[i] = nil end
+    for i = 1, #songs do
+        local sg = songs[i]
+        local s = SongMatchScore(sg, query, qlen)
+        if s > 0 then rankTmp[#rankTmp + 1] = { sg.key, s, sg.title, sg.artist } end
+    end
+    table.sort(rankTmp, rankDesc)
+    return rankTmp
+end
+
+-- A results dropdown under a search box (like the main search bar): typing shows the
+-- ranked matches, click a row (or Enter for the top one) to pick. onSelect(key) is the
+-- caller's action; the box does not instant-jump while you type.
+function GameUI:AttachSongSearchDropdown(editBox, onSelect)
+    local dd = CreateFrame("Frame", nil, editBox)
+    dd:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -2)
+    dd:SetPoint("TOPRIGHT", editBox, "BOTTOMRIGHT", 0, -2)
+    dd:SetFrameStrata("FULLSCREEN_DIALOG")
+    dd:SetFrameLevel(editBox:GetFrameLevel() + 30)
+    Theme.StylePanel(dd, 0.98)
+    dd:Hide()
+    editBox.searchDropdown = dd
+
+    local ROW_H = 28
+    local function selectKey(key)
+        if not key then return end
+        PlayUISound(SOUND_CLICK)
+        editBox:SetText("")
+        editBox:ClearFocus()
+        dd:Hide()
+        onSelect(key)
+    end
+
+    dd.rows = {}
+    for i = 1, 7 do
+        local row = CreateFrame("Button", nil, dd)
+        row:SetHeight(ROW_H)
+        row:SetPoint("TOPLEFT", 3, -3 - (i - 1) * ROW_H)
+        row:SetPoint("TOPRIGHT", -3, -3 - (i - 1) * ROW_H)
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(Theme.RGB(Theme.C.ACCENT, 0.22))
+        local t = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        t:SetPoint("LEFT", 8, 5); t:SetJustifyH("LEFT")
+        row.titleFS = t
+        local a = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        a:SetPoint("LEFT", 8, -7); a:SetJustifyH("LEFT")
+        row.artistFS = a
+        row:SetScript("OnClick", function(self) selectKey(self.songKey) end)
+        row:Hide()
+        dd.rows[i] = row
+    end
+
+    local function populate()
+        local matches = RankedSongMatches(editBox:GetText())
+        local n = matches and mmin(#matches, #dd.rows) or 0
+        if n == 0 then dd:Hide(); return end
+        for i = 1, #dd.rows do
+            local row, m = dd.rows[i], matches[i]
+            if m then
+                row.songKey = m[1]
+                row.titleFS:SetText(m[3])
+                row.artistFS:SetText(m[4] or "")
+                row:Show()
+            else
+                row:Hide()
+            end
+        end
+        dd:SetHeight(6 + n * ROW_H)
+        dd:Show()
+    end
+
+    editBox:HookScript("OnTextChanged", function(_, userInput) if userInput then populate() end end)
+    editBox:HookScript("OnEditFocusLost", function() C_Timer.After(0.2, function() dd:Hide() end) end)
+    editBox:HookScript("OnEnterPressed", function()
+        if dd:IsShown() and dd.rows[1]:IsShown() then selectKey(dd.rows[1].songKey) end
+    end)
+    editBox:HookScript("OnEscapePressed", function() dd:Hide() end)
+    return dd
+end
+
+-- Scroll the carousel to the best fuzzy match for the query.
+function GameUI:ApplySongSearch(query)
+    if not songSelect then return end
+    local best = BestSongMatch(query)
     if not best then return end
+    local songs = ns.SongData.songs
     songSelect.selIndex = best
     BoundToLearn.db.game.songKey = songs[best].key
     songSelect.animOffset = 0
@@ -1839,18 +2299,31 @@ function GameUI:PositionWheel()
         -- bubble shows its themed dungeon/raid art; the rest are the renown atlas
         -- desaturated to silver so they read on any backdrop.
         slot.bg:SetTexCoord(0, 1, 0, 1)
+        -- Atlas hover glow matches the atlas bubbles; suppress it when the nine-slice
+        -- art is showing (its rounded silhouette differs from the atlas shape).
+        slot.hl:SetAlpha(0.22)
         if ae < 0.5 then
             local img, tc = ns.SongData.InstanceImage(sg)
             if img then
-                slot.bg:SetTexture(img)
-                slot.bg:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+                -- Real image clipped to the bubble shape by the nine-slice overlay;
+                -- hide the square bg texture underneath it.
+                Theme.SetArtCorner(slot, slot._h * 0.32)
+                Theme.SetArt(slot, img, tc[1], tc[2], tc[3], tc[4])
+                Theme.SetArtVertexColor(slot, 0.62, 0.63, 0.67, 1)  -- lower gamma: ground the hazy EJ backdrop
+                Theme.ShowArt(slot, true)
+                slot.bg:Hide()
+                slot.hl:SetAlpha(0)
             else
+                Theme.ShowArt(slot, false)
+                slot.bg:Show()
                 slot.bg:SetAtlas("UI-Journeys-Renown-Button-pressed")
+                slot.bg:SetDesaturated(false)
+                slot.bg:SetVertexColor(0.62, 0.63, 0.67, 1)
             end
-            slot.bg:SetDesaturated(false)
-            slot.bg:SetVertexColor(0.62, 0.63, 0.67, 1)   -- lower gamma: ground the hazy EJ backdrop
             slot.titleFS:SetTextColor(1, 1, 1)
         else
+            Theme.ShowArt(slot, false)
+            slot.bg:Show()
             slot.bg:SetAtlas("UI-Journeys-Renown-Button")
             slot.bg:SetDesaturated(true)
             if slot.hover then
@@ -1991,10 +2464,7 @@ function GameUI:RefreshSongSelect()
             drow.label:SetTextColor(c[1] * 0.7, c[2] * 0.7, c[3] * 0.7)
         end
         local rating = (ns.SongData and ns.SongData.Rating(song, name)) or 5
-        local caps = songSelect.diffSegs[i]
-        for s = 1, #caps do
-            SetKeycap(caps[s], c[1], c[2], c[3], (s <= rating) and 1 or 0, not selected)
-        end
+        SetDiffBar(songSelect.diffSegs[i], rating, not selected)
     end
 
     local best = SongBestScore(key, curDiff)
@@ -2044,6 +2514,7 @@ end
 function GameUI:HideSongSelect()
     if songSelect then songSelect:Hide() end
     if modifierDropdown then modifierDropdown:Hide() end
+    if self.songMenu and self.songMenu.catcher then self.songMenu.catcher:Hide() end
     self:StopSongPreview()
 end
 
