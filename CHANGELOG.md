@@ -2,7 +2,7 @@
 
 All notable changes to BoundToLearn are documented here.
 
-## [1.0.0] - 2026-07-14
+## [1.0.1] - 2026-07-14
 
 ### Added
 - **Keybind Tracker**: Real-time tracking of keybinds versus clicks, with a live ratio, encouraging feedback, and session summaries.
