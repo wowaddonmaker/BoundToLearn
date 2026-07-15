@@ -1230,10 +1230,10 @@ function PingGameUI:CreateStartScreen()
         end
     end)
     mapBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+        ns.Theme.SetBorderColor(self, 0.5, 0.5, 0.5, 1)
     end)
     mapBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+        ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
     end)
 
     startFrame.mapBtn = mapBtn
@@ -1272,16 +1272,11 @@ function PingGameUI:CreateStartScreen()
         label:SetTextColor(def.color[1], def.color[2], def.color[3])
         label:SetText(def.label)
 
-        local bindBtn = CreateFrame("Button", nil, bindBar, "BackdropTemplate")
+        local bindBtn = CreateFrame("Button", nil, bindBar)
         bindBtn:SetSize(80, 18)
         bindBtn:SetPoint("LEFT", label, "RIGHT", 4, 0)
-        bindBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        bindBtn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+        ns.Theme.StyleCard(bindBtn, nil, nil, true)
+        ns.Theme.SetBorderColor(bindBtn, 0.35, 0.35, 0.35, 0.8)
 
         local keyText = bindBtn:CreateFontString(nil, "OVERLAY")
         keyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1295,11 +1290,11 @@ function PingGameUI:CreateStartScreen()
             if bindingInProgress and bindingInProgress ~= self then
                 bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "unbound")
                 bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-                bindingInProgress:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetBorderColor(bindingInProgress, 0.35, 0.35, 0.35, 0.8)
             end
             bindingInProgress = self
             self.keyText:SetText("|cFFFFD700Press a key...|r")
-            self:SetBackdropBorderColor(1, 0.84, 0, 1)
+            ns.Theme.SetBorderColor(self, 1, 0.84, 0, 1)
             self:EnableKeyboard(true)
         end)
 
@@ -1313,7 +1308,7 @@ function PingGameUI:CreateStartScreen()
                 self:EnableKeyboard(false)
                 self.keyText:SetText(GetBindingKey(self.bindingName) or "|cFF666666unbound|r")
                 self.keyText:SetTextColor(0.85, 0.85, 0.85)
-                self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
                 bindingInProgress = nil
                 return
             end
@@ -1332,7 +1327,7 @@ function PingGameUI:CreateStartScreen()
             self:EnableKeyboard(false)
             self.keyText:SetText(fullKey)
             self.keyText:SetTextColor(0.85, 0.85, 0.85)
-            self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
             bindingInProgress = nil
             if ns.PingGame and ns.PingGame.HasPingKeybinds then
                 ns.PingGame:Initialize()
@@ -1341,12 +1336,12 @@ function PingGameUI:CreateStartScreen()
 
         bindBtn:SetScript("OnEnter", function(self)
             if bindingInProgress ~= self then
-                self:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+                ns.Theme.SetBorderColor(self, 0.5, 0.5, 0.5, 1)
             end
         end)
         bindBtn:SetScript("OnLeave", function(self)
             if bindingInProgress ~= self then
-                self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
             end
         end)
 
@@ -1358,7 +1353,7 @@ function PingGameUI:CreateStartScreen()
             bindingInProgress:EnableKeyboard(false)
             bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "|cFF666666unbound|r")
             bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-            bindingInProgress:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetBorderColor(bindingInProgress, 0.35, 0.35, 0.35, 0.8)
             bindingInProgress = nil
         end
         if mapDropdown then mapDropdown:Hide() end
