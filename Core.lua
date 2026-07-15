@@ -480,39 +480,31 @@ function BoundToLearn:PrintHelp()
 end
 
 -- Hidden testing command (/btl reset scores): wipe all persistent progress.
--- Not listed in help; confirmed via popup so a user who stumbles on it is
--- warned about exactly what they lose before anything is erased.
+-- Not listed in help; confirmed via a themed dialog so a user who stumbles on
+-- it is warned about exactly what they lose before anything is erased.
 function BoundToLearn:ConfirmResetScores()
-    if not StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] then
-        StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] = {
-            text = "Reset ALL BoundToLearn progress?\n\nThis permanently erases every achievement, trophy, personal best, high score, and leaderboard entry. It cannot be undone.",
-            button1 = "Erase Everything",
-            button2 = "Cancel",
-            showAlert = true,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-            OnAccept = function()
-                local db = BoundToLearn.db
-                wipe(db.achievements.unlocked)
-                for _, board in pairs(db.leaderboard) do wipe(board) end
-                local s = db.stats
-                wipe(s.sessions)
-                local pb = s.personalBest
-                pb.longestCombo, pb.highestScore = 0, 0
-                pb.bestAccuracy, pb.bestKeybindRatio, pb.fastestQuiz = 0, 0, 0
-                for _, d in pairs(s.difficultyBest) do
-                    d.highestScore, d.longestCombo = 0, 0
-                end
-                s.lifetimeClicks, s.lifetimeKeybinds = 0, 0
-                s.lifetimeGameNotes, s.lifetimeGameHits = 0, 0
-                s.lifetimeQuizzes, s.lifetimeQuizAbilities = 0, 0
-                BoundToLearn:Print("All scores, achievements, and trophies reset.")
-            end,
-        }
-    end
-    StaticPopup_Show("BOUNDTOLEARN_RESET_SCORES")
+    ns.Theme.ShowConfirm({
+        title = "Reset Everything",
+        body = "Reset ALL BoundToLearn progress?\n\nThis permanently erases every achievement, trophy, personal best, high score, and leaderboard entry. It cannot be undone.",
+        acceptText = "Erase Everything",
+        onAccept = function()
+            local db = BoundToLearn.db
+            wipe(db.achievements.unlocked)
+            for _, board in pairs(db.leaderboard) do wipe(board) end
+            local s = db.stats
+            wipe(s.sessions)
+            local pb = s.personalBest
+            pb.longestCombo, pb.highestScore = 0, 0
+            pb.bestAccuracy, pb.bestKeybindRatio, pb.fastestQuiz = 0, 0, 0
+            for _, d in pairs(s.difficultyBest) do
+                d.highestScore, d.longestCombo = 0, 0
+            end
+            s.lifetimeClicks, s.lifetimeKeybinds = 0, 0
+            s.lifetimeGameNotes, s.lifetimeGameHits = 0, 0
+            s.lifetimeQuizzes, s.lifetimeQuizAbilities = 0, 0
+            BoundToLearn:Print("All scores, achievements, and trophies reset.")
+        end,
+    })
 end
 
 -- Minimap button

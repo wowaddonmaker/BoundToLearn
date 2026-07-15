@@ -18,8 +18,6 @@ local wipe = wipe
 local C_Spell = C_Spell
 local GetSpellTexture = C_Spell and C_Spell.GetSpellTexture
 local InCombatLockdown = InCombatLockdown
-local StaticPopupDialogs = StaticPopupDialogs
-local StaticPopup_Show = StaticPopup_Show
 
 local C = Theme.C
 
@@ -190,27 +188,15 @@ local function ColorToHex(c)
     return sformat("%02X%02X%02X", mfloor(c[1] * 255 + 0.5), mfloor(c[2] * 255 + 0.5), mfloor(c[3] * 255 + 0.5))
 end
 
--- One reusable themed copy-link dialog, shared by every link button. It sits
--- on the same strata as the options window but at a much higher frame level,
--- so it draws above all window content and any open flyout dropdown.
+-- One reusable copy-link dialog, shared by every link button. Built on the
+-- shared themed dialog scaffold, so it floats above the window and its flyouts.
 local linkDialog
 local function ShowLinkDialog(title, url)
     if not linkDialog then
-        linkDialog = CreateFrame("Frame", "BoundToLearnLinkDialog", optionsFrame)
-        linkDialog:SetSize(340, 128)
-        linkDialog:SetPoint("CENTER", optionsFrame, "CENTER", 0, 30)
-        linkDialog:SetFrameStrata(FRAME_STRATA)
-        linkDialog:SetToplevel(true)
-        Theme.StylePanel(linkDialog)
-        linkDialog:EnableMouse(true)
-        tinsert(UISpecialFrames, "BoundToLearnLinkDialog")
-
-        local titleFS = Theme.CreateTitle(linkDialog, "", 15)
-        titleFS:SetPoint("TOP", 0, -14)
-        linkDialog.titleFS = titleFS
+        linkDialog = Theme.CreateDialogShell("BoundToLearnLinkDialog", 340, 128)
 
         local hint = linkDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        hint:SetPoint("TOP", titleFS, "BOTTOM", 0, -8)
+        hint:SetPoint("TOP", linkDialog.titleFS, "BOTTOM", 0, -8)
         hint:SetText("Select the link and press Ctrl+C to copy.")
         hint:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
 
@@ -222,17 +208,11 @@ local function ShowLinkDialog(title, url)
         local okBtn = Theme.CreateButton(linkDialog, _G["CLOSE"] or "Close", 110, 24)
         okBtn:SetPoint("BOTTOM", 0, 14)
         okBtn:SetScript("OnClick", function() linkDialog:Hide() end)
-
-        local close = Theme.CreateCloseButton(linkDialog, function() linkDialog:Hide() end)
-        close:SetPoint("TOPRIGHT", -8, -8)
     end
 
     linkDialog.titleFS:SetText(title or "")
     linkDialog.urlBox:SetURL(url)
-    linkDialog:SetFrameStrata(FRAME_STRATA)
-    linkDialog:SetFrameLevel((optionsFrame and optionsFrame:GetFrameLevel() or FRAME_LEVEL) + 100)
-    linkDialog:Show()
-    linkDialog:Raise()
+    linkDialog:Present()
     linkDialog.urlBox.editBox:SetFocus()
     linkDialog.urlBox.editBox:HighlightText()
 end
@@ -408,25 +388,16 @@ local function BuildBlacklistCard(tab, boxY)
     local clearBtn = Theme.CreateButton(blacklistBox, "Clear", 78, 22)
     clearBtn:SetPoint("BOTTOMRIGHT", -6, 5)
     clearBtn:SetScript("OnClick", function()
-        local dialog = StaticPopup_Show("BOUNDTOLEARN_CLEAR_BLACKLIST")
-        if dialog and ns.ClickBlock and ns.ClickBlock:IsSelecting() then
-            dialog:SetFrameStrata("TOOLTIP")
-        end
+        Theme.ShowConfirm({
+            title = "Clear Blocked Spells",
+            body = "Clear the custom spell blacklist?",
+            acceptText = "Clear",
+            onAccept = function()
+                if ns.ClickBlock then ns.ClickBlock:ClearBlacklist() end
+                RefreshBlacklistContent()
+            end,
+        })
     end)
-
-    StaticPopupDialogs["BOUNDTOLEARN_CLEAR_BLACKLIST"] = {
-        text = "Clear the custom spell blacklist?",
-        button1 = "Clear",
-        button2 = "Cancel",
-        OnAccept = function()
-            if ns.ClickBlock then ns.ClickBlock:ClearBlacklist() end
-            RefreshBlacklistContent()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
 
     RefreshBlacklistContent()
 end
@@ -770,6 +741,42 @@ local function BuildFeedbackTab()
     end)
 end
 
+-- Restore every setting to its default. The confirm dialog gates it.
+local function DoResetDefaults()
+    local db = BoundToLearn.db
+    db.tracker.enabled = true
+    db.tracker.showWidget = true
+    db.tracker.widgetScale = 1.0
+    db.tracker.combatOnly = false
+    db.tracker.hideInCombat = false
+    db.filter.mounts = true
+    db.filter.toys = true
+    db.filter.hearthstones = true
+    db.filter.teleports = true
+    db.filter.consumables = true
+    db.filter.professions = true
+    db.filter.skyriding = true
+    db.filter.nonCombatMacros = true
+    db.filter.buffs = true
+    db.clickBlock.enabled = false
+    db.clickBlock.mode = "all"
+    wipe(db.clickBlock.customBlacklist)
+    if ns.ClickBlock then ns.ClickBlock:Disable() end
+    db.game.difficulty = "Medium"
+    db.game.fallSpeed = 150
+    db.game.fallDistance = 300
+    db.game.spawnInterval = 1.5
+    db.game.maxActiveNotes = 3
+    db.game.timingPerfect = 0.08
+    db.game.timingGreat = 0.15
+    db.game.timingGood = 0.25
+    db.game.soundEnabled = true
+    db.game.showCombo = true
+    db.options.muteChat = false
+    BoundToLearn:Print("Settings reset to defaults.")
+    SyncControls()
+end
+
 local function BuildResetButtons()
     -- A grouped pair centered along the window bottom. Shown only on the
     -- setting tabs (SwitchToTab toggles the group; see BuildFrame).
@@ -780,13 +787,18 @@ local function BuildResetButtons()
     local resetStats = Theme.CreateButton(resetGroup, "Reset Stats", 120, 24)
     resetStats:SetPoint("LEFT", resetGroup, "LEFT", 0, 0)
     resetStats:SetScript("OnClick", function()
-        StaticPopup_Show("BOUNDTOLEARN_RESET_STATS")
+        if ns.GameUI then ns.GameUI:ConfirmResetStats() end
     end)
 
     local resetDefaults = Theme.CreateButton(resetGroup, "Reset Defaults", 120, 24)
     resetDefaults:SetPoint("LEFT", resetStats, "RIGHT", 8, 0)
     resetDefaults:SetScript("OnClick", function()
-        StaticPopup_Show("BOUNDTOLEARN_RESET_DEFAULTS")
+        Theme.ShowConfirm({
+            title = "Reset Defaults",
+            body = "Reset all BoundToLearn settings to defaults?",
+            acceptText = _G["RESET"] or "Reset",
+            onAccept = DoResetDefaults,
+        })
     end)
 end
 
@@ -815,6 +827,7 @@ local function BuildFrame()
         if ns.ClickBlock and ns.ClickBlock:IsSelecting() then
             ns.ClickBlock:StopSelect()
         end
+        if linkDialog then linkDialog:Hide() end
     end)
     tinsert(UISpecialFrames, "BoundToLearnOptionsFrame")
 
@@ -964,49 +977,3 @@ function Options:ShowTrackerSection()
     optionsFrame:Raise()
 end
 
--- =========================================
--- Static popups
--- =========================================
-
-StaticPopupDialogs["BOUNDTOLEARN_RESET_DEFAULTS"] = {
-    text = "Reset all BoundToLearn settings to defaults?",
-    button1 = "Reset",
-    button2 = "Cancel",
-    OnAccept = function()
-        local db = BoundToLearn.db
-        db.tracker.enabled = true
-        db.tracker.showWidget = true
-        db.tracker.widgetScale = 1.0
-        db.tracker.combatOnly = false
-        db.tracker.hideInCombat = false
-        db.filter.mounts = true
-        db.filter.toys = true
-        db.filter.hearthstones = true
-        db.filter.teleports = true
-        db.filter.consumables = true
-        db.filter.professions = true
-        db.filter.skyriding = true
-        db.filter.nonCombatMacros = true
-        db.filter.buffs = true
-        db.clickBlock.enabled = false
-        db.clickBlock.mode = "all"
-        wipe(db.clickBlock.customBlacklist)
-        if ns.ClickBlock then ns.ClickBlock:Disable() end
-        db.game.difficulty = "Medium"
-        db.game.fallSpeed = 150
-        db.game.fallDistance = 300
-        db.game.spawnInterval = 1.5
-        db.game.maxActiveNotes = 3
-        db.game.timingPerfect = 0.08
-        db.game.timingGreat = 0.15
-        db.game.timingGood = 0.25
-        db.game.soundEnabled = true
-        db.game.showCombo = true
-        db.options.muteChat = false
-        BoundToLearn:Print("Settings reset to defaults.")
-        SyncControls()
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-}

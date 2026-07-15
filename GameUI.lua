@@ -607,6 +607,7 @@ function GameUI:BuildModifierDropdown()
         Theme.StylePanel(modifierDropdown, 0.97)
         modifierDropdown:SetFrameStrata("FULLSCREEN_DIALOG")
         modifierDropdown:SetFrameLevel(100)
+        modifierDropdown:SetClampedToScreen(true)
         modifierDropdown.rows = {}
         modifierDropdown:HookScript("OnShow", function() PaintModifierBtn(modifierBtn:IsMouseOver()) end)
         modifierDropdown:HookScript("OnHide", function() PaintModifierBtn(modifierBtn:IsMouseOver()) end)
@@ -617,9 +618,18 @@ function GameUI:BuildModifierDropdown()
     local rowH = 26
     local pad = 6
     local rowW = 208
-    modifierDropdown:SetSize(220, #list * rowH + pad * 2)
+    local ddH = #list * rowH + pad * 2
+    modifierDropdown:SetSize(220, ddH)
     modifierDropdown:ClearAllPoints()
-    modifierDropdown:SetPoint("TOPLEFT", opener, "BOTTOMLEFT", 0, -2)
+    -- Drop down from the opener, or flip above it when there is not enough room
+    -- below; SetClampedToScreen keeps the remaining edges on-screen.
+    local opScale = opener:GetEffectiveScale() or 1
+    local ddScale = modifierDropdown:GetEffectiveScale() or 1
+    if (opener:GetBottom() or 0) * opScale < ddH * ddScale + 8 then
+        modifierDropdown:SetPoint("BOTTOMLEFT", opener, "TOPLEFT", 0, 2)
+    else
+        modifierDropdown:SetPoint("TOPLEFT", opener, "BOTTOMLEFT", 0, -2)
+    end
 
     local active = Mods:GetActive()
     local rows = modifierDropdown.rows
@@ -627,7 +637,23 @@ function GameUI:BuildModifierDropdown()
         local row = rows[i]
         if not row then
             row = Theme.CreateToggle(modifierDropdown, "", nil, rowW)
+            -- Locked/required rows are Disabled; enable motion scripts so they
+            -- still fire OnEnter for the unlock tooltip and the hover wash.
+            row:SetMotionScriptsWhileDisabled(true)
             Theme.DelayedTooltip(row, ModifierRowTooltip)
+            -- Subtle accent hover wash behind the row (same treatment as the
+            -- minimap menu), shown for locked and unlocked rows alike.
+            local hl = CreateFrame("Frame", nil, modifierDropdown)
+            hl:SetFrameLevel(modifierDropdown:GetFrameLevel())
+            hl:SetPoint("TOPLEFT", row, "TOPLEFT", -2, 1)
+            hl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 2, -1)
+            Theme.Round(hl)
+            Theme.SetBarHeight(hl, 10)
+            Theme.SetBorderShown(hl, false)
+            Theme.SetFillColor(hl, Theme.C.ACCENT, 0)
+            row.hl = hl
+            row:HookScript("OnEnter", function(self) Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0.15) end)
+            row:HookScript("OnLeave", function(self) Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0) end)
             rows[i] = row
         end
 
@@ -1705,20 +1731,20 @@ end
 -- the carousel with aggregate lifetime numbers; Back returns to track selection.
 local STATS_SONG_DIFFS = { "Easy", "Medium", "Hard", "Extreme" }
 
--- Shared by the in-game stats page's Reset button and the options panel's reset button.
-StaticPopupDialogs["BOUNDTOLEARN_RESET_STATS"] = {
-    text = "Reset all BoundToLearn statistics? This cannot be undone.",
-    button1 = "Reset",
-    button2 = "Cancel",
-    OnAccept = function()
-        if ns.Stats then ns.Stats:ResetAll() end
-        if ns.GameUI then ns.GameUI:RefreshStatsPanel() end
-        if BoundToLearn then BoundToLearn:Print("Statistics reset.") end
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-}
+-- Shared by the in-game stats page's Reset button and the options panel's reset
+-- button, via a themed confirm dialog that floats above both windows.
+function GameUI:ConfirmResetStats()
+    Theme.ShowConfirm({
+        title = "Reset Stats",
+        body = "Reset all BoundToLearn statistics? This cannot be undone.",
+        acceptText = _G["RESET"] or "Reset",
+        onAccept = function()
+            if ns.Stats then ns.Stats:ResetAll() end
+            if ns.GameUI then ns.GameUI:RefreshStatsPanel() end
+            if BoundToLearn then BoundToLearn:Print("Statistics reset.") end
+        end,
+    })
+end
 
 function GameUI:CreateStatsPanel(f)
     local sp = CreateFrame("Frame", nil, f)
@@ -1741,7 +1767,7 @@ function GameUI:CreateStatsPanel(f)
     resetBtn:SetPoint("LEFT", backBtn, "RIGHT", 6, 0)
     resetBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
-        StaticPopup_Show("BOUNDTOLEARN_RESET_STATS")
+        GameUI:ConfirmResetStats()
     end)
 
     local title = sp:CreateFontString(nil, "OVERLAY")

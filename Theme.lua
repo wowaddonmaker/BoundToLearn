@@ -1186,6 +1186,91 @@ function Theme.CreateSettingsGroup(parent, width, height, color)
 end
 
 --------------------------------------------------------------------------
+-- Floating dialogs (confirm + copy-link). A shared scaffold builds a themed
+-- panel that always draws above the addon's other windows -- including the
+-- options window while it is temporarily raised for blacklist selection -- so
+-- a dialog can never hide behind them. TOOLTIP strata sits above every window
+-- strata; a high level plus Raise keeps it on top of same-strata frames.
+--------------------------------------------------------------------------
+local DIALOG_STRATA = "TOOLTIP"
+local DIALOG_LEVEL = 5000
+
+-- A themed panel with a title line and a close-X, floating above everything.
+-- The caller fills in body/buttons. name (if given) registers with
+-- UISpecialFrames so Escape closes it. Returns the frame; call frame:Present()
+-- to show it and re-assert its top-of-stack strata/level.
+function Theme.CreateDialogShell(name, width, height)
+    local f = CreateFrame("Frame", name, UIParent)
+    f:SetSize(width, height)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    f:SetFrameStrata(DIALOG_STRATA)
+    f:SetToplevel(true)
+    f:SetFrameLevel(DIALOG_LEVEL)
+    Theme.StylePanel(f)
+    f:EnableMouse(true)
+    if name then Utils.tinsert(UISpecialFrames, name) end
+
+    local titleFS = Theme.CreateTitle(f, "", 15)
+    titleFS:SetPoint("TOP", 0, -14)
+    f.titleFS = titleFS
+
+    local close = Theme.CreateCloseButton(f, function() f:Hide() end)
+    close:SetPoint("TOPRIGHT", -8, -8)
+    f.closeBtn = close
+
+    f.Present = function(self)
+        self:SetFrameStrata(DIALOG_STRATA)
+        self:SetFrameLevel(DIALOG_LEVEL)
+        self:Show()
+        self:Raise()
+    end
+    return f
+end
+
+-- Shared confirmation dialog: title + body + Accept/Cancel. opts =
+-- { title, body, acceptText, onAccept }. One reusable frame for every confirm.
+local confirmDialog
+function Theme.ShowConfirm(opts)
+    opts = opts or {}
+    if not confirmDialog then
+        confirmDialog = Theme.CreateDialogShell("BoundToLearnConfirmDialog", 360, 150)
+
+        local body = confirmDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        body:SetPoint("TOPLEFT", confirmDialog, "TOPLEFT", 20, -44)
+        body:SetPoint("TOPRIGHT", confirmDialog, "TOPRIGHT", -20, -44)
+        body:SetJustifyH("CENTER")
+        body:SetSpacing(3)
+        body:SetTextColor(RGB(C.TEXT_BODY, 1))
+        confirmDialog.body = body
+
+        -- Accept (accent) on the left, Cancel (neutral) on the right, matching
+        -- the default button1/button2 order the old popups used.
+        local accept = Theme.CreateAccentButton(confirmDialog, "", 140, 26)
+        accept:SetPoint("BOTTOMRIGHT", confirmDialog, "BOTTOM", -6, 16)
+        confirmDialog.accept = accept
+
+        local cancel = Theme.CreateButton(confirmDialog, _G["CANCEL"] or "Cancel", 110, 26)
+        cancel:SetPoint("BOTTOMLEFT", confirmDialog, "BOTTOM", 6, 16)
+        cancel:SetScript("OnClick", function() confirmDialog:Hide() end)
+        confirmDialog.cancel = cancel
+    end
+
+    confirmDialog.titleFS:SetText(opts.title or "")
+    confirmDialog.body:SetText(opts.body or "")
+    confirmDialog.accept:SetText(opts.acceptText or (_G["OKAY"] or "OK"))
+    local onAccept = opts.onAccept
+    confirmDialog.accept:SetScript("OnClick", function()
+        confirmDialog:Hide()
+        if onAccept then onAccept() end
+    end)
+
+    -- Grow to fit the body so long confirmations are not clipped.
+    local bodyH = confirmDialog.body:GetStringHeight() or 40
+    confirmDialog:SetHeight(mfloor(bodyH + 0.5) + 108)
+    confirmDialog:Present()
+end
+
+--------------------------------------------------------------------------
 -- Color themes: a preset accent hue drives the whole interactive palette.
 -- Each preset gives the accent RGB + a text-safe hex; the button/toggle/gloss
 -- tints are derived, so adding a theme is one line. Applied once on load from
