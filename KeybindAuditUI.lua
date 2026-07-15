@@ -62,8 +62,7 @@ local function LoadBarToggles()
     local db = GetDb()
     -- Always sync with actual bar visibility
     for _, barDef in ipairs(BAR_FRAME_MAP) do
-        local btn1 = _G[barDef.prefix .. "1"]
-        local visible = btn1 and btn1:IsVisible() or false
+        local visible = ns.KeybindAudit.IsBarVisible(barDef.prefix)
         db.bars[barDef.key] = visible
         barToggles[barDef.key] = visible
     end
@@ -1163,8 +1162,7 @@ function KeybindAuditUI:ShowBarOverlays()
     for _, barDef in ipairs(BAR_FRAME_MAP) do
         local overlay = barOverlays[barDef.key]
         if overlay then
-            local btn1 = _G[barDef.prefix .. "1"]
-            if btn1 and btn1:IsVisible() then
+            if ns.KeybindAudit.IsBarVisible(barDef.prefix) then
                 PositionOverlay(overlay, barDef)
                 overlay.barLabel = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
                 UpdateBarOverlay(overlay, barToggles[barDef.key])
@@ -1191,8 +1189,7 @@ function KeybindAuditUI:ShowSetup()
         local cb = setupPage.barCheckboxes[barDef.key]
         if cb then
             local label = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
-            local btn1 = _G[barDef.prefix .. "1"]
-            local barEnabled = btn1 and btn1:IsVisible()
+            local barEnabled = ns.KeybindAudit.IsBarVisible(barDef.prefix)
             if barEnabled then
                 cb:EnableMouse(true)
                 cb.label:SetText(label)

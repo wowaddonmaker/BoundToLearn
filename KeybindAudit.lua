@@ -86,17 +86,26 @@ function KeybindAudit.ResolveBarLabel(buttonPrefix, fallback)
     return fallback
 end
 
--- Whether a bar is currently shown in the UI. Checks the bar FRAME's shown
--- state, which is reliable even when the bar's first slot is empty (an empty
--- action button is hidden, so checking button 1 alone gives a false negative).
+-- Which GetActionBarToggles() return slot each button prefix maps to. The API
+-- reports the seven optional bars (Action Bars 2-8) in this order; the main bar
+-- (Action Bar 1) is always shown and has no toggle.
+local BAR_TOGGLE_INDEX = {
+    MultiBarBottomLeftButton  = 1,
+    MultiBarBottomRightButton = 2,
+    MultiBarRightButton       = 3,
+    MultiBarLeftButton        = 4,
+    MultiBar5Button           = 5,
+    MultiBar6Button           = 6,
+    MultiBar7Button           = 7,
+}
+
+-- Whether a bar is enabled, straight from the game's own action-bar toggle API
+-- rather than poking at frames or buttons (which proved unreliable).
 function KeybindAudit.IsBarVisible(buttonPrefix)
-    local barFrameName = BAR_FRAME_NAMES[buttonPrefix]
-    local barFrame = barFrameName and _G[barFrameName]
-    if barFrame then
-        return barFrame:IsShown() and true or false
-    end
-    local btn1 = _G[buttonPrefix .. "1"]
-    return btn1 and btn1:IsVisible() and true or false
+    if buttonPrefix == "ActionButton" then return true end
+    local idx = BAR_TOGGLE_INDEX[buttonPrefix]
+    if not idx then return false end
+    return select(idx, GetActionBarToggles()) and true or false
 end
 
 -- Keyboard layout coordinate maps: key → {x, y}
