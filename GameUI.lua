@@ -2828,6 +2828,18 @@ function GameUI:CreateHealthBar()
         end
     end)
     hf.pauseBtn = pauseBtn
+    -- Manual pause is disabled outside Practice (pausing a scored run is a
+    -- cheat). It re-enables while paused so a combat-forced pause can be
+    -- resumed; the tooltip explains the disabled state.
+    pauseBtn:SetMotionScriptsWhileDisabled(true)
+    pauseBtn:HookScript("OnEnter", function(self)
+        if self:IsEnabled() then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Pause")
+        GameTooltip:AddLine("Only available in Practice mode.", 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    pauseBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     local timerFS = hf:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     timerFS:SetPoint("RIGHT", pauseBtn, "LEFT", -12, 0)
@@ -3021,7 +3033,10 @@ function GameUI:OnGameStart(slots)
     -- the entire in-round HUD.
     if scoreFrame then scoreFrame:Hide() end
     if pauseOverlay then pauseOverlay:Hide() end
-    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Pause") end
+    if self.healthFrame then
+        self.healthFrame.pauseBtn:SetText("Pause")
+        self.healthFrame.pauseBtn:SetEnabled(ns.Game ~= nil and ns.Game:GetMode() == "practice")
+    end
     if modifierDropdown then modifierDropdown:Hide() end
 
     -- Set initial timer
@@ -3059,13 +3074,21 @@ end
 function GameUI:OnGamePause()
     if pauseOverlay then pauseOverlay:Show() end
     if controlBar then controlBar.pauseBtn:SetText("Resume") end
-    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Resume") end
+    if self.healthFrame then
+        self.healthFrame.pauseBtn:SetText("Resume")
+        -- Enable while paused so a combat-forced pause can be resumed even in
+        -- non-practice modes, where the button is otherwise disabled.
+        self.healthFrame.pauseBtn:SetEnabled(true)
+    end
 end
 
 function GameUI:OnGameResume()
     if pauseOverlay then pauseOverlay:Hide() end
     if controlBar then controlBar.pauseBtn:SetText("Pause") end
-    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Pause") end
+    if self.healthFrame then
+        self.healthFrame.pauseBtn:SetText("Pause")
+        self.healthFrame.pauseBtn:SetEnabled(ns.Game ~= nil and ns.Game:GetMode() == "practice")
+    end
 end
 
 function GameUI:CreateHitZones(slots)
