@@ -2987,6 +2987,89 @@ function GameUI:ResizeScoreFrame()
     scoreFrame:SetHeight(DIFFROW_BOTTOM + 4 + controlBar:GetHeight() + 6)
 end
 
+-- Looping icon-fall demo on the main menu: a continuous stream of icons drops
+-- onto a small action bar and auto-hits (with the odd miss), previewing the
+-- game. Non-interactive; the OnUpdate runs only while the menu is shown and
+-- self-cancels on error. Icons stay inside the demo rect (spawned at the top
+-- edge, faded out at the bar) so no clipping is needed.
+local DEMO_ICONS = {
+    "Interface\\Icons\\Spell_Nature_Lightning",
+    "Interface\\Icons\\Spell_Fire_Fireball02",
+    "Interface\\Icons\\Ability_Warrior_Charge",
+    "Interface\\Icons\\Spell_Holy_FlashHeal",
+    "Interface\\Icons\\Ability_Rogue_Eviscerate",
+    "Interface\\Icons\\Spell_Frost_FrostBolt02",
+}
+local DEMO_COLS, DEMO_SLOT, DEMO_GAP, DEMO_H = 5, 30, 8, 150
+local DEMO_FALL, DEMO_SPAWN = 95, 0.55
+local DEMO_HITY = 2 + DEMO_SLOT
+local drandom = math.random
+
+local function DemoColX(c)
+    return (c - (DEMO_COLS + 1) / 2) * (DEMO_SLOT + DEMO_GAP)
+end
+
+local function AcquireDemoIcon(demo)
+    local icon = tremove(demo.pool)
+    if not icon then
+        icon = demo:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(DEMO_SLOT - 2, DEMO_SLOT - 2)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    end
+    icon:SetTexture(DEMO_ICONS[drandom(#DEMO_ICONS)])
+    icon:SetVertexColor(1, 1, 1)
+    icon:SetAlpha(1)
+    icon:Show()
+    return icon
+end
+
+local function DemoStep(demo, elapsed)
+    demo.spawnT = (demo.spawnT or 0) + elapsed
+    if demo.spawnT >= DEMO_SPAWN then
+        demo.spawnT = demo.spawnT - DEMO_SPAWN
+        local icon = AcquireDemoIcon(demo)
+        icon.col = drandom(DEMO_COLS)
+        icon.y = DEMO_H - DEMO_SLOT
+        icon.hit = false
+        icon.miss = (drandom(6) == 1)
+        icon:ClearAllPoints()
+        icon:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+        demo.active[#demo.active + 1] = icon
+    end
+
+    for i = 1, DEMO_COLS do
+        local flash = demo.slots[i].flash
+        local a = flash:GetAlpha()
+        if a > 0 then flash:SetAlpha(mmax(0, a - elapsed * 3)) end
+    end
+
+    local active = demo.active
+    for i = #active, 1, -1 do
+        local icon = active[i]
+        if icon.hit then
+            local a = icon:GetAlpha() - elapsed * 5
+            if a <= 0 then
+                icon:Hide()
+                tremove(active, i)
+                demo.pool[#demo.pool + 1] = icon
+            else
+                icon:SetAlpha(a)
+            end
+        else
+            icon.y = icon.y - DEMO_FALL * elapsed
+            icon:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+            if icon.y <= DEMO_HITY then
+                icon.hit = true
+                if icon.miss then
+                    icon:SetVertexColor(1, 0.5, 0.5)
+                else
+                    demo.slots[icon.col].flash:SetAlpha(0.75)
+                end
+            end
+        end
+    end
+end
+
 -- The Icon Game main menu: a landing screen (built on the same window setup as
 -- the song-select carousel, Midnight backdrop by default) with a looping demo
 -- and a visible-only action-bar picker. Start opens the song-select carousel.
@@ -3043,6 +3126,7 @@ function GameUI:CreateMainMenu()
     end)
     f.startBtn = startBtn
 
+    self:BuildMainMenuDemo(f)
     self:BuildMainMenuBars(f)
 
     mainMenu = f
@@ -3114,6 +3198,38 @@ function GameUI:RefreshMainMenuBars()
         cb:SetEnabled(visible)
         cb:SetChecked(visible and bars[cb.barKey] and true or false)
     end
+end
+
+function GameUI:BuildMainMenuDemo(f)
+    local demoW = DEMO_COLS * DEMO_SLOT + (DEMO_COLS - 1) * DEMO_GAP
+    local demo = CreateFrame("Frame", nil, f)
+    demo:SetSize(demoW, DEMO_H)
+    demo:SetPoint("TOP", 0, -62)
+    demo.pool = {}
+    demo.active = {}
+    demo.spawnT = 0
+
+    demo.slots = {}
+    for c = 1, DEMO_COLS do
+        local base = demo:CreateTexture(nil, "BACKGROUND")
+        base:SetSize(DEMO_SLOT, DEMO_SLOT)
+        base:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)
+        base:SetColorTexture(0.10, 0.10, 0.13, 0.85)
+        local flash = demo:CreateTexture(nil, "OVERLAY")
+        flash:SetSize(DEMO_SLOT, DEMO_SLOT)
+        flash:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)
+        flash:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        flash:SetAlpha(0)
+        demo.slots[c] = { flash = flash }
+    end
+
+    demo:SetScript("OnUpdate", function(self, elapsed)
+        if not pcall(DemoStep, self, elapsed) then
+            self:SetScript("OnUpdate", nil)
+        end
+    end)
+
+    f.demo = demo
 end
 
 function GameUI:ShowReadyState()
