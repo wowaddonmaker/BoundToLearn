@@ -29,6 +29,7 @@ local scoreFrame, scoreText, comboText, multiplierText, difficultyText, timerTex
 local modifierRow, modifierBtn, modifierDropdown
 local achievementPanel
 local songSelect
+local mainMenu
 local pauseOverlay, pauseText
 local notePool = {}
 local resultPool = {}
@@ -2986,14 +2987,86 @@ function GameUI:ResizeScoreFrame()
     scoreFrame:SetHeight(DIFFROW_BOTTOM + 4 + controlBar:GetHeight() + 6)
 end
 
+-- The Icon Game main menu: a landing screen (built on the same window setup as
+-- the song-select carousel, Midnight backdrop by default) with a looping demo
+-- and a visible-only action-bar picker. Start opens the song-select carousel.
+function GameUI:CreateMainMenu()
+    if mainMenu then return end
+
+    local f = CreateFrame("Frame", "BoundToLearnIconGameMenu", UIParent)
+    f:SetSize(568, 432)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    f:SetFrameStrata("FULLSCREEN")
+    f:SetFrameLevel(70)
+    Theme.StylePanel(f, 0.96)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetClampedToScreen(true)
+    tinsert(UISpecialFrames, "BoundToLearnIconGameMenu")
+    f:Hide()
+
+    local xbg = f:CreateTexture(nil, "ARTWORK")
+    xbg:SetPoint("TOPLEFT", 7, -7)
+    xbg:SetPoint("BOTTOMRIGHT", -7, 7)
+    xbg:SetAlpha(0.85)
+    xbg:SetAtlas("ui-ej-midnight")
+    f.xpacBg = xbg
+
+    local title = f:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
+    title:SetPoint("TOP", 0, -20)
+    title:SetText("Icon Game")
+    title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
+
+    local subtitle = f:CreateFontString(nil, "OVERLAY")
+    subtitle:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetTextColor(0.82, 0.82, 0.82)
+    subtitle:SetText("Practice hitting your keybinds to falling icons.")
+
+    local closeBtn = Theme.CreateCloseButton(f, function() f:Hide() end)
+    closeBtn:SetSize(18, 18)
+    closeBtn:SetPoint("TOPRIGHT", -8, -8)
+
+    -- Start enters the song-selection carousel, where the track and difficulty
+    -- are chosen and the round begins.
+    local startBtn = Theme.CreateAccentButton(f, "Start", 200, 42)
+    startBtn:SetPoint("BOTTOM", 0, 84)
+    startBtn._label:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    startBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        f:Hide()
+        GameUI:ShowSongSelect()
+    end)
+    f.startBtn = startBtn
+
+    mainMenu = f
+end
+
+function GameUI:ShowMainMenu()
+    if not mainMenu then self:CreateMainMenu() end
+    self:HideSongSelect()
+    if scoreFrame then scoreFrame:Hide() end
+    if self.healthFrame then self.healthFrame:Hide() end
+    mainMenu:Show()
+end
+
+function GameUI:HideMainMenu()
+    if mainMenu then mainMenu:Hide() end
+end
+
 function GameUI:ShowReadyState()
-    -- The song-select carousel is the ready-state menu. The compact score HUD
-    -- and life gauge only appear once a round starts (OnGameStart).
+    -- The main menu is the ready-state entry; its Start opens the song-select
+    -- carousel. The compact score HUD and life gauge only appear once a round
+    -- starts (OnGameStart).
     if scoreFrame then scoreFrame:Hide() end
     if self.healthFrame then self.healthFrame:Hide() end
     if modifierDropdown then modifierDropdown:Hide() end
     self:UpdateDifficultyButtons()
-    self:ShowSongSelect()
+    self:ShowMainMenu()
 end
 
 function GameUI:OnGameStart(slots)
