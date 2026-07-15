@@ -551,7 +551,7 @@ local function CreateQuizUI()
 
     -- Ready screen (standalone frame above dimmer)
     local readyFrame = CreateFrame("Frame", nil, UIParent)
-    readyFrame:SetSize(300, 160)
+    readyFrame:SetSize(300, 188)
     readyFrame:SetPoint("CENTER", 0, 40)
     readyFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     readyFrame:SetFrameLevel(50)
@@ -578,6 +578,13 @@ local function CreateQuizUI()
     readyDesc:SetWidth(260)
     readyDesc:SetTextColor(0.7, 0.7, 0.7)
     readyFrame.desc = readyDesc
+
+    local barNote = readyFrame:CreateFontString(nil, "OVERLAY")
+    barNote:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    barNote:SetPoint("TOP", readyDesc, "BOTTOM", 0, -8)
+    barNote:SetWidth(260)
+    barNote:SetTextColor(0.95, 0.80, 0.35)
+    barNote:SetText("Your action bars are hidden during the quiz.")
 
     local timedBtn = ns.Theme.CreateAccentButton(readyFrame, "Timed Run", 120, 28)
     timedBtn:SetPoint("BOTTOMRIGHT", readyFrame, "BOTTOM", -6, 36)
