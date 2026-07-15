@@ -3034,7 +3034,7 @@ function GameUI:CreateMainMenu()
     -- Start enters the song-selection carousel, where the track and difficulty
     -- are chosen and the round begins.
     local startBtn = Theme.CreateAccentButton(f, "Start", 200, 42)
-    startBtn:SetPoint("BOTTOM", 0, 84)
+    startBtn:SetPoint("BOTTOM", 0, 24)
     startBtn._label:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
     startBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
@@ -3042,6 +3042,8 @@ function GameUI:CreateMainMenu()
         GameUI:ShowSongSelect()
     end)
     f.startBtn = startBtn
+
+    self:BuildMainMenuBars(f)
 
     mainMenu = f
 end
@@ -3051,11 +3053,67 @@ function GameUI:ShowMainMenu()
     self:HideSongSelect()
     if scoreFrame then scoreFrame:Hide() end
     if self.healthFrame then self.healthFrame:Hide() end
+    self:RefreshMainMenuBars()
     mainMenu:Show()
 end
 
 function GameUI:HideMainMenu()
     if mainMenu then mainMenu:Hide() end
+end
+
+-- Action-bar picker: which bars the game pulls spells from. Mirrors the Keybind
+-- Audit -- only bars currently visible in the UI can be toggled.
+function GameUI:BuildMainMenuBars(f)
+    local BARS = ns.KeybindAudit and ns.KeybindAudit.BAR_MAPPINGS or {}
+
+    local header = f:CreateFontString(nil, "OVERLAY")
+    header:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    header:SetPoint("TOP", 0, -222)
+    header:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
+    header:SetText("Action bars in play")
+
+    local hint = f:CreateFontString(nil, "OVERLAY")
+    hint:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    hint:SetPoint("TOP", header, "BOTTOM", 0, -2)
+    hint:SetTextColor(0.72, 0.72, 0.72)
+    hint:SetText("Only bars shown in your UI can be picked.")
+
+    f.barToggles = {}
+    local COLS, CELL_W, CELL_H = 2, 156, 22
+    for i = 1, #BARS do
+        local bar = BARS[i]
+        local col = (i - 1) % COLS
+        local row = mfloor((i - 1) / COLS)
+        local cb = Theme.CreateToggle(f, bar.label, nil, CELL_W - 10)
+        cb:SetPoint("TOP", f, "TOP", (col - 0.5) * CELL_W, -256 - row * CELL_H)
+        cb.barKey = bar.key
+        cb.buttonPrefix = bar.buttonPrefix
+        cb:SetScript("OnClick", function(self)
+            BoundToLearn.db.game.bars[self.barKey] = self:GetChecked()
+        end)
+        cb:SetMotionScriptsWhileDisabled(true)
+        cb:HookScript("OnEnter", function(self)
+            if self:IsEnabled() then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(bar.label)
+            GameTooltip:AddLine("Hidden in your UI, so it can't be used.", 1, 0.82, 0, true)
+            GameTooltip:Show()
+        end)
+        cb:HookScript("OnLeave", function() GameTooltip:Hide() end)
+        f.barToggles[i] = cb
+    end
+end
+
+function GameUI:RefreshMainMenuBars()
+    if not mainMenu or not mainMenu.barToggles then return end
+    local bars = BoundToLearn.db.game.bars
+    for i = 1, #mainMenu.barToggles do
+        local cb = mainMenu.barToggles[i]
+        local btn1 = _G[cb.buttonPrefix .. "1"]
+        local visible = btn1 and btn1:IsVisible() and true or false
+        cb:SetEnabled(visible)
+        cb:SetChecked(visible and bars[cb.barKey] and true or false)
+    end
 end
 
 function GameUI:ShowReadyState()
