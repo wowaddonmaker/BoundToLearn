@@ -3006,12 +3006,13 @@ local DEMO_HITY = 2 + DEMO_SLOT / 2   -- slot centre; icons land centred on it
 local drandom = math.random
 
 -- Weighted judgement pool (weights sum to 100). hit=false is a Miss (no flash).
--- off = how far off centre a hit lands (0 = dead centre), so the visual matches
--- the judgement. A Miss (hit = false) has no landing; it falls through the bar.
+-- off = how far ABOVE the slot centre a hit lands (0 = dead centre); worse
+-- timing lands higher and flashes dimmer (fa), so the landing spot visibly
+-- matches the label. A Miss (hit = false) has no landing; it falls through.
 local DEMO_JUDGES = {
-    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 55, hit = true, off = 0 },
-    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 25, hit = true, off = 5 },
-    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 12, hit = true, off = 9 },
+    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 55, hit = true, off = 0,  fa = 0.9 },
+    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 25, hit = true, off = 10, fa = 0.6 },
+    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 12, hit = true, off = 20, fa = 0.35 },
     { text = "Miss",    r = 1.0, g = 0.35, b = 0.35, w = 8, hit = false },
 }
 
@@ -3041,7 +3042,7 @@ local function AcquireDemoIcon(demo)
     return icon
 end
 
-local function SpawnJudgeText(demo, col, judge)
+local function SpawnJudgeText(demo, col, judge, landY)
     local t = tremove(demo.textPool)
     if not t then
         local fs = demo:CreateFontString(nil, "OVERLAY")
@@ -3051,7 +3052,7 @@ local function SpawnJudgeText(demo, col, judge)
     t.fs:SetText(judge.text)
     t.fs:SetTextColor(judge.r, judge.g, judge.b)
     t.x = DemoColX(col)
-    t.y = DEMO_HITY + DEMO_SLOT / 2 + 4
+    t.y = landY + DEMO_SLOT / 2 + 3
     t.life = 0.6
     t.fs:ClearAllPoints()
     t.fs:SetPoint("CENTER", demo, "BOTTOM", t.x, t.y)
@@ -3072,13 +3073,9 @@ local function DemoStep(demo, elapsed)
         icon.judged = false
         local judge = PickJudge()
         icon.judge = judge
-        if not judge.hit then
-            icon.stopY = nil                       -- a miss falls through the bar
-        elseif judge.off > 0 then
-            icon.stopY = DEMO_HITY + (drandom(2) == 1 and judge.off or -judge.off)
-        else
-            icon.stopY = DEMO_HITY                 -- perfect lands dead centre
-        end
+        -- Hits land above the slot the worse the timing (perfect = dead centre);
+        -- a miss has no landing and falls through the bar.
+        icon.stopY = judge.hit and (DEMO_HITY + judge.off) or nil
         icon:ClearAllPoints()
         icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(col), icon.y)
         demo.active[#demo.active + 1] = icon
@@ -3112,12 +3109,12 @@ local function DemoStep(demo, elapsed)
             icon.y = icon.y - DEMO_FALL * elapsed
             if icon.y <= (icon.stopY or DEMO_HITY) then
                 icon.judged = true
-                SpawnJudgeText(demo, icon.col, icon.judge)
+                SpawnJudgeText(demo, icon.col, icon.judge, icon.stopY or DEMO_HITY)
                 if icon.judge.hit then
                     icon.y = icon.stopY
                     local flash = demo.slots[icon.col].flash
                     flash:SetColorTexture(icon.judge.r, icon.judge.g, icon.judge.b)
-                    flash:SetAlpha(0.85)
+                    flash:SetAlpha(icon.judge.fa)
                 else
                     icon:SetVertexColor(1, 0.45, 0.45)
                 end
@@ -3279,7 +3276,8 @@ function GameUI:RefreshMainMenuBars()
 end
 
 function GameUI:BuildMainMenuDemo(f)
-    local demoW = DEMO_COLS * DEMO_SLOT + (DEMO_COLS - 1) * DEMO_GAP
+    -- Extra width so the judgement text on the edge lanes is not clipped.
+    local demoW = DEMO_COLS * DEMO_SLOT + (DEMO_COLS - 1) * DEMO_GAP + 56
     local demo = CreateFrame("Frame", nil, f)
     demo:SetSize(demoW, DEMO_H)
     demo:SetPoint("TOP", 0, -60)
