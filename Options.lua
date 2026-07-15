@@ -192,7 +192,9 @@ local function BuildBlacklistCard(tab, boxY)
 
     local boxTitle = blacklistBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     boxTitle:SetPoint("TOPLEFT", 8, -6)
-    boxTitle:SetText("|cFF" .. Theme.ACCENT_HEX .. "Blocked Spells|r")
+    local function applyBoxTitle() boxTitle:SetText("|cFF" .. Theme.ACCENT_HEX .. "Blocked Spells|r") end
+    applyBoxTitle()
+    Theme.RegisterRetinter(applyBoxTitle)
 
     local scroll = CreateFrame("ScrollFrame", nil, blacklistBox, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 6, -22)
@@ -277,7 +279,9 @@ local function BuildBlacklistCard(tab, boxY)
     local dimHintLine1 = panelDim:CreateFontString(nil, "OVERLAY")
     dimHintLine1:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
     dimHintLine1:SetPoint("TOP", optionsFrame, "BOTTOM", 0, -12)
-    dimHintLine1:SetText("|cFF" .. Theme.ACCENT_HEX .. "Click the spells you want to block|r")
+    local function applyDimHint() dimHintLine1:SetText("|cFF" .. Theme.ACCENT_HEX .. "Click the spells you want to block|r") end
+    applyDimHint()
+    Theme.RegisterRetinter(applyDimHint)
     local dimHintLine2 = panelDim:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     dimHintLine2:SetPoint("TOP", dimHintLine1, "BOTTOM", 0, -4)
     dimHintLine2:SetText("|cFF888888Go ahead, click away.\nThis is the one time we'll allow it.|r")
@@ -424,10 +428,14 @@ local function BuildHomeTab()
     desc:SetPoint("RIGHT", tab, "RIGHT", -12, 0)
     desc:SetJustifyH("LEFT")
     desc:SetSpacing(3)
-    desc:SetText("Build muscle memory for your keybinds. The tracker shows how often "
-        .. "you click versus press your abilities, and the practice game turns "
-        .. "it into a rhythm challenge. Type |cFF" .. Theme.ACCENT_HEX .. "/btl|r "
-        .. "for all commands, or right-click the minimap button.")
+    local function applyDescText()
+        desc:SetText("Build muscle memory for your keybinds. The tracker shows how often "
+            .. "you click versus press your abilities, and the practice game turns "
+            .. "it into a rhythm challenge. Type |cFF" .. Theme.ACCENT_HEX .. "/btl|r "
+            .. "for all commands, or right-click the minimap button.")
+    end
+    applyDescText()
+    Theme.RegisterRetinter(applyDescText)
 
     local urlLabel = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     urlLabel:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -16)
@@ -460,9 +468,9 @@ local function BuildGeneralTab()
         function(value)
             if BoundToLearn.db.options.colorTheme == value then return end
             BoundToLearn.db.options.colorTheme = value
-            -- Do not retint live: applying only part of the UI looks broken.
-            -- Save the choice and let the reload apply the whole theme at once.
-            StaticPopup_Show("BOUNDTOLEARN_THEME_RELOAD")
+            -- Apply immediately: ApplyTheme mutates the palette and re-runs the
+            -- registered retinters, so the open window recolors with no reload.
+            if Theme.ApplyTheme then Theme.ApplyTheme(value) end
         end,
         {
             -- Closed selector shows a dot in the active accent.
@@ -822,16 +830,6 @@ end
 -- =========================================
 -- Static popups
 -- =========================================
-
-StaticPopupDialogs["BOUNDTOLEARN_THEME_RELOAD"] = {
-    text = "Reload your interface to apply the new color theme?",
-    button1 = _G.RELOADUI or "Reload UI",
-    button2 = _G.CANCEL or "Cancel",
-    OnAccept = function() C_UI.Reload() end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-}
 
 StaticPopupDialogs["BOUNDTOLEARN_SHOW_URL"] = {
     text = "Copy this link (Ctrl+C):",

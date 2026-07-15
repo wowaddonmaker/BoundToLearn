@@ -77,6 +77,34 @@ function Theme.RGB(c, alpha)
 end
 local RGB = Theme.RGB
 
+--------------------------------------------------------------------------
+-- Live retint: themed elements register a closure that re-applies their
+-- accent-family colors from Theme.C. Theme.ApplyTheme mutates the palette in
+-- place, then runs every registered closure so already-built frames recolor
+-- without a reload. Each run is guarded so one bad element cannot break the
+-- pass; registration is once-per-frame so the registry stays bounded.
+--------------------------------------------------------------------------
+Theme._retinters = {}
+function Theme.RegisterRetinter(fn)
+    Theme._retinters[#Theme._retinters + 1] = fn
+end
+
+function Theme.RunRetinters()
+    local rt = Theme._retinters
+    for i = 1, #rt do
+        pcall(rt[i])
+    end
+end
+
+-- The exact C tables ApplyTheme mutates. A rounded-rect fill painted from one
+-- of these must retint; fills from fixed neutrals (greys, dark chrome, knob,
+-- gold, insets) never change hue and are left alone.
+local THEMED_FILLS = {
+    [C.ACCENT] = true, [C.ACCENT_DIM] = true, [C.ACCENT_BRIGHT] = true,
+    [C.TOGGLE_ON] = true, [C.TOGGLE_ON_DIS] = true,
+    [C.BTN_NORMAL] = true, [C.BTN_HOVER] = true, [C.BTN_PRESSED] = true,
+}
+
 -- Delayed hover tooltip where the caller populates GameTooltip themselves.
 -- buildFn(self) runs 0.4s after mouse-enter (a short grace delay); the
 -- owner/anchor is set for you. Returning nothing from buildFn shows nothing.
@@ -198,6 +226,24 @@ end
 
 function Theme.SetFillColor(frame, color, a)
     Theme.SetFill(frame, color[1], color[2], color[3], a or color[4] or 1)
+    -- Remember accent-family fills (matched by table identity) so a later
+    -- theme switch can re-apply them live. Register once per frame.
+    if THEMED_FILLS[color] then
+        frame._themedFill = color
+        frame._themedFillAlpha = a
+        if not frame._fillRetinter then
+            frame._fillRetinter = true
+            Theme.RegisterRetinter(function()
+                local col = frame._themedFill
+                if col and frame.rr then
+                    Theme.SetFill(frame, col[1], col[2], col[3],
+                        frame._themedFillAlpha or col[4] or 1)
+                end
+            end)
+        end
+    else
+        frame._themedFill = nil
+    end
 end
 
 function Theme.SetBorderColor(frame, r, g, b, a)
@@ -364,6 +410,8 @@ function Theme.StylePanel(frame, alpha)
     if not frame._btlGlossHooked then
         frame._btlGlossHooked = true
         frame:HookScript("OnSizeChanged", ApplyGloss)
+        -- The bottom sheen is tinted from the accent; re-apply it on a switch.
+        Theme.RegisterRetinter(function() ApplyGloss(frame) end)
     end
     return frame
 end
@@ -499,6 +547,8 @@ function Theme.CreateToggle(parent, labelText, tooltipText, width)
         Theme.AttachTooltip(cb, labelText, tooltipText)
     end
     paint(cb)
+    -- Re-run the on/off visual on a theme switch so the accent track recolors.
+    Theme.RegisterRetinter(function() if cb.track then paint(cb) end end)
     return cb
 end
 
@@ -786,6 +836,17 @@ function Theme.CreateSidebar(parent, opts)
         return tabContent
     end
 
+    -- Nav buttons paint via SetFill (raw), so they are not caught by the
+    -- fill-color retinter; re-assert each button's current state on a switch.
+    Theme.RegisterRetinter(function()
+        for i = 1, #nav.buttons do
+            local navBtn = nav.buttons[i]
+            if navBtn and navBtn.label then
+                PaintNavButton(navBtn, nav.current == navBtn._navIndex and "active" or "clear")
+            end
+        end
+    end)
+
     return nav
 end
 
@@ -978,7 +1039,11 @@ function Theme.CreateFlyoutRow(parent, labelText, choices, getter, setter, opts)
     end
 
     btnText:SetText(LabelFor(getter()))
-    if updateSwatch then updateSwatch(getter()) end
+    if updateSwatch then
+        updateSwatch(getter())
+        -- Keep the closed swatch showing the active theme after a switch.
+        Theme.RegisterRetinter(function() updateSwatch(getter()) end)
+    end
     local flyout = Theme.CreateFlyoutPanel(btn, btnW, #choices)
     Theme.AddFlyoutOptions(flyout, choices, btnW - 6, function(choice)
         setter(choice.value)
@@ -1136,7 +1201,8 @@ Theme.THEMES = {
     Teal   = { {0.18, 0.70, 0.66}, "3FC7BC" },
     Gray   = { {0.56, 0.58, 0.62}, "AEB2B8" },
 }
-Theme.THEME_ORDER = { "Orange", "Blue", "Green", "Yellow", "Red", "Purple", "Teal", "Gray" }
+-- Blue is the default look, so it leads the picker order.
+Theme.THEME_ORDER = { "Blue", "Orange", "Green", "Yellow", "Red", "Purple", "Teal", "Gray" }
 Theme.activeTheme = "Orange"
 
 local function setC(key, r, g, b)
@@ -1161,6 +1227,9 @@ function Theme.ApplyTheme(name)
     setC("BTN_PRESSED", 0.115 + r * 0.03, 0.115 + g * 0.03, 0.115 + b * 0.03)
     Theme.ACCENT_HEX = preset[2]
     GLOSS_TOP[1], GLOSS_TOP[2], GLOSS_TOP[3] = r * 0.22, g * 0.22, b * 0.22
+    -- Re-apply live: already-built frames read the mutated palette. Safe on
+    -- the login path too, where the registry is still empty.
+    Theme.RunRetinters()
 end
 
 -- Blue is the addon's default look, so the factory colours are blue too (not the orange
