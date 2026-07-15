@@ -3065,7 +3065,10 @@ local function DemoStep(demo, elapsed)
     demo.spawnT = (demo.spawnT or 0) + elapsed
     if demo.spawnT >= DEMO_SPAWN then
         demo.spawnT = demo.spawnT - DEMO_SPAWN
-        local col = drandom(DEMO_COLS)
+        -- Skip the previous lane so the same icon doesn't repeat back-to-back.
+        local col = drandom(DEMO_COLS - 1)
+        if col >= (demo.lastCol or 0) then col = col + 1 end
+        demo.lastCol = col
         local icon = AcquireDemoIcon(demo)
         icon:SetTexture(DEMO_LANE_ICONS[col])
         icon.col = col
@@ -3176,7 +3179,7 @@ function GameUI:CreateMainMenu()
 
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-    title:SetPoint("TOP", 0, -20)
+    title:SetPoint("TOP", 0, -13)
     title:SetText("Icon Game")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
@@ -3221,6 +3224,15 @@ function GameUI:HideMainMenu()
     if mainMenu then mainMenu:Hide() end
 end
 
+-- The highest-index visible button on a bar; the hover highlight spans from
+-- button 1's top-left to this button's bottom-right.
+local function LastVisibleBarButton(prefix)
+    for i = 12, 1, -1 do
+        local btn = _G[prefix .. i]
+        if btn and btn:IsVisible() then return btn end
+    end
+end
+
 -- Action-bar picker: which bars the game pulls spells from. Mirrors the Keybind
 -- Audit -- only bars currently visible in the UI can be toggled.
 function GameUI:BuildMainMenuBars(f)
@@ -3238,6 +3250,20 @@ function GameUI:BuildMainMenuBars(f)
     hint:SetTextColor(0.72, 0.72, 0.72)
     hint:SetText("Only bars shown in your UI can be picked.")
 
+    -- A highlight drawn over the real action bar that the hovered row refers to.
+    local barHighlight = f.barHighlight
+    if not barHighlight then
+        barHighlight = CreateFrame("Frame", nil, UIParent)
+        barHighlight:SetFrameStrata("FULLSCREEN_DIALOG")
+        barHighlight:Hide()
+        local bh = barHighlight:CreateTexture(nil, "OVERLAY")
+        bh:SetAllPoints()
+        bh:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        bh:SetAlpha(0.25)
+        f.barHighlight = barHighlight
+        f:HookScript("OnHide", function() barHighlight:Hide() end)
+    end
+
     f.barToggles = {}
     local COLS, CELL_W, CELL_H = 2, 156, 22
     for i = 1, #BARS do
@@ -3251,15 +3277,37 @@ function GameUI:BuildMainMenuBars(f)
         cb:SetScript("OnClick", function(self)
             BoundToLearn.db.game.bars[self.barKey] = self:GetChecked()
         end)
+
+        -- Row hover wash so it is clear which row is focused.
+        local rowHL = cb:CreateTexture(nil, "BACKGROUND")
+        rowHL:SetPoint("TOPLEFT", -4, 1)
+        rowHL:SetPoint("BOTTOMRIGHT", 4, -1)
+        rowHL:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        rowHL:SetAlpha(0)
+
         cb:SetMotionScriptsWhileDisabled(true)
         cb:HookScript("OnEnter", function(self)
-            if self:IsEnabled() then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(bar.label)
-            GameTooltip:AddLine("Hidden in your UI, so it can't be used.", 1, 0.82, 0, true)
-            GameTooltip:Show()
+            rowHL:SetAlpha(0.12)
+            local btn1 = _G[self.buttonPrefix .. "1"]
+            local lastBtn = LastVisibleBarButton(self.buttonPrefix)
+            if btn1 and lastBtn then
+                barHighlight:ClearAllPoints()
+                barHighlight:SetPoint("TOPLEFT", btn1, "TOPLEFT", -4, 4)
+                barHighlight:SetPoint("BOTTOMRIGHT", lastBtn, "BOTTOMRIGHT", 4, -4)
+                barHighlight:Show()
+            end
+            if not self:IsEnabled() then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(bar.label)
+                GameTooltip:AddLine("Hidden in your UI, so it can't be used.", 1, 0.82, 0, true)
+                GameTooltip:Show()
+            end
         end)
-        cb:HookScript("OnLeave", function() GameTooltip:Hide() end)
+        cb:HookScript("OnLeave", function()
+            rowHL:SetAlpha(0)
+            barHighlight:Hide()
+            GameTooltip:Hide()
+        end)
         f.barToggles[i] = cb
     end
 end
@@ -3287,6 +3335,7 @@ function GameUI:BuildMainMenuDemo(f)
     demo.texts = {}
     demo.textPool = {}
     demo.spawnT = 0
+    demo.lastCol = drandom(DEMO_COLS)
 
     demo.slots = {}
     for c = 1, DEMO_COLS do
