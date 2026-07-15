@@ -49,6 +49,9 @@ local nav
 local isInitialized = false
 local blizzardRegistered = false
 local trackerTabIndex
+local homeTabIndex
+local feedbackTabIndex
+local resetGroup
 local blacklistBox
 local RefreshBlacklistContent
 local refreshers = {}
@@ -405,6 +408,7 @@ end
 
 local function BuildHomeTab()
     local tab = nav:AddTab("Home")
+    homeTabIndex = #nav.tabs
 
     local icon = tab:CreateTexture(nil, "ARTWORK")
     icon:SetSize(80, 80)
@@ -430,9 +434,12 @@ local function BuildHomeTab()
     desc:SetSpacing(3)
     local function applyDescText()
         desc:SetText("Build muscle memory for your keybinds. The tracker shows how often "
-            .. "you click versus press your abilities, and the practice game turns "
-            .. "it into a rhythm challenge. Type |cFF" .. Theme.ACCENT_HEX .. "/btl|r "
-            .. "for all commands, or right-click the minimap button.")
+            .. "you click versus press your abilities. When you are ready to practice, "
+            .. "play the Icon Game (a falling-note rhythm challenge), warm up your "
+            .. "reflexes in the Ping Trainer, test your recall with the Keybind Quiz, "
+            .. "or review your bars with the Keybind Audit. Type |cFF"
+            .. Theme.ACCENT_HEX .. "/btl|r for all commands, or right-click the "
+            .. "minimap button.")
     end
     applyDescText()
     Theme.RegisterRetinter(applyDescText)
@@ -445,10 +452,53 @@ local function BuildHomeTab()
     local urlBox = CreateURLBox(tab, URL_HOMEPAGE, CONTENT_W - 8)
     urlBox:SetPoint("TOPLEFT", urlLabel, "BOTTOMLEFT", 0, -4)
 
-    -- Thanks line at the window bottom-right, mirroring the reference. Lifted
-    -- above the reset button row so the two never overlap.
+    -- Cross-promo for the author's other addon. The link target is hidden
+    -- behind the clickable word (opens the copy-link popup) so the Home tab
+    -- does not read as a wall of URLs. This is the one sanctioned place the
+    -- other addon is named by request; the inline word is the click target.
+    local promo = CreateFrame("Frame", nil, tab)
+    promo:SetPoint("TOPLEFT", urlBox, "BOTTOMLEFT", 0, -18)
+    promo:SetPoint("RIGHT", tab, "RIGHT", -12, 0)
+    promo:SetHeight(52)
+    promo:EnableMouse(true)
+    promo:SetHyperlinksEnabled(true)
+
+    local promoText = promo:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    promoText:SetPoint("TOPLEFT", promo, "TOPLEFT", 0, 0)
+    promoText:SetPoint("RIGHT", promo, "RIGHT", 0, 0)
+    promoText:SetJustifyH("LEFT")
+    promoText:SetSpacing(3)
+    promoText:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
+
+    local PROMO_URL = "https://www.curseforge.com/wow/addons/easyfind"
+    local function applyPromo()
+        promoText:SetText("If you enjoy BoundToLearn, you might also like another addon "
+            .. "I made: |Hbtl_promo:link|h|cFF" .. Theme.ACCENT_HEX .. "EasyFind|r|h. "
+            .. "It lets you instantly search for and jump to any interface panel, "
+            .. "setting, or map location.")
+    end
+    applyPromo()
+    Theme.RegisterRetinter(applyPromo)
+    promo:SetHeight((promoText:GetStringHeight() or 48) + 2)
+
+    promo:SetScript("OnHyperlinkClick", function(_, link)
+        if link == "btl_promo:link" then
+            StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, PROMO_URL)
+        end
+    end)
+    promo:SetScript("OnHyperlinkEnter", function(self, link)
+        if link == "btl_promo:link" then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Open on CurseForge", 1, 0.82, 0)
+            GameTooltip:Show()
+        end
+    end)
+    promo:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
+
+    -- Thanks line at the window bottom-right, mirroring the reference. The
+    -- reset buttons are hidden on this tab, so it sits at the corner.
     local thanks = tab:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    thanks:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -6, 30)
+    thanks:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -6, 8)
     thanks:SetText("Thanks for trying BoundToLearn")
     thanks:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
 end
@@ -628,6 +678,7 @@ end
 
 local function BuildFeedbackTab()
     local tab = nav:AddTab("Feedback")
+    feedbackTabIndex = #nav.tabs
 
     local desc = tab:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     desc:SetPoint("TOPLEFT", tab, "TOPLEFT", 12, -16)
@@ -650,14 +701,20 @@ local function BuildFeedbackTab()
 end
 
 local function BuildResetButtons()
-    local resetStats = Theme.CreateButton(optionsFrame, "Reset Stats", 120, 24)
-    resetStats:SetPoint("BOTTOMLEFT", nav.content, "BOTTOMLEFT", 0, 0)
+    -- A grouped pair centered along the window bottom. Shown only on the
+    -- setting tabs (SwitchToTab toggles the group; see BuildFrame).
+    resetGroup = CreateFrame("Frame", nil, optionsFrame)
+    resetGroup:SetSize(248, 24)   -- 120 + 8 gap + 120
+    resetGroup:SetPoint("BOTTOM", nav.content, "BOTTOM", 0, 0)
+
+    local resetStats = Theme.CreateButton(resetGroup, "Reset Stats", 120, 24)
+    resetStats:SetPoint("LEFT", resetGroup, "LEFT", 0, 0)
     resetStats:SetScript("OnClick", function()
         StaticPopup_Show("BOUNDTOLEARN_RESET_STATS")
     end)
 
-    local resetDefaults = Theme.CreateButton(optionsFrame, "Reset Defaults", 120, 24)
-    resetDefaults:SetPoint("BOTTOMRIGHT", nav.content, "BOTTOMRIGHT", 0, 0)
+    local resetDefaults = Theme.CreateButton(resetGroup, "Reset Defaults", 120, 24)
+    resetDefaults:SetPoint("LEFT", resetStats, "RIGHT", 8, 0)
     resetDefaults:SetScript("OnClick", function()
         StaticPopup_Show("BOUNDTOLEARN_RESET_DEFAULTS")
     end)
@@ -702,6 +759,16 @@ local function BuildFrame()
         title = "BoundToLearn",
     })
     optionsFrame.nav = nav
+
+    -- The reset pair belongs to the setting tabs only; hide it on Home and
+    -- Feedback by toggling the shared group whenever the tab changes.
+    local baseSwitch = nav.SwitchToTab
+    nav.SwitchToTab = function(self, index)
+        baseSwitch(self, index)
+        if resetGroup then
+            resetGroup:SetShown(index ~= homeTabIndex and index ~= feedbackTabIndex)
+        end
+    end
 
     BuildHomeTab()
     BuildGeneralTab()
