@@ -2987,26 +2987,43 @@ function GameUI:ResizeScoreFrame()
     scoreFrame:SetHeight(DIFFROW_BOTTOM + 4 + controlBar:GetHeight() + 6)
 end
 
--- Looping icon-fall demo on the main menu: a continuous stream of icons drops
--- onto a small action bar and auto-hits (with the odd miss), previewing the
--- game. Non-interactive; the OnUpdate runs only while the menu is shown and
--- self-cancels on error. Icons stay inside the demo rect (spawned at the top
--- edge, faded out at the bar) so no clipping is needed.
-local DEMO_ICONS = {
+-- Looping icon-fall demo on the main menu: each of the five lanes has a fixed
+-- ability icon; matching icons stream down and land ON that lane's slot with a
+-- randomised judgement (Perfect / Good / Bad / Miss), previewing real play.
+-- Non-interactive; the OnUpdate runs only while the menu is shown and
+-- self-cancels on error. Icons stay inside the demo rect (spawned at the top,
+-- faded out on the bar) so no clipping is needed.
+local DEMO_LANE_ICONS = {
     "Interface\\Icons\\Spell_Nature_Lightning",
     "Interface\\Icons\\Spell_Fire_Fireball02",
     "Interface\\Icons\\Ability_Warrior_Charge",
     "Interface\\Icons\\Spell_Holy_FlashHeal",
     "Interface\\Icons\\Ability_Rogue_Eviscerate",
-    "Interface\\Icons\\Spell_Frost_FrostBolt02",
 }
 local DEMO_COLS, DEMO_SLOT, DEMO_GAP, DEMO_H = 5, 30, 8, 150
-local DEMO_FALL, DEMO_SPAWN = 95, 0.55
-local DEMO_HITY = 2 + DEMO_SLOT
+local DEMO_FALL, DEMO_SPAWN = 88, 0.5
+local DEMO_HITY = 2 + DEMO_SLOT / 2   -- slot centre; icons land centred on it
 local drandom = math.random
+
+-- Weighted judgement pool (weights sum to 100). hit=false is a Miss (no flash).
+local DEMO_JUDGES = {
+    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 46, hit = true },
+    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 28, hit = true },
+    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 16, hit = true },
+    { text = "Miss",    r = 1.0, g = 0.35, b = 0.35, w = 10, hit = false },
+}
 
 local function DemoColX(c)
     return (c - (DEMO_COLS + 1) / 2) * (DEMO_SLOT + DEMO_GAP)
+end
+
+local function PickJudge()
+    local roll, acc = drandom(100), 0
+    for i = 1, #DEMO_JUDGES do
+        acc = acc + DEMO_JUDGES[i].w
+        if roll <= acc then return DEMO_JUDGES[i] end
+    end
+    return DEMO_JUDGES[1]
 end
 
 local function AcquireDemoIcon(demo)
@@ -3016,38 +3033,72 @@ local function AcquireDemoIcon(demo)
         icon:SetSize(DEMO_SLOT - 2, DEMO_SLOT - 2)
         icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     end
-    icon:SetTexture(DEMO_ICONS[drandom(#DEMO_ICONS)])
     icon:SetVertexColor(1, 1, 1)
     icon:SetAlpha(1)
     icon:Show()
     return icon
 end
 
+local function SpawnJudgeText(demo, col, judge)
+    local t = tremove(demo.textPool)
+    if not t then
+        local fs = demo:CreateFontString(nil, "OVERLAY")
+        fs:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        t = { fs = fs }
+    end
+    t.fs:SetText(judge.text)
+    t.fs:SetTextColor(judge.r, judge.g, judge.b)
+    t.x = DemoColX(col)
+    t.y = DEMO_HITY + DEMO_SLOT / 2 + 4
+    t.life = 0.6
+    t.fs:ClearAllPoints()
+    t.fs:SetPoint("CENTER", demo, "BOTTOM", t.x, t.y)
+    t.fs:SetAlpha(1)
+    t.fs:Show()
+    demo.texts[#demo.texts + 1] = t
+end
+
 local function DemoStep(demo, elapsed)
     demo.spawnT = (demo.spawnT or 0) + elapsed
     if demo.spawnT >= DEMO_SPAWN then
         demo.spawnT = demo.spawnT - DEMO_SPAWN
+        local col = drandom(DEMO_COLS)
         local icon = AcquireDemoIcon(demo)
-        icon.col = drandom(DEMO_COLS)
-        icon.y = DEMO_H - DEMO_SLOT
+        icon:SetTexture(DEMO_LANE_ICONS[col])
+        icon.col = col
+        icon.y = DEMO_H - DEMO_SLOT / 2
         icon.hit = false
-        icon.miss = (drandom(6) == 1)
         icon:ClearAllPoints()
-        icon:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+        icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(col), icon.y)
         demo.active[#demo.active + 1] = icon
     end
 
     for i = 1, DEMO_COLS do
         local flash = demo.slots[i].flash
         local a = flash:GetAlpha()
-        if a > 0 then flash:SetAlpha(mmax(0, a - elapsed * 3)) end
+        if a > 0 then flash:SetAlpha(mmax(0, a - elapsed * 4)) end
+    end
+
+    local texts = demo.texts
+    for i = #texts, 1, -1 do
+        local t = texts[i]
+        t.life = t.life - elapsed
+        if t.life <= 0 then
+            t.fs:Hide()
+            tremove(texts, i)
+            demo.textPool[#demo.textPool + 1] = t
+        else
+            t.y = t.y + elapsed * 20
+            t.fs:SetAlpha(mmin(1, t.life * 2.2))
+            t.fs:SetPoint("CENTER", demo, "BOTTOM", t.x, t.y)
+        end
     end
 
     local active = demo.active
     for i = #active, 1, -1 do
         local icon = active[i]
         if icon.hit then
-            local a = icon:GetAlpha() - elapsed * 5
+            local a = icon:GetAlpha() - elapsed * 4
             if a <= 0 then
                 icon:Hide()
                 tremove(active, i)
@@ -3057,13 +3108,17 @@ local function DemoStep(demo, elapsed)
             end
         else
             icon.y = icon.y - DEMO_FALL * elapsed
-            icon:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+            icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(icon.col), icon.y)
             if icon.y <= DEMO_HITY then
                 icon.hit = true
-                if icon.miss then
-                    icon:SetVertexColor(1, 0.5, 0.5)
+                local judge = PickJudge()
+                SpawnJudgeText(demo, icon.col, judge)
+                if judge.hit then
+                    local flash = demo.slots[icon.col].flash
+                    flash:SetColorTexture(judge.r, judge.g, judge.b)
+                    flash:SetAlpha(0.85)
                 else
-                    demo.slots[icon.col].flash:SetAlpha(0.75)
+                    icon:SetVertexColor(1, 0.45, 0.45)
                 end
             end
         end
@@ -3193,8 +3248,7 @@ function GameUI:RefreshMainMenuBars()
     local bars = BoundToLearn.db.game.bars
     for i = 1, #mainMenu.barToggles do
         local cb = mainMenu.barToggles[i]
-        local btn1 = _G[cb.buttonPrefix .. "1"]
-        local visible = btn1 and btn1:IsVisible() and true or false
+        local visible = ns.KeybindAudit and ns.KeybindAudit.IsBarVisible(cb.buttonPrefix) or false
         cb:SetEnabled(visible)
         cb:SetChecked(visible and bars[cb.barKey] and true or false)
     end
@@ -3204,9 +3258,11 @@ function GameUI:BuildMainMenuDemo(f)
     local demoW = DEMO_COLS * DEMO_SLOT + (DEMO_COLS - 1) * DEMO_GAP
     local demo = CreateFrame("Frame", nil, f)
     demo:SetSize(demoW, DEMO_H)
-    demo:SetPoint("TOP", 0, -62)
+    demo:SetPoint("TOP", 0, -60)
     demo.pool = {}
     demo.active = {}
+    demo.texts = {}
+    demo.textPool = {}
     demo.spawnT = 0
 
     demo.slots = {}
@@ -3214,7 +3270,15 @@ function GameUI:BuildMainMenuDemo(f)
         local base = demo:CreateTexture(nil, "BACKGROUND")
         base:SetSize(DEMO_SLOT, DEMO_SLOT)
         base:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)
-        base:SetColorTexture(0.10, 0.10, 0.13, 0.85)
+        base:SetColorTexture(0.09, 0.09, 0.12, 0.92)
+        -- The lane's ability icon, dimmed, so the bar reads as real slots.
+        local target = demo:CreateTexture(nil, "BORDER")
+        target:SetSize(DEMO_SLOT - 3, DEMO_SLOT - 3)
+        target:SetPoint("CENTER", base, "CENTER")
+        target:SetTexture(DEMO_LANE_ICONS[c])
+        target:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        target:SetVertexColor(0.45, 0.45, 0.5)
+        -- Hit flash, above the falling icons.
         local flash = demo:CreateTexture(nil, "OVERLAY")
         flash:SetSize(DEMO_SLOT, DEMO_SLOT)
         flash:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)

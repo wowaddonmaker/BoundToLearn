@@ -86,6 +86,19 @@ function KeybindAudit.ResolveBarLabel(buttonPrefix, fallback)
     return fallback
 end
 
+-- Whether a bar is currently shown in the UI. Checks the bar FRAME's shown
+-- state, which is reliable even when the bar's first slot is empty (an empty
+-- action button is hidden, so checking button 1 alone gives a false negative).
+function KeybindAudit.IsBarVisible(buttonPrefix)
+    local barFrameName = BAR_FRAME_NAMES[buttonPrefix]
+    local barFrame = barFrameName and _G[barFrameName]
+    if barFrame then
+        return barFrame:IsShown() and true or false
+    end
+    local btn1 = _G[buttonPrefix .. "1"]
+    return btn1 and btn1:IsVisible() and true or false
+end
+
 -- Keyboard layout coordinate maps: key → {x, y}
 -- Row positions use QWERTY-style stagger offsets
 local KEYBOARD_LAYOUTS = {
