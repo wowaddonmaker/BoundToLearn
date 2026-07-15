@@ -38,11 +38,11 @@ local CONTENT_RIGHT = 14
 local CONTENT_W    = WINDOW_W - (SIDEBAR_W + 32) - CONTENT_RIGHT
 local BTN_W        = 170
 
--- Support links. No public URLs exist for this addon yet; these are
--- placeholders to be replaced with the real destinations before release.
-local URL_HOMEPAGE    = "https://www.curseforge.com/wow/addons/REPLACE-ME"
-local URL_BUG_REPORT  = "https://REPLACE-ME/issues"
-local URL_FEATURE_REQ = "https://REPLACE-ME/discussions"
+-- Support links. Bug/feature open the GitHub issue forms (see
+-- .github/ISSUE_TEMPLATE); the repo must be public for players to use them.
+local URL_HOMEPAGE    = "https://www.curseforge.com/wow/addons/boundtolearn"
+local URL_BUG_REPORT  = "https://github.com/wowaddonmaker/BoundToLearn/issues/new?template=bug_report.yml"
+local URL_FEATURE_REQ = "https://github.com/wowaddonmaker/BoundToLearn/issues/new?template=feature_request.yml"
 
 local optionsFrame
 local nav
