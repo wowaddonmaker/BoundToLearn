@@ -151,7 +151,10 @@ local function AddGrid(tab, y, caption, items, perRow, getState, onToggle)
     return y - (rowCount * GRID_CELL_H + PAD * 2) - 6
 end
 
--- Read-only rounded editbox showing a link the user can select and copy.
+-- Read-only rounded editbox showing a link the user can select and copy. The
+-- text resets to the stored link on any change so it cannot be typed into;
+-- focusing it selects the link for Ctrl+C. shell:SetURL swaps the link so one
+-- box can be reused for different destinations.
 local function CreateURLBox(parent, url, width)
     local shell = CreateFrame("Frame", nil, parent)
     shell:SetSize(width, 20)
@@ -166,13 +169,72 @@ local function CreateURLBox(parent, url, width)
     box:SetAutoFocus(false)
     box:SetFontObject("GameFontHighlightSmall")
     box:SetTextColor(0.92, 0.92, 0.92, 1)
+    box._url = url
     box:SetText(url)
     box:SetCursorPosition(0)
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     box:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0) end)
-    box:SetScript("OnTextChanged", function(self) self:SetText(url); self:SetCursorPosition(0) end)
+    box:SetScript("OnTextChanged", function(self) self:SetText(self._url); self:SetCursorPosition(0) end)
+    shell.editBox = box
+    shell.SetURL = function(_, u)
+        box._url = u
+        box:SetText(u)
+        box:SetCursorPosition(0)
+    end
     return shell
+end
+
+-- Convert an RGB color table to a |cFF hex string (for inline colored text).
+local function ColorToHex(c)
+    return sformat("%02X%02X%02X", mfloor(c[1] * 255 + 0.5), mfloor(c[2] * 255 + 0.5), mfloor(c[3] * 255 + 0.5))
+end
+
+-- One reusable themed copy-link dialog, shared by every link button. It sits
+-- on the same strata as the options window but at a much higher frame level,
+-- so it draws above all window content and any open flyout dropdown.
+local linkDialog
+local function ShowLinkDialog(title, url)
+    if not linkDialog then
+        linkDialog = CreateFrame("Frame", "BoundToLearnLinkDialog", optionsFrame)
+        linkDialog:SetSize(340, 128)
+        linkDialog:SetPoint("CENTER", optionsFrame, "CENTER", 0, 30)
+        linkDialog:SetFrameStrata(FRAME_STRATA)
+        linkDialog:SetToplevel(true)
+        Theme.StylePanel(linkDialog)
+        linkDialog:EnableMouse(true)
+        tinsert(UISpecialFrames, "BoundToLearnLinkDialog")
+
+        local titleFS = Theme.CreateTitle(linkDialog, "", 15)
+        titleFS:SetPoint("TOP", 0, -14)
+        linkDialog.titleFS = titleFS
+
+        local hint = linkDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        hint:SetPoint("TOP", titleFS, "BOTTOM", 0, -8)
+        hint:SetText("Select the link and press Ctrl+C to copy.")
+        hint:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
+
+        local box = CreateURLBox(linkDialog, url, 300)
+        box:ClearAllPoints()
+        box:SetPoint("TOP", hint, "BOTTOM", 0, -12)
+        linkDialog.urlBox = box
+
+        local okBtn = Theme.CreateButton(linkDialog, _G["CLOSE"] or "Close", 110, 24)
+        okBtn:SetPoint("BOTTOM", 0, 14)
+        okBtn:SetScript("OnClick", function() linkDialog:Hide() end)
+
+        local close = Theme.CreateCloseButton(linkDialog, function() linkDialog:Hide() end)
+        close:SetPoint("TOPRIGHT", -8, -8)
+    end
+
+    linkDialog.titleFS:SetText(title or "")
+    linkDialog.urlBox:SetURL(url)
+    linkDialog:SetFrameStrata(FRAME_STRATA)
+    linkDialog:SetFrameLevel((optionsFrame and optionsFrame:GetFrameLevel() or FRAME_LEVEL) + 100)
+    linkDialog:Show()
+    linkDialog:Raise()
+    linkDialog.urlBox.editBox:SetFocus()
+    linkDialog.urlBox.editBox:HighlightText()
 end
 
 -- =========================================
@@ -471,9 +533,12 @@ local function BuildHomeTab()
     promoText:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
 
     local PROMO_URL = "https://www.curseforge.com/wow/addons/easyfind"
+    local promoHover = false
     local function applyPromo()
+        -- Brighten the clickable word on hover; base accent otherwise.
+        local hex = promoHover and ColorToHex(C.ACCENT_BRIGHT) or Theme.ACCENT_HEX
         promoText:SetText("If you enjoy BoundToLearn, you might also like another addon "
-            .. "I made: |Hbtl_promo:link|h|cFF" .. Theme.ACCENT_HEX .. "EasyFind|r|h. "
+            .. "I made: |Hbtl_promo:link|h|cFF" .. hex .. "EasyFind|r|h. "
             .. "It lets you instantly search for and jump to any interface panel, "
             .. "setting, or map location.")
     end
@@ -483,23 +548,28 @@ local function BuildHomeTab()
 
     promo:SetScript("OnHyperlinkClick", function(_, link)
         if link == "btl_promo:link" then
-            StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, PROMO_URL)
+            ShowLinkDialog("Open on CurseForge", PROMO_URL)
         end
     end)
     promo:SetScript("OnHyperlinkEnter", function(self, link)
-        if link == "btl_promo:link" then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Open on CurseForge", 1, 0.82, 0)
-            GameTooltip:Show()
-        end
+        if link ~= "btl_promo:link" then return end
+        promoHover = true
+        applyPromo()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Open on CurseForge", 1, 0.82, 0)
+        GameTooltip:Show()
     end)
-    promo:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
+    promo:SetScript("OnHyperlinkLeave", function()
+        promoHover = false
+        applyPromo()
+        GameTooltip:Hide()
+    end)
 
     -- Thanks line at the window bottom-right, mirroring the reference. The
     -- reset buttons are hidden on this tab, so it sits at the corner.
     local thanks = tab:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     thanks:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -6, 8)
-    thanks:SetText("Thanks for trying BoundToLearn")
+    thanks:SetText("Thanks for trying BoundToLearn!")
     thanks:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
 end
 
@@ -690,13 +760,13 @@ local function BuildFeedbackTab()
     local bugBtn = Theme.CreateButton(tab, "Report a Bug", 120, 20)
     bugBtn:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -14)
     bugBtn:SetScript("OnClick", function()
-        StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, URL_BUG_REPORT)
+        ShowLinkDialog("Report a Bug", URL_BUG_REPORT)
     end)
 
     local featureBtn = Theme.CreateButton(tab, "Request a Feature", 140, 20)
     featureBtn:SetPoint("LEFT", bugBtn, "RIGHT", 12, 0)
     featureBtn:SetScript("OnClick", function()
-        StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, URL_FEATURE_REQ)
+        ShowLinkDialog("Request a Feature", URL_FEATURE_REQ)
     end)
 end
 
@@ -897,27 +967,6 @@ end
 -- =========================================
 -- Static popups
 -- =========================================
-
-StaticPopupDialogs["BOUNDTOLEARN_SHOW_URL"] = {
-    text = "Copy this link (Ctrl+C):",
-    button1 = _G.CLOSE or "Close",
-    hasEditBox = true,
-    editBoxWidth = 260,
-    OnShow = function(self, data)
-        local eb = self.editBox or (self.GetEditBox and self:GetEditBox())
-        if eb then
-            eb:SetText(data or "")
-            eb:HighlightText()
-            eb:SetFocus()
-        end
-    end,
-    EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-}
 
 StaticPopupDialogs["BOUNDTOLEARN_RESET_DEFAULTS"] = {
     text = "Reset all BoundToLearn settings to defaults?",
