@@ -3179,7 +3179,7 @@ function GameUI:CreateMainMenu()
 
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-    title:SetPoint("TOP", 0, -13)
+    title:SetPoint("TOP", 0, -9)
     title:SetText("Icon Game")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
