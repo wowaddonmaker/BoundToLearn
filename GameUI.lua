@@ -1069,6 +1069,18 @@ function GameUI:ShowSongContextMenu(slot)
         catcher:RegisterForClicks("AnyUp")
         catcher:Hide()
         catcher:SetScript("OnClick", function(self) self:Hide() end)
+        -- First Esc closes just this menu: capture the key here and swallow it so
+        -- it doesn't fall through to close the whole song-select window.
+        catcher:SetScript("OnShow", function(self)
+            if InCombatLockdown() then return end
+            self:EnableKeyboard(true)
+            self:SetPropagateKeyboardInput(true)
+        end)
+        catcher:SetScript("OnKeyDown", function(self, key)
+            if InCombatLockdown() then return end
+            self:SetPropagateKeyboardInput(key ~= "ESCAPE")
+            if key == "ESCAPE" then self:Hide() end
+        end)
 
         menu = CreateFrame("Frame", nil, catcher)
         menu:SetSize(150, 62)
@@ -1135,15 +1147,24 @@ function GameUI:CreateSongSelect()
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
     title:SetPoint("TOPLEFT", 18, -17)
-    title:SetText("Select Music")
+    title:SetText("Select Track")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     local closeBtn = Theme.CreateCloseButton(f, function() GameUI:HideSongSelect() end)
     closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
 
+    local backBtn = MakeBubbleButton(f, "|TInterface\\Buttons\\UI-SpellbookIcon-PrevPage-Up:14:14|t Menu", 72, 22)
+    backBtn:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    backBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:HideSongSelect()
+        GameUI:ShowMainMenu()
+    end)
+    f.backToMenuBtn = backBtn
+
     local statsBtn = MakeBubbleButton(f, "Stats", 62, 22)
-    statsBtn:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    statsBtn:SetPoint("LEFT", backBtn, "RIGHT", 6, 0)
     statsBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ToggleStatsPanel()
@@ -1170,16 +1191,16 @@ function GameUI:CreateSongSelect()
     -- Slots live in an inset viewport so they are cut off at the interior
     -- border of the background art, not at the outer window edge.
     local wheelClip = CreateFrame("Frame", nil, f)
-    wheelClip:SetPoint("TOPLEFT", 250, -58)      -- top edge sits at the interior border
+    wheelClip:SetPoint("TOPLEFT", 250, -70)      -- dropped below the header row + search
     wheelClip:SetPoint("BOTTOMRIGHT", -24, 14)   -- right edge sits at the interior border
     wheelClip:SetClipsChildren(true)
     f.wheelClip = wheelClip
 
     -- Search box above the wheel: filters the carousel by title or artist.
     local search = CreateFrame("EditBox", nil, f)
-    -- Vertical center aligned with the title/Stats header row (same top, both ~22px).
-    search:SetPoint("TOPLEFT", 250, -17)
-    search:SetPoint("TOPRIGHT", -24, -17)
+    -- Below the header row (title + buttons), so it and the wheel sit clear of it.
+    search:SetPoint("TOPLEFT", 250, -40)
+    search:SetPoint("TOPRIGHT", -24, -40)
     search:SetHeight(22)
     search:SetAutoFocus(false)
     search:SetFontObject("GameFontHighlightSmall")
@@ -1287,7 +1308,7 @@ function GameUI:CreateSongSelect()
         slot.donut = donut
 
         local st = slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        st:SetPoint("LEFT", 40, 0)
+        st:SetPoint("LEFT", 34, 0)
         st:SetPoint("RIGHT", -14, 0)
         st:SetJustifyH("LEFT")
         st:SetWordWrap(false)
