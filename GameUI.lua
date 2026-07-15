@@ -1827,6 +1827,13 @@ function GameUI:CreateStatsPanel(f)
     stat(66,   -308, "Hard",    "Hard", false)
     stat(198,  -308, "Extreme", "Extreme", false)
 
+    local sumShare = MakeBubbleButton(sum, "Share Stats", 110, 22)
+    sumShare:SetPoint("BOTTOM", sum, "BOTTOM", 0, 10)
+    sumShare:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:OpenShareMenu(sumShare, GameUI:BuildSummaryShareText())
+    end)
+
     -- ===== Song view: per-track stats =====
     local sg = CreateFrame("Frame", nil, sp)
     sg:SetAllPoints()
@@ -1918,6 +1925,14 @@ function GameUI:BuildStatsSongView(sg, sp)
     local prog = sg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     prog:SetPoint("TOPLEFT", 22, headY - 26 - 4 * 30 - 14)
     sp.songProgFS = prog
+
+    local songShare = MakeBubbleButton(sg, "Share", 90, 22)
+    songShare:SetPoint("BOTTOM", sg, "BOTTOM", 0, 10)
+    songShare:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        local key = (songSelect and songSelect.statsSongKey) or BoundToLearn.db.game.songKey
+        GameUI:OpenShareMenu(songShare, GameUI:BuildSongShareText(key))
+    end)
 end
 
 function GameUI:RefreshStatsPanel()
@@ -1989,6 +2004,207 @@ function GameUI:RefreshStatsSongView()
     end
     local prog = (g.songProgress and g.songProgress[key]) or 0
     sp.songProgFS:SetText(sformat("Best progress: |cFFFFCC00%d%%|r", mfloor(prog * 100 + 0.5)))
+end
+
+--------------------------------------------------------------------------
+-- Share stats to chat: a themed destination dropdown. Public/group channels
+-- gate on group/guild state; Whisper targets the current unit; Custom prompts
+-- for a channel name or number. Selecting a row sends one SendChatMessage.
+--------------------------------------------------------------------------
+local SHARE_CHANNELS = {
+    { chan = "SAY" },
+    { chan = "YELL" },
+    { chan = "PARTY",         enabled = function() return IsInGroup() end },
+    { chan = "INSTANCE_CHAT", enabled = function() return IsInGroup(LE_PARTY_CATEGORY_INSTANCE or 2) end },
+    { chan = "RAID",          enabled = function() return IsInRaid() end },
+    { chan = "GUILD",         enabled = function() return IsInGuild() end },
+}
+local shareMenu
+
+-- Whisper target for the current unit target, realm-qualified when cross-realm.
+local function ShareTargetName()
+    if not UnitExists("target") or not UnitIsPlayer("target") then return nil end
+    local name, realm = UnitName("target")
+    if not name then return nil end
+    if realm and realm ~= "" then return name .. "-" .. realm end
+    return name
+end
+
+-- Fit a chat payload under the 255-char limit by trimming the free-text head
+-- (a song name) rather than the trailing stats.
+local function ClampShare(head, tail)
+    local budget = 255 - #tail
+    if #head > budget then
+        local cut = budget - 3
+        if cut < 0 then cut = 0 end
+        head = head:sub(1, cut) .. "..."
+    end
+    return head .. tail
+end
+
+function GameUI:BuildSummaryShareText()
+    local stats = BoundToLearn.db.stats
+    local g = BoundToLearn.db.game
+    local songs = ns.SongData.songs
+    local total = #songs
+    local completed = 0
+    local prog = g.songProgress or {}
+    for i = 1, total do
+        if (prog[songs[i].key] or 0) >= 0.99 then completed = completed + 1 end
+    end
+    local pb = stats.personalBest or {}
+    local acc = (stats.lifetimeGameNotes or 0) > 0
+        and (stats.lifetimeGameHits / stats.lifetimeGameNotes * 100) or 0
+    return sformat("BoundToLearn | Overall: %d/%d tracks, high score %d, %dx combo, %.1f%% best acc (%.0f%% lifetime)",
+        completed, total, pb.highestScore or 0, pb.longestCombo or 0, pb.bestAccuracy or 0, acc)
+end
+
+function GameUI:BuildSongShareText(key)
+    local g = BoundToLearn.db.game
+    local song = ns.SongData and ns.SongData.Get(key)
+    local name = (song and song.title) or key or "?"
+    local scores = (g.songScores and g.songScores[key]) or {}
+    local sstats = (g.songStats and g.songStats[key]) or {}
+    -- Share the best-scoring difficulty; fall back to the current one if unplayed.
+    local bestDiff, bestScore = nil, -1
+    for _, diff in ipairs(STATS_SONG_DIFFS) do
+        local sc = scores[diff] or 0
+        if sc > bestScore then bestScore, bestDiff = sc, diff end
+    end
+    if bestScore <= 0 then bestDiff = g.difficulty or "Medium" end
+    local st = sstats[bestDiff]
+    local tail = sformat(" [%s]: %d pts, %.1f%% acc, %dx combo",
+        bestDiff, scores[bestDiff] or 0, (st and st.bestAccuracy) or 0, (st and st.bestCombo) or 0)
+    return ClampShare("BoundToLearn | " .. name, tail)
+end
+
+function GameUI:OpenShareMenu(anchor, text)
+    local rows = {}
+    for i = 1, #SHARE_CHANNELS do
+        local c = SHARE_CHANNELS[i]
+        local on = (not c.enabled) or c.enabled()
+        local chan = c.chan
+        rows[#rows + 1] = {
+            text = _G[chan] or chan,
+            disabled = not on,
+            onClick = on and function() SendChatMessage(text, chan) end or nil,
+        }
+    end
+    local tname = ShareTargetName()
+    rows[#rows + 1] = {
+        text = tname and ((_G["WHISPER"] or "Whisper") .. ": " .. tname) or (_G["WHISPER"] or "Whisper"),
+        disabled = not tname,
+        onClick = tname and function() SendChatMessage(text, "WHISPER", nil, tname) end or nil,
+    }
+    rows[#rows + 1] = {
+        text = "Custom Channel...",
+        onClick = function()
+            Theme.ShowPrompt({
+                title = "Custom Channel",
+                body = "Enter a channel name or number:",
+                maxLetters = 48,
+                acceptText = _G["OKAY"] or "OK",
+                onAccept = function(val)
+                    val = val and strtrim(val) or ""
+                    if val == "" then return end
+                    local idx = tonumber(val) or GetChannelName(val)
+                    if idx and idx > 0 then SendChatMessage(text, "CHANNEL", nil, idx) end
+                end,
+            })
+        end,
+    }
+    self:ShowShareDropdown(anchor, rows)
+end
+
+function GameUI:ShowShareDropdown(anchor, rows)
+    local menu = shareMenu
+    if not menu then
+        menu = CreateFrame("Frame", nil, UIParent)
+        Theme.StylePanel(menu, 0.97)
+        menu:SetClampedToScreen(true)
+        menu:SetFrameStrata("FULLSCREEN_DIALOG")
+        menu.rows = {}
+        menu:SetScript("OnShow", function(self)
+            self:SetScript("OnUpdate", function(self)
+                if not self:IsMouseOver()
+                   and not (self._anchor and self._anchor:IsMouseOver())
+                   and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
+                    self:Hide()
+                end
+            end)
+        end)
+        menu:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
+        shareMenu = menu
+    end
+    menu._anchor = anchor
+
+    local ROW_H, PAD, W = 24, 6, 174
+    local n = #rows
+    menu:SetSize(W, n * ROW_H + PAD * 2)
+    menu:SetFrameLevel((anchor:GetFrameLevel() or 1) + 40)
+
+    for i = 1, n do
+        local spec = rows[i]
+        local row = menu.rows[i]
+        if not row then
+            row = CreateFrame("Button", nil, menu)
+            row:SetHeight(ROW_H)
+            local hl = CreateFrame("Frame", nil, menu)
+            hl:SetFrameLevel(menu:GetFrameLevel())
+            hl:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+            hl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+            Theme.Round(hl)
+            Theme.SetBarHeight(hl, 10)
+            Theme.SetBorderShown(hl, false)
+            Theme.SetFillColor(hl, Theme.C.ACCENT, 0)
+            row.hl = hl
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            label:SetPoint("LEFT", row, "LEFT", 10, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+            label:SetJustifyH("LEFT")
+            row.label = label
+            row:HookScript("OnEnter", function(self)
+                if self._enabled then Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0.18) end
+            end)
+            row:HookScript("OnLeave", function(self)
+                Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0)
+            end)
+            menu.rows[i] = row
+        end
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", menu, "TOPLEFT", PAD, -(PAD + (i - 1) * ROW_H))
+        row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -PAD, -(PAD + (i - 1) * ROW_H))
+        row.label:SetText(spec.text)
+        row._enabled = not spec.disabled
+        Theme.SetFillColor(row.hl, Theme.C.ACCENT, 0)
+        if spec.disabled then
+            row.label:SetTextColor(Theme.RGB(Theme.C.TEXT_DISABLED, 1))
+            row:SetScript("OnClick", nil)
+        else
+            row.label:SetTextColor(Theme.RGB(Theme.C.TEXT_BODY, 1))
+            local onClick = spec.onClick
+            row:SetScript("OnClick", function()
+                PlayUISound(SOUND_CLICK)
+                menu:Hide()
+                if onClick then onClick() end
+            end)
+        end
+        row:SetShown(true)
+    end
+    for i = n + 1, #menu.rows do menu.rows[i]:Hide() end
+
+    -- Drop from the button, or flip above it when there is not enough room below.
+    menu:ClearAllPoints()
+    local opScale = anchor:GetEffectiveScale() or 1
+    local mScale = menu:GetEffectiveScale() or 1
+    local menuH = n * ROW_H + PAD * 2
+    if (anchor:GetBottom() or 0) * opScale < menuH * mScale + 8 then
+        menu:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 2)
+    else
+        menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    end
+    menu:Show()
+    menu:Raise()
 end
 
 function GameUI:CycleStatsSong(dir)

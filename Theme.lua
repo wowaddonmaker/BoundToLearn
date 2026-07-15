@@ -1270,6 +1270,68 @@ function Theme.ShowConfirm(opts)
     confirmDialog:Present()
 end
 
+-- Shared input dialog: title + body + a typeable field + Accept/Cancel. opts =
+-- { title, body, acceptText, maxLetters, onAccept(text) }. Enter or Accept
+-- commits the typed text; Escape or Cancel dismisses.
+local promptDialog
+function Theme.ShowPrompt(opts)
+    opts = opts or {}
+    if not promptDialog then
+        promptDialog = Theme.CreateDialogShell("BoundToLearnPromptDialog", 340, 158)
+
+        local body = promptDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        body:SetPoint("TOP", promptDialog.titleFS, "BOTTOM", 0, -10)
+        body:SetPoint("LEFT", promptDialog, "LEFT", 20, 0)
+        body:SetPoint("RIGHT", promptDialog, "RIGHT", -20, 0)
+        body:SetJustifyH("CENTER")
+        body:SetTextColor(RGB(C.TEXT_BODY, 1))
+        promptDialog.body = body
+
+        local shell = CreateFrame("Frame", nil, promptDialog)
+        shell:SetSize(280, 22)
+        shell:SetPoint("TOP", body, "BOTTOM", 0, -12)
+        Theme.Round(shell)
+        Theme.SetBarHeight(shell, 10)
+        Theme.SetBorderShown(shell, false)
+        Theme.SetFillColor(shell, C.INSET_FILL)
+        local eb = CreateFrame("EditBox", nil, shell)
+        eb:SetPoint("TOPLEFT", shell, "TOPLEFT", 8, 0)
+        eb:SetPoint("BOTTOMRIGHT", shell, "BOTTOMRIGHT", -8, 0)
+        eb:SetAutoFocus(false)
+        eb:SetFontObject("GameFontHighlight")
+        eb:SetTextColor(0.95, 0.95, 0.95, 1)
+        promptDialog.editBox = eb
+
+        local function commit()
+            local val = promptDialog.editBox:GetText()
+            local cb = promptDialog._onAccept
+            promptDialog:Hide()
+            if cb then cb(val) end
+        end
+        eb:SetScript("OnEnterPressed", commit)
+        eb:SetScript("OnEscapePressed", function() promptDialog:Hide() end)
+
+        local accept = Theme.CreateAccentButton(promptDialog, "", 120, 26)
+        accept:SetPoint("BOTTOMRIGHT", promptDialog, "BOTTOM", -6, 16)
+        accept:SetScript("OnClick", commit)
+        promptDialog.accept = accept
+
+        local cancel = Theme.CreateButton(promptDialog, _G["CANCEL"] or "Cancel", 110, 26)
+        cancel:SetPoint("BOTTOMLEFT", promptDialog, "BOTTOM", 6, 16)
+        cancel:SetScript("OnClick", function() promptDialog:Hide() end)
+    end
+
+    promptDialog.titleFS:SetText(opts.title or "")
+    promptDialog.body:SetText(opts.body or "")
+    promptDialog.accept:SetText(opts.acceptText or (_G["OKAY"] or "OK"))
+    promptDialog.editBox:SetMaxLetters(opts.maxLetters or 64)
+    promptDialog.editBox:SetText("")
+    promptDialog._onAccept = opts.onAccept
+    promptDialog:SetHeight(158)
+    promptDialog:Present()
+    promptDialog.editBox:SetFocus()
+end
+
 --------------------------------------------------------------------------
 -- Color themes: a preset accent hue drives the whole interactive palette.
 -- Each preset gives the accent RGB + a text-safe hex; the button/toggle/gloss
