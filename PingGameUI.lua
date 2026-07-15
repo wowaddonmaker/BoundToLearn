@@ -928,17 +928,10 @@ function PingGameUI:CreateStartScreen()
 
     -- Left side: brief description in bordered box
     local panelY = midY - 30
-    local descBox = CreateFrame("Frame", nil, startFrame, "BackdropTemplate")
+    local descBox = CreateFrame("Frame", nil, startFrame)
     descBox:SetSize(155, 86)
     descBox:SetPoint("TOPLEFT", 10, panelY)
-    descBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    descBox:SetBackdropColor(0.05, 0.05, 0.05, 0.6)
-    descBox:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.7)
+    ns.Theme.StyleCard(descBox, nil, nil, true)
 
     local descTitle = descBox:CreateFontString(nil, "OVERLAY")
     descTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -965,17 +958,10 @@ function PingGameUI:CreateStartScreen()
     local diffStartX = (GAME_WIDTH - diffTotalW) / 2
 
     for i, name in ipairs(diffs) do
-        local btn = CreateFrame("Button", nil, startFrame, "BackdropTemplate")
+        local btn = CreateFrame("Button", nil, startFrame)
         btn:SetSize(diffBtnW, 22)
         btn:SetPoint("TOPLEFT", diffStartX + (i - 1) * diffBtnW, midY)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-        btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+        ns.Theme.StyleCard(btn, nil, nil, true)
         btn:SetNormalFontObject("GameFontNormalSmall")
         btn:SetHighlightFontObject("GameFontHighlightSmall")
         btn:SetText(name)
@@ -989,17 +975,10 @@ function PingGameUI:CreateStartScreen()
     end
 
     -- Right side: Settings in bordered box (stacked sections)
-    local settingsBox = CreateFrame("Frame", nil, startFrame, "BackdropTemplate")
+    local settingsBox = CreateFrame("Frame", nil, startFrame)
     settingsBox:SetSize(175, 130)
     settingsBox:SetPoint("TOPRIGHT", -10, panelY)
-    settingsBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    settingsBox:SetBackdropColor(0.05, 0.05, 0.05, 0.6)
-    settingsBox:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.7)
+    ns.Theme.StyleCard(settingsBox, nil, nil, true)
 
     local settingsTitle = settingsBox:CreateFontString(nil, "OVERLAY")
     settingsTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1143,16 +1122,10 @@ function PingGameUI:CreateStartScreen()
     mapLabel:SetPoint("BOTTOM", startBtn, "BOTTOM", -100, -24)
     mapLabel:SetText("|cFFFFD700Expansion|r")
 
-    local mapBtn = CreateFrame("Button", nil, startFrame, "BackdropTemplate")
+    local mapBtn = CreateFrame("Button", nil, startFrame)
     mapBtn:SetSize(165, 20)
     mapBtn:SetPoint("LEFT", mapLabel, "RIGHT", 6, 0)
-    mapBtn:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    mapBtn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+    ns.Theme.StyleCard(mapBtn, nil, nil, true)
 
     local mapBtnText = mapBtn:CreateFontString(nil, "OVERLAY")
     mapBtnText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1167,19 +1140,13 @@ function PingGameUI:CreateStartScreen()
     mapArrow:SetText("v")
 
     -- Dropdown opens upward (above the button) to avoid clipping bottom
-    local mapDropdown = CreateFrame("Frame", nil, mapBtn, "BackdropTemplate")
+    local mapDropdown = CreateFrame("Frame", nil, mapBtn)
     mapDropdown:SetPoint("BOTTOMLEFT", mapBtn, "TOPLEFT", 0, 2)
     mapDropdown:SetWidth(205)
     local dropdownRowH = 18
     local dropdownRows = #BACKGROUNDS + 1
     mapDropdown:SetHeight(dropdownRows * dropdownRowH + 6)
-    mapDropdown:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    mapDropdown:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    ns.Theme.StylePanel(mapDropdown, 0.98)
     mapDropdown:SetFrameLevel(mapBtn:GetFrameLevel() + 10)
     mapDropdown:Hide()
 
@@ -1536,12 +1503,14 @@ function PingGameUI:UpdateDiffButtons()
         local c = DIFF_COLORS[btn.diffName]
         if btn.diffName == current then
             btn:SetNormalFontObject("GameFontNormalSmall")
-            if c then btn:GetFontString():SetTextColor(c[1], c[2], c[3]) end
-            if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(c[1], c[2], c[3], 1) end
+            if c then
+                btn:GetFontString():SetTextColor(c[1], c[2], c[3])
+                ns.Theme.SetBorderColor(btn, c[1], c[2], c[3], 1)
+            end
         else
             btn:SetNormalFontObject("GameFontDisableSmall")
             btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
-            if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8) end
+            ns.Theme.SetBorderColor(btn, 0.3, 0.3, 0.3, 0.8)
         end
     end
 end
