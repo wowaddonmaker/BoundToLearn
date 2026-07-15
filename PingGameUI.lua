@@ -931,7 +931,7 @@ function PingGameUI:CreateStartScreen()
     local descBox = CreateFrame("Frame", nil, startFrame)
     descBox:SetSize(155, 86)
     descBox:SetPoint("TOPLEFT", 10, panelY)
-    ns.Theme.StyleCard(descBox, nil, nil, true)
+    ns.Theme.StyleCard(descBox)
 
     local descTitle = descBox:CreateFontString(nil, "OVERLAY")
     descTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -953,15 +953,16 @@ function PingGameUI:CreateStartScreen()
     startFrame.diffBtns = {}
     local diffs = ns.PingGame and ns.PingGame.DIFFICULTIES or { "Easy", "Normal", "Hard", "Extreme" }
     local diffCount = #diffs
-    local diffBtnW = 65
-    local diffTotalW = diffCount * diffBtnW
+    local diffBtnW = 60
+    local diffGap = 7
+    local diffTotalW = diffCount * diffBtnW + (diffCount - 1) * diffGap
     local diffStartX = (GAME_WIDTH - diffTotalW) / 2
 
     for i, name in ipairs(diffs) do
         local btn = CreateFrame("Button", nil, startFrame)
         btn:SetSize(diffBtnW, 22)
-        btn:SetPoint("TOPLEFT", diffStartX + (i - 1) * diffBtnW, midY)
-        ns.Theme.StyleCard(btn, nil, nil, true)
+        btn:SetPoint("TOPLEFT", diffStartX + (i - 1) * (diffBtnW + diffGap), midY)
+        ns.Theme.StyleCard(btn)
         btn:SetNormalFontObject("GameFontNormalSmall")
         btn:SetHighlightFontObject("GameFontHighlightSmall")
         btn:SetText(name)
@@ -978,7 +979,7 @@ function PingGameUI:CreateStartScreen()
     local settingsBox = CreateFrame("Frame", nil, startFrame)
     settingsBox:SetSize(175, 130)
     settingsBox:SetPoint("TOPRIGHT", -10, panelY)
-    ns.Theme.StyleCard(settingsBox, nil, nil, true)
+    ns.Theme.StyleCard(settingsBox)
 
     local settingsTitle = settingsBox:CreateFontString(nil, "OVERLAY")
     settingsTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1125,7 +1126,7 @@ function PingGameUI:CreateStartScreen()
     local mapBtn = CreateFrame("Button", nil, startFrame)
     mapBtn:SetSize(165, 20)
     mapBtn:SetPoint("LEFT", mapLabel, "RIGHT", 6, 0)
-    ns.Theme.StyleCard(mapBtn, nil, nil, true)
+    ns.Theme.StyleCard(mapBtn)
 
     local mapBtnText = mapBtn:CreateFontString(nil, "OVERLAY")
     mapBtnText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1146,7 +1147,7 @@ function PingGameUI:CreateStartScreen()
     local dropdownRowH = 18
     local dropdownRows = #BACKGROUNDS + 1
     mapDropdown:SetHeight(dropdownRows * dropdownRowH + 6)
-    ns.Theme.StylePanel(mapDropdown, 0.98)
+    ns.Theme.StyleCard(mapDropdown, ns.Theme.C.PANEL_DARK)
     mapDropdown:SetFrameLevel(mapBtn:GetFrameLevel() + 10)
     mapDropdown:Hide()
 
@@ -1230,10 +1231,10 @@ function PingGameUI:CreateStartScreen()
         end
     end)
     mapBtn:SetScript("OnEnter", function(self)
-        ns.Theme.SetBorderColor(self, 0.5, 0.5, 0.5, 1)
+        ns.Theme.SetFillColor(self, ns.Theme.C.BTN_HOVER)
     end)
     mapBtn:SetScript("OnLeave", function(self)
-        ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
+        ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
     end)
 
     startFrame.mapBtn = mapBtn
@@ -1275,8 +1276,7 @@ function PingGameUI:CreateStartScreen()
         local bindBtn = CreateFrame("Button", nil, bindBar)
         bindBtn:SetSize(80, 18)
         bindBtn:SetPoint("LEFT", label, "RIGHT", 4, 0)
-        ns.Theme.StyleCard(bindBtn, nil, nil, true)
-        ns.Theme.SetBorderColor(bindBtn, 0.35, 0.35, 0.35, 0.8)
+        ns.Theme.StyleCard(bindBtn)
 
         local keyText = bindBtn:CreateFontString(nil, "OVERLAY")
         keyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1290,11 +1290,11 @@ function PingGameUI:CreateStartScreen()
             if bindingInProgress and bindingInProgress ~= self then
                 bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "unbound")
                 bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-                ns.Theme.SetBorderColor(bindingInProgress, 0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(bindingInProgress, ns.Theme.C.SECTION_FILL)
             end
             bindingInProgress = self
             self.keyText:SetText("|cFFFFD700Press a key...|r")
-            ns.Theme.SetBorderColor(self, 1, 0.84, 0, 1)
+            ns.Theme.SetFill(self, 0.4, 0.32, 0.1, 0.9)
             self:EnableKeyboard(true)
         end)
 
@@ -1308,7 +1308,7 @@ function PingGameUI:CreateStartScreen()
                 self:EnableKeyboard(false)
                 self.keyText:SetText(GetBindingKey(self.bindingName) or "|cFF666666unbound|r")
                 self.keyText:SetTextColor(0.85, 0.85, 0.85)
-                ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
                 bindingInProgress = nil
                 return
             end
@@ -1327,7 +1327,7 @@ function PingGameUI:CreateStartScreen()
             self:EnableKeyboard(false)
             self.keyText:SetText(fullKey)
             self.keyText:SetTextColor(0.85, 0.85, 0.85)
-            ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
             if ns.PingGame and ns.PingGame.HasPingKeybinds then
                 ns.PingGame:Initialize()
@@ -1336,12 +1336,12 @@ function PingGameUI:CreateStartScreen()
 
         bindBtn:SetScript("OnEnter", function(self)
             if bindingInProgress ~= self then
-                ns.Theme.SetBorderColor(self, 0.5, 0.5, 0.5, 1)
+                ns.Theme.SetFillColor(self, ns.Theme.C.BTN_HOVER)
             end
         end)
         bindBtn:SetScript("OnLeave", function(self)
             if bindingInProgress ~= self then
-                ns.Theme.SetBorderColor(self, 0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
             end
         end)
 
@@ -1353,7 +1353,7 @@ function PingGameUI:CreateStartScreen()
             bindingInProgress:EnableKeyboard(false)
             bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "|cFF666666unbound|r")
             bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-            ns.Theme.SetBorderColor(bindingInProgress, 0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetFillColor(bindingInProgress, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
         end
         if mapDropdown then mapDropdown:Hide() end
@@ -1500,12 +1500,12 @@ function PingGameUI:UpdateDiffButtons()
             btn:SetNormalFontObject("GameFontNormalSmall")
             if c then
                 btn:GetFontString():SetTextColor(c[1], c[2], c[3])
-                ns.Theme.SetBorderColor(btn, c[1], c[2], c[3], 1)
+                ns.Theme.SetFill(btn, c[1] * 0.55, c[2] * 0.55, c[3] * 0.55, 0.9)
             end
         else
             btn:SetNormalFontObject("GameFontDisableSmall")
             btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
-            ns.Theme.SetBorderColor(btn, 0.3, 0.3, 0.3, 0.8)
+            ns.Theme.SetFill(btn, 0.14, 0.13, 0.12, 0.85)
         end
     end
 end
