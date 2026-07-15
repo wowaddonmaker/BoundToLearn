@@ -23,10 +23,12 @@ local StaticPopup_Show = StaticPopup_Show
 
 local C = Theme.C
 
--- Fixed-size sidebar window. The content column width is derived from the
--- window and sidebar so nothing drifts if the geometry changes.
+-- Fixed-size sidebar window. WINDOW_H is sized so the tallest tab (General,
+-- with the click-block block and its 120px blacklist card in custom mode)
+-- fits above the bottom reset buttons. The content column width is derived
+-- from the window and sidebar so nothing drifts.
 local WINDOW_W     = 544
-local WINDOW_H     = 408
+local WINDOW_H     = 508
 local PANEL_SCALE  = 0.9
 local FRAME_STRATA = "FULLSCREEN_DIALOG"
 local FRAME_LEVEL  = 700
@@ -35,6 +37,12 @@ local CONTENT_TOP  = 46
 local CONTENT_RIGHT = 14
 local CONTENT_W    = WINDOW_W - (SIDEBAR_W + 32) - CONTENT_RIGHT
 local BTN_W        = 170
+
+-- Support links. No public URLs exist for this addon yet; these are
+-- placeholders to be replaced with the real destinations before release.
+local URL_HOMEPAGE    = "https://www.curseforge.com/wow/addons/REPLACE-ME"
+local URL_BUG_REPORT  = "https://REPLACE-ME/issues"
+local URL_FEATURE_REQ = "https://REPLACE-ME/discussions"
 
 local optionsFrame
 local nav
@@ -140,8 +148,32 @@ local function AddGrid(tab, y, caption, items, perRow, getState, onToggle)
     return y - (rowCount * GRID_CELL_H + PAD * 2) - 6
 end
 
+-- Read-only rounded editbox showing a link the user can select and copy.
+local function CreateURLBox(parent, url, width)
+    local shell = CreateFrame("Frame", nil, parent)
+    shell:SetSize(width, 20)
+    Theme.Round(shell)
+    Theme.SetBarHeight(shell, 10)
+    Theme.SetBorderShown(shell, false)
+    Theme.SetFillColor(shell, C.INSET_FILL)
+
+    local box = CreateFrame("EditBox", nil, shell)
+    box:SetPoint("TOPLEFT", shell, "TOPLEFT", 8, 0)
+    box:SetPoint("BOTTOMRIGHT", shell, "BOTTOMRIGHT", -8, 0)
+    box:SetAutoFocus(false)
+    box:SetFontObject("GameFontHighlightSmall")
+    box:SetTextColor(0.92, 0.92, 0.92, 1)
+    box:SetText(url)
+    box:SetCursorPosition(0)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    box:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0) end)
+    box:SetScript("OnTextChanged", function(self) self:SetText(url); self:SetCursorPosition(0) end)
+    return shell
+end
+
 -- =========================================
--- Custom blacklist card (Click Blocking tab)
+-- Custom blacklist card (Click Blocking block)
 -- =========================================
 
 local function BuildBlacklistCard(tab, boxY)
@@ -330,9 +362,88 @@ local function BuildBlacklistCard(tab, boxY)
     RefreshBlacklistContent()
 end
 
+-- The click-block block appended to the bottom of the General tab: master
+-- toggle, divider, mode dropdown, and the custom blacklist card.
+local function AppendClickBlock(tab, y)
+    local _
+    _, y = AddCheckbox(tab, y, "Enable Click Blocking",
+        function() return BoundToLearn.db.clickBlock.enabled end,
+        function(v)
+            if ns.ClickBlock then
+                if v then ns.ClickBlock:Enable() else ns.ClickBlock:Disable() end
+            end
+            UpdateBlacklistVisibility()
+        end)
+    y = AddDivider(tab, y)
+
+    local modeChoices = {
+        { label = "All Abilities",   value = "all" },
+        { label = "CC + Interrupts", value = "cc" },
+        { label = "Interrupts Only", value = "interrupt" },
+        { label = "Custom",          value = "custom" },
+    }
+    _, y = AddFlyoutRow(tab, y, "Block Mode", modeChoices,
+        function() return BoundToLearn.db.clickBlock.mode end,
+        function(v)
+            BoundToLearn.db.clickBlock.mode = v
+            if ns.ClickBlock then ns.ClickBlock:Refresh() end
+            UpdateBlacklistVisibility()
+        end)
+
+    y = y - 4
+    BuildBlacklistCard(tab, y)
+    UpdateBlacklistVisibility()
+end
+
 -- =========================================
 -- Tabs
 -- =========================================
+
+local function BuildHomeTab()
+    local tab = nav:AddTab("Home")
+
+    local icon = tab:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(80, 80)
+    icon:SetPoint("TOPLEFT", tab, "TOPLEFT", 12, -8)
+    icon:SetTexture("Interface\\MacroFrame\\MacroFrame-Icon")
+
+    local title = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+    local titlePath, _, titleFlags = title:GetFont()
+    if titlePath then title:SetFont(titlePath, 28, titleFlags) end
+    title:SetPoint("LEFT", icon, "RIGHT", 14, 6)
+    title:SetText("BoundToLearn")
+    title:SetTextColor(Theme.RGB(C.TEXT_PRIMARY, 1))
+
+    local version = tab:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 6, 2)
+    version:SetText("v" .. (ns.version or ""))
+    version:SetTextColor(0.53, 0.53, 0.53, 1)
+
+    local desc = tab:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", 0, -20)
+    desc:SetPoint("RIGHT", tab, "RIGHT", -12, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetSpacing(3)
+    desc:SetText("Build muscle memory for your keybinds. The tracker shows how often "
+        .. "you click versus press your abilities, and the practice game turns "
+        .. "it into a rhythm challenge. Type |cFF" .. Theme.ACCENT_HEX .. "/btl|r "
+        .. "for all commands, or right-click the minimap button.")
+
+    local urlLabel = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    urlLabel:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -16)
+    urlLabel:SetText("Homepage")
+    urlLabel:SetTextColor(Theme.RGB(C.GOLD, 1))
+
+    local urlBox = CreateURLBox(tab, URL_HOMEPAGE, CONTENT_W - 8)
+    urlBox:SetPoint("TOPLEFT", urlLabel, "BOTTOMLEFT", 0, -4)
+
+    -- Thanks line at the window bottom-right, mirroring the reference. Lifted
+    -- above the reset button row so the two never overlap.
+    local thanks = tab:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    thanks:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -6, 30)
+    thanks:SetText("Thanks for trying BoundToLearn")
+    thanks:SetTextColor(Theme.RGB(C.TEXT_DIM, 1))
+end
 
 local function BuildGeneralTab()
     local tab = nav:AddTab("General")
@@ -353,19 +464,27 @@ local function BuildGeneralTab()
             -- Save the choice and let the reload apply the whole theme at once.
             StaticPopup_Show("BOUNDTOLEARN_THEME_RELOAD")
         end,
-        { styleFn = function(optBtn, choice, lbl)
-            local preset = Theme.THEMES[choice.value]
-            if not preset then return end
-            local dot = CreateFrame("Frame", nil, optBtn)
-            dot:SetSize(12, 12)
-            dot:SetPoint("RIGHT", optBtn, "RIGHT", -6, 0)
-            Theme.Round(dot)
-            Theme.SetBarHeight(dot, 12)
-            Theme.SetBorderShown(dot, false)
-            Theme.SetFillColor(dot, preset[1])
-            lbl:SetPoint("RIGHT", optBtn, "RIGHT", -22, 0)
-            optBtn._rightIconW = 12 + 8
-        end })
+        {
+            -- Closed selector shows a dot in the active accent.
+            swatch = function(value)
+                local preset = Theme.THEMES[value]
+                return preset and preset[1] or nil
+            end,
+            -- Each flyout row shows its own accent dot.
+            styleFn = function(optBtn, choice, lbl)
+                local preset = Theme.THEMES[choice.value]
+                if not preset then return end
+                local dot = CreateFrame("Frame", nil, optBtn)
+                dot:SetSize(12, 12)
+                dot:SetPoint("RIGHT", optBtn, "RIGHT", -6, 0)
+                Theme.Round(dot)
+                Theme.SetBarHeight(dot, 12)
+                Theme.SetBorderShown(dot, false)
+                Theme.SetFillColor(dot, preset[1])
+                lbl:SetPoint("RIGHT", optBtn, "RIGHT", -22, 0)
+                optBtn._rightIconW = 12 + 8
+            end,
+        })
 
     _, y = AddCheckbox(tab, y, "Mute Chat Messages",
         function() return BoundToLearn.db.options.muteChat end,
@@ -389,9 +508,11 @@ local function BuildGeneralTab()
         { key = "nonCombatMacros", label = "Non-combat macros" },
         { key = "buffs",           label = "Buffs" },
     }
-    AddGrid(tab, y, "Ignore these action types:", filterNames, 3,
+    y = AddGrid(tab, y, "Ignore these action types:", filterNames, 3,
         function(key) return BoundToLearn.db.filter[key] end,
         function(key, v) BoundToLearn.db.filter[key] = v end)
+
+    AppendClickBlock(tab, y)
 end
 
 local function BuildTrackerTab()
@@ -461,40 +582,6 @@ local function BuildTrackerTab()
         function(v) BoundToLearn.db.tracker.maxSegments = v end)
 end
 
-local function BuildClickBlockTab()
-    local tab = nav:AddTab("Click Blocking")
-    local y = -6
-    local _
-
-    _, y = AddCheckbox(tab, y, "Enable Click Blocking",
-        function() return BoundToLearn.db.clickBlock.enabled end,
-        function(v)
-            if ns.ClickBlock then
-                if v then ns.ClickBlock:Enable() else ns.ClickBlock:Disable() end
-            end
-            UpdateBlacklistVisibility()
-        end)
-    y = AddDivider(tab, y)
-
-    local modeChoices = {
-        { label = "All Abilities",   value = "all" },
-        { label = "CC + Interrupts", value = "cc" },
-        { label = "Interrupts Only", value = "interrupt" },
-        { label = "Custom",          value = "custom" },
-    }
-    _, y = AddFlyoutRow(tab, y, "Block Mode", modeChoices,
-        function() return BoundToLearn.db.clickBlock.mode end,
-        function(v)
-            BoundToLearn.db.clickBlock.mode = v
-            if ns.ClickBlock then ns.ClickBlock:Refresh() end
-            UpdateBlacklistVisibility()
-        end)
-
-    y = y - 4
-    BuildBlacklistCard(tab, y)
-    UpdateBlacklistVisibility()
-end
-
 local function BuildGameTab()
     local tab = nav:AddTab("Game")
     local y = -6
@@ -514,10 +601,8 @@ local function BuildGameTab()
     _, y = AddCheckbox(tab, y, "Show Combo Counter",
         function() return BoundToLearn.db.game.showCombo end,
         function(v) BoundToLearn.db.game.showCombo = v end)
-end
 
-local function BuildActionBarsTab()
-    local tab = nav:AddTab("Action Bars")
+    y = y - 8
     local barDefs = {
         { key = "main",        label = "Bar 1 (Main)" },
         { key = "bottomLeft",  label = "Bar 2" },
@@ -528,9 +613,32 @@ local function BuildActionBarsTab()
         { key = "bar7",        label = "Bar 7" },
         { key = "bar8",        label = "Bar 8" },
     }
-    AddGrid(tab, -6, "Action bars to include in the game:", barDefs, 3,
+    AddGrid(tab, y, "Action bars to include in the game:", barDefs, 3,
         function(key) return BoundToLearn.db.game.bars[key] end,
         function(key, v) BoundToLearn.db.game.bars[key] = v end)
+end
+
+local function BuildFeedbackTab()
+    local tab = nav:AddTab("Feedback")
+
+    local desc = tab:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", tab, "TOPLEFT", 12, -16)
+    desc:SetPoint("RIGHT", tab, "RIGHT", -12, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetSpacing(3)
+    desc:SetText("Found a bug or have an idea? Your feedback shapes what gets built next. Use the links below.")
+
+    local bugBtn = Theme.CreateButton(tab, "Report a Bug", 120, 20)
+    bugBtn:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -14)
+    bugBtn:SetScript("OnClick", function()
+        StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, URL_BUG_REPORT)
+    end)
+
+    local featureBtn = Theme.CreateButton(tab, "Request a Feature", 140, 20)
+    featureBtn:SetPoint("LEFT", bugBtn, "RIGHT", 12, 0)
+    featureBtn:SetScript("OnClick", function()
+        StaticPopup_Show("BOUNDTOLEARN_SHOW_URL", nil, nil, URL_FEATURE_REQ)
+    end)
 end
 
 local function BuildResetButtons()
@@ -587,11 +695,11 @@ local function BuildFrame()
     })
     optionsFrame.nav = nav
 
+    BuildHomeTab()
     BuildGeneralTab()
     BuildTrackerTab()
-    BuildClickBlockTab()
     BuildGameTab()
-    BuildActionBarsTab()
+    BuildFeedbackTab()
     BuildResetButtons()
 
     nav:SwitchToTab(1)
@@ -723,6 +831,27 @@ StaticPopupDialogs["BOUNDTOLEARN_THEME_RELOAD"] = {
     timeout = 0,
     whileDead = true,
     hideOnEscape = true,
+}
+
+StaticPopupDialogs["BOUNDTOLEARN_SHOW_URL"] = {
+    text = "Copy this link (Ctrl+C):",
+    button1 = _G.CLOSE or "Close",
+    hasEditBox = true,
+    editBoxWidth = 260,
+    OnShow = function(self, data)
+        local eb = self.editBox or (self.GetEditBox and self:GetEditBox())
+        if eb then
+            eb:SetText(data or "")
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end,
+    EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
 }
 
 StaticPopupDialogs["BOUNDTOLEARN_RESET_DEFAULTS"] = {

@@ -955,11 +955,35 @@ function Theme.CreateFlyoutRow(parent, labelText, choices, getter, setter, opts)
     end
 
     local btn, btnText = Theme.CreateFlyoutSelector(row, btnW)
+
+    -- Optional color swatch on the CLOSED selector: a small filled circle
+    -- left of the label, tinted by opts.swatch(value). Used by the theme
+    -- picker so the button shows the active accent, not just the name.
+    local updateSwatch
+    if opts.swatch then
+        local dot = CreateFrame("Frame", nil, btn)
+        dot:SetSize(12, 12)
+        dot:SetPoint("LEFT", btn, "LEFT", 8, 0)
+        Theme.Round(dot)
+        Theme.SetBarHeight(dot, 12)
+        Theme.SetBorderShown(dot, false)
+        btnText:ClearAllPoints()
+        btnText:SetPoint("LEFT", dot, "RIGHT", 6, 0)
+        btnText:SetPoint("RIGHT", btn, "RIGHT", -18, 0)
+        btnText:SetJustifyH("LEFT")
+        updateSwatch = function(value)
+            local col = opts.swatch(value)
+            if col then Theme.SetFillColor(dot, col); dot:Show() else dot:Hide() end
+        end
+    end
+
     btnText:SetText(LabelFor(getter()))
+    if updateSwatch then updateSwatch(getter()) end
     local flyout = Theme.CreateFlyoutPanel(btn, btnW, #choices)
     Theme.AddFlyoutOptions(flyout, choices, btnW - 6, function(choice)
         setter(choice.value)
         btnText:SetText(LabelFor(choice.value))
+        if updateSwatch then updateSwatch(choice.value) end
     end, FlyoutLabelFor, opts.styleFn)
 
     if opts.tooltip then
@@ -968,7 +992,10 @@ function Theme.CreateFlyoutRow(parent, labelText, choices, getter, setter, opts)
     end
 
     row.flyout = flyout
-    row.SetValue = function(_, value) btnText:SetText(LabelFor(value)) end
+    row.SetValue = function(_, value)
+        btnText:SetText(LabelFor(value))
+        if updateSwatch then updateSwatch(value) end
+    end
     return row
 end
 
