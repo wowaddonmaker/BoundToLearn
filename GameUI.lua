@@ -3006,11 +3006,13 @@ local DEMO_HITY = 2 + DEMO_SLOT / 2   -- slot centre; icons land centred on it
 local drandom = math.random
 
 -- Weighted judgement pool (weights sum to 100). hit=false is a Miss (no flash).
+-- off = how far off centre a hit lands (0 = dead centre), so the visual matches
+-- the judgement. A Miss (hit = false) has no landing; it falls through the bar.
 local DEMO_JUDGES = {
-    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 46, hit = true },
-    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 28, hit = true },
-    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 16, hit = true },
-    { text = "Miss",    r = 1.0, g = 0.35, b = 0.35, w = 10, hit = false },
+    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 55, hit = true, off = 0 },
+    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 25, hit = true, off = 5 },
+    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 12, hit = true, off = 9 },
+    { text = "Miss",    r = 1.0, g = 0.35, b = 0.35, w = 8, hit = false },
 }
 
 local function DemoColX(c)
@@ -3067,7 +3069,16 @@ local function DemoStep(demo, elapsed)
         icon:SetTexture(DEMO_LANE_ICONS[col])
         icon.col = col
         icon.y = DEMO_H - DEMO_SLOT / 2
-        icon.hit = false
+        icon.judged = false
+        local judge = PickJudge()
+        icon.judge = judge
+        if not judge.hit then
+            icon.stopY = nil                       -- a miss falls through the bar
+        elseif judge.off > 0 then
+            icon.stopY = DEMO_HITY + (drandom(2) == 1 and judge.off or -judge.off)
+        else
+            icon.stopY = DEMO_HITY                 -- perfect lands dead centre
+        end
         icon:ClearAllPoints()
         icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(col), icon.y)
         demo.active[#demo.active + 1] = icon
@@ -3097,8 +3108,24 @@ local function DemoStep(demo, elapsed)
     local active = demo.active
     for i = #active, 1, -1 do
         local icon = active[i]
-        if icon.hit then
-            local a = icon:GetAlpha() - elapsed * 4
+        if not icon.judged then
+            icon.y = icon.y - DEMO_FALL * elapsed
+            if icon.y <= (icon.stopY or DEMO_HITY) then
+                icon.judged = true
+                SpawnJudgeText(demo, icon.col, icon.judge)
+                if icon.judge.hit then
+                    icon.y = icon.stopY
+                    local flash = demo.slots[icon.col].flash
+                    flash:SetColorTexture(icon.judge.r, icon.judge.g, icon.judge.b)
+                    flash:SetAlpha(0.85)
+                else
+                    icon:SetVertexColor(1, 0.45, 0.45)
+                end
+            end
+            icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+        elseif icon.judge.hit then
+            -- Landed: hold on the slot a moment, then fade.
+            local a = icon:GetAlpha() - elapsed * 3.5
             if a <= 0 then
                 icon:Hide()
                 tremove(active, i)
@@ -3107,19 +3134,16 @@ local function DemoStep(demo, elapsed)
                 icon:SetAlpha(a)
             end
         else
+            -- Miss: keep falling through the bar (clipped) as it fades out.
             icon.y = icon.y - DEMO_FALL * elapsed
             icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(icon.col), icon.y)
-            if icon.y <= DEMO_HITY then
-                icon.hit = true
-                local judge = PickJudge()
-                SpawnJudgeText(demo, icon.col, judge)
-                if judge.hit then
-                    local flash = demo.slots[icon.col].flash
-                    flash:SetColorTexture(judge.r, judge.g, judge.b)
-                    flash:SetAlpha(0.85)
-                else
-                    icon:SetVertexColor(1, 0.45, 0.45)
-                end
+            local a = icon:GetAlpha() - elapsed * 3
+            if a <= 0 or icon.y <= -DEMO_SLOT then
+                icon:Hide()
+                tremove(active, i)
+                demo.pool[#demo.pool + 1] = icon
+            else
+                icon:SetAlpha(a)
             end
         end
     end
@@ -3259,6 +3283,7 @@ function GameUI:BuildMainMenuDemo(f)
     local demo = CreateFrame("Frame", nil, f)
     demo:SetSize(demoW, DEMO_H)
     demo:SetPoint("TOP", 0, -60)
+    demo:SetClipsChildren(true)
     demo.pool = {}
     demo.active = {}
     demo.texts = {}
