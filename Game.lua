@@ -199,8 +199,13 @@ function Game:Initialize()
     ns.eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     ns.eventFrame:HookScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" and isRunning then
-            self:Pause()
-            -- Paused by combat; pause overlay shows
+            if currentMode == "practice" then
+                self:Pause()   -- Practice is lenient: combat just pauses.
+            else
+                -- Scored runs cannot be paused; entering combat ends the run.
+                BoundToLearn:Print("Entered combat. Run ended.")
+                self:Stop()
+            end
         end
     end)
 end

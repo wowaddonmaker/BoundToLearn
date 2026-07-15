@@ -2828,18 +2828,6 @@ function GameUI:CreateHealthBar()
         end
     end)
     hf.pauseBtn = pauseBtn
-    -- Manual pause is disabled outside Practice (pausing a scored run is a
-    -- cheat). It re-enables while paused so a combat-forced pause can be
-    -- resumed; the tooltip explains the disabled state.
-    pauseBtn:SetMotionScriptsWhileDisabled(true)
-    pauseBtn:HookScript("OnEnter", function(self)
-        if self:IsEnabled() then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Pause")
-        GameTooltip:AddLine("Only available in Practice mode.", 1, 0.82, 0, true)
-        GameTooltip:Show()
-    end)
-    pauseBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     local timerFS = hf:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     timerFS:SetPoint("RIGHT", pauseBtn, "LEFT", -12, 0)
@@ -3034,8 +3022,14 @@ function GameUI:OnGameStart(slots)
     if scoreFrame then scoreFrame:Hide() end
     if pauseOverlay then pauseOverlay:Hide() end
     if self.healthFrame then
-        self.healthFrame.pauseBtn:SetText("Pause")
-        self.healthFrame.pauseBtn:SetEnabled(ns.Game ~= nil and ns.Game:GetMode() == "practice")
+        local hf = self.healthFrame
+        hf.pauseBtn:SetText("Pause")
+        -- Pause is Practice-only; hide it entirely in scored modes (combat ends
+        -- a scored run rather than pausing it) and close the timer gap.
+        local practice = ns.Game ~= nil and ns.Game:GetMode() == "practice"
+        hf.pauseBtn:SetShown(practice)
+        hf.timerFS:ClearAllPoints()
+        hf.timerFS:SetPoint("RIGHT", practice and hf.pauseBtn or hf.stopBtn, "LEFT", -12, 0)
     end
     if modifierDropdown then modifierDropdown:Hide() end
 
@@ -3074,21 +3068,13 @@ end
 function GameUI:OnGamePause()
     if pauseOverlay then pauseOverlay:Show() end
     if controlBar then controlBar.pauseBtn:SetText("Resume") end
-    if self.healthFrame then
-        self.healthFrame.pauseBtn:SetText("Resume")
-        -- Enable while paused so a combat-forced pause can be resumed even in
-        -- non-practice modes, where the button is otherwise disabled.
-        self.healthFrame.pauseBtn:SetEnabled(true)
-    end
+    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Resume") end
 end
 
 function GameUI:OnGameResume()
     if pauseOverlay then pauseOverlay:Hide() end
     if controlBar then controlBar.pauseBtn:SetText("Pause") end
-    if self.healthFrame then
-        self.healthFrame.pauseBtn:SetText("Pause")
-        self.healthFrame.pauseBtn:SetEnabled(ns.Game ~= nil and ns.Game:GetMode() == "practice")
-    end
+    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Pause") end
 end
 
 function GameUI:CreateHitZones(slots)
