@@ -477,6 +477,12 @@ function Theme.CreateAccentButton(parent, text, width, height)
     btn:SetScript("OnMouseDown", function() paint(C.ACCENT_DIM) end)
     btn:SetScript("OnMouseUp", function() paint(btn:IsMouseOver() and C.ACCENT or C.ACCENT_DIM) end)
     btn._label:SetTextColor(1, 1, 1, 1)
+    -- CreateButton's OnEnable restores the neutral fill; re-assert the accent
+    -- fill so a disabled-then-enabled accent button keeps its accent look.
+    btn:HookScript("OnEnable", function()
+        Theme.SetFillColor(btn, C.ACCENT_DIM)
+        btn._label:SetTextColor(1, 1, 1, 1)
+    end)
     return btn
 end
 

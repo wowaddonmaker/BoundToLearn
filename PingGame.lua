@@ -64,6 +64,10 @@ local CORRECT_PING = {
 
 PingGame.CORRECT_PING = CORRECT_PING
 
+-- Friendly names for the target-relevant pings, used by the "bind all pings"
+-- prompt. onmyway is intentionally excluded: it is not a target ping.
+local PING_LABEL = { attack = "Attack", assist = "Assist", warning = "Warning" }
+
 -- Difficulty scales through time pressure (shorter lifetime + faster spawn cadence) and
 -- precision (smaller targets), keeping the on-screen count low and steady, rather than
 -- piling on more targets at once. Mirrors how aim trainers scale.
@@ -112,6 +116,28 @@ end
 function PingGame:HasPingKeybinds()
     for _ in pairs(pingKeybinds) do return true end
     return false
+end
+
+-- True only when every target-relevant ping (attack/assist/warning) is bound.
+function PingGame:AreAllPingsKeybound()
+    for i = 1, #TARGET_TYPES do
+        if not GetBindingKey(PING_BINDINGS[CORRECT_PING[TARGET_TYPES[i]]]) then
+            return false
+        end
+    end
+    return true
+end
+
+-- Display names of any target-relevant pings that are not yet bound.
+function PingGame:GetUnboundPingNames()
+    local names = {}
+    for i = 1, #TARGET_TYPES do
+        local action = CORRECT_PING[TARGET_TYPES[i]]
+        if not GetBindingKey(PING_BINDINGS[action]) then
+            names[#names + 1] = PING_LABEL[action]
+        end
+    end
+    return names
 end
 
 function PingGame:Initialize()

@@ -1092,13 +1092,14 @@ function PingGameUI:CreateStartScreen()
         function() return IsMusicMuted() end,
         function() if not IsMusicMuted() then ToggleMuteMusic(true) end end)
 
-    -- Section 3: Sound (centered header, On/Off below)
+    -- Section 3: Ping SFX (centered header, On/Off below). Named "Ping SFX"
+    -- rather than "Sound" so it is not confused with the Music toggle above.
     local secY3 = secY2 - 36
     local soundHeader = settingsBox:CreateFontString(nil, "OVERLAY")
     soundHeader:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     soundHeader:SetPoint("TOP", 0, secY3)
     soundHeader:SetTextColor(1, 0.82, 0)
-    soundHeader:SetText("Sound")
+    soundHeader:SetText("Ping SFX")
     CreateSectionDivider(secY3 - 13)
 
     local sfxOnBtn = CreateToggleOption(settingsBox, toggleStartX, secY3 - 14, "On",
@@ -1118,6 +1119,23 @@ function PingGameUI:CreateStartScreen()
         PlayUISound(SOUND_CLICK)
         if ns.PingGame then ns.PingGame:Start() end
     end)
+    startFrame.startBtn = startBtn
+    -- Disabled until all three pings are bound; the tooltip names what's missing.
+    startBtn:SetMotionScriptsWhileDisabled(true)
+    startBtn:HookScript("OnEnter", function(self)
+        if self:IsEnabled() then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Bind your pings first")
+        local missing = ns.PingGame and ns.PingGame:GetUnboundPingNames()
+        if missing and #missing > 0 then
+            local list = missing[1]
+            for i = 2, #missing do list = list .. ", " .. missing[i] end
+            GameTooltip:AddLine("Not bound: " .. list, 1, 0.82, 0, true)
+        end
+        GameTooltip:AddLine("Set your Attack, Assist, and Warning pings in Key Bindings.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    startBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- ===== Map dropdown below start button =====
     local mapLabel = startFrame:CreateFontString(nil, "OVERLAY")
@@ -1604,6 +1622,13 @@ function PingGameUI:RefreshShowcase()
     end
 end
 
+-- Gray the Start button until every ping is bound (checked each time the start
+-- screen shows, so binding a ping and reopening re-enables it).
+function PingGameUI:UpdateStartButton()
+    if not startFrame or not startFrame.startBtn then return end
+    startFrame.startBtn:SetEnabled(ns.PingGame ~= nil and ns.PingGame:AreAllPingsKeybound())
+end
+
 function PingGameUI:ShowStartScreen()
     if not mainFrame then self:CreateUI() end
     if gameArea then gameArea:Hide() end
@@ -1614,6 +1639,7 @@ function PingGameUI:ShowStartScreen()
     self:UpdateKeybindDisplay()
     self:UpdateBackgroundButtons()
     self:UpdateSoundButtons()
+    self:UpdateStartButton()
     startFrame:Show()
     mainFrame:Show()
 end
