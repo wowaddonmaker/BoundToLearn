@@ -84,6 +84,45 @@ SongData.songs = {
     { key = "s68", title = [[PvP]], artist = [[Derek Duke]], id = 53686, length = 40 },
 }
 
+-- Tracks the Forever client does not ship; dropped from its song list.
+local FOREVER_MISSING = {
+    s5 = true, s6 = true, s10 = true, s11 = true, s12 = true, s14 = true,
+    s17 = true, s18 = true, s19 = true, s20 = true, s21 = true, s22 = true,
+    s23 = true, s26 = true, s27 = true, s28 = true, s29 = true, s30 = true,
+    s31 = true, s33 = true, s34 = true, s35 = true, s36 = true, s37 = true,
+    s40 = true, s41 = true, s42 = true, s43 = true, s44 = true, s45 = true,
+    s56 = true, s57 = true, s58 = true, s59 = true, s60 = true, s66 = true,
+}
+local allSongs = SongData.songs
+
+-- Dev probe (/btl songcheck): asks the client which tracks it can play.
+-- Returns the unplayable keys, and those where FOREVER_MISSING disagrees.
+function SongData.CheckTracks()
+    local unplayable, disagree = {}, {}
+    for i = 1, #allSongs do
+        local song = allSongs[i]
+        local willPlay, handle = PlaySoundFile(song.id, "Master")
+        if willPlay then
+            StopSound(handle)
+        else
+            unplayable[#unplayable + 1] = song.key
+        end
+        if (not willPlay) ~= (FOREVER_MISSING[song.key] or false) then
+            disagree[#disagree + 1] = song.key
+        end
+    end
+    return unplayable, disagree, #allSongs
+end
+
+if Utils.IS_FOREVER then
+    local kept = {}
+    for i = 1, #SongData.songs do
+        local song = SongData.songs[i]
+        if not FOREVER_MISSING[song.key] then kept[#kept + 1] = song end
+    end
+    SongData.songs = kept
+end
+
 SongData.byKey = {}
 for i = 1, #SongData.songs do
     SongData.byKey[SongData.songs[i].key] = SongData.songs[i]
@@ -191,12 +230,15 @@ end
 -- matched instance's real expansion instead of guessing from the song's index.
 local resolveSong
 
+-- Forever has no Midnight backdrop; its neutral art is the Classic one.
+SongData.DEFAULT_BG = Utils.IS_FOREVER and "ui-ej-classic" or "ui-ej-midnight"
+
 function SongData.XpacBackground(song)
     local atlas = SongData.XPAC_BG[resolveSong(song).tier]
     if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
         return atlas
     end
-    return "ui-ej-midnight"
+    return SongData.DEFAULT_BG
 end
 
 -- Five-axis "groove" profile (each 0-1) for the radar on the song select, using
@@ -311,8 +353,12 @@ local function buildInstanceImages()
         C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
     end
     if not (EJ_GetInstanceByIndex and EJ_SelectTier and EJ_GetNumTiers) then return end
+    -- Forever has the guide's functions but no tiers (tier 0 is refused).
+    local numTiers = EJ_GetNumTiers()
+    if numTiers < 1 then return end
     local prevTier = EJ_GetCurrentTier and EJ_GetCurrentTier() or 1
-    for tier = 1, EJ_GetNumTiers() do
+    if prevTier < 1 then prevTier = 1 end
+    for tier = 1, numTiers do
         EJ_SelectTier(tier)
         for r = 1, 2 do
             local isRaid = (r == 2)
@@ -396,10 +442,32 @@ local function flagshipImage(tier)
     return img or nil
 end
 
+-- Forever has no Adventure Guide data. Its client still ships the art, so
+-- each song carries what retail resolves: { background file, tier }.
+local FOREVER_ART = {
+    s3 = { 4423751, 9 }, s4 = { 2177522, 8 }, s7 = { 1718200, 7 }, s8 = { 1718200, 7 },
+    s9 = { 1041969, 6 }, s13 = { 652217, 5 }, s15 = { 904980, 5 }, s16 = { 904980, 5 },
+    s24 = { 571738, 4 }, s25 = { 571738, 4 }, s32 = { 1396457, 3 }, s38 = { 1396457, 3 },
+    s39 = { 1396457, 3 }, s46 = { 1718200, 7 }, s47 = { 1396457, 3 }, s48 = { 1396457, 3 },
+    s49 = { 1396457, 3 }, s50 = { 1396457, 3 }, s51 = { 1396457, 3 }, s52 = { 608159, 2 },
+    s53 = { 608159, 2 }, s54 = { 608159, 2 }, s55 = { 1396453, 2 }, s61 = { 1396453, 2 },
+    s62 = { 1396460, 1 }, s63 = { 1396460, 1 }, s64 = { 1396460, 1 }, s65 = { 1396460, 1 },
+    s67 = { 1396460, 1 }, s68 = { 1396460, 1 },
+}
+
 local songResolveCache = {}
 resolveSong = function(song)
     local cached = songResolveCache[song.key]
     if cached then return cached end
+    if Utils.IS_FOREVER then
+        local art = FOREVER_ART[song.key]
+        cached = {
+            img = art and art[1],
+            tier = art and art[2] or tierForIndex(tonumber(song.key:match("%d+")) or 1),
+        }
+        songResolveCache[song.key] = cached
+        return cached
+    end
     buildInstanceImages()
     local img, tier = matchInstance(song.title:lower())
     if not tier then

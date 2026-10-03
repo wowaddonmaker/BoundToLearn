@@ -239,7 +239,6 @@ local function BuildBlacklistCard(tab, boxY)
     boxTitle:SetPoint("TOPLEFT", 8, -6)
     local function applyBoxTitle() boxTitle:SetText("|cFF" .. Theme.ACCENT_HEX .. "Blocked Spells|r") end
     applyBoxTitle()
-    Theme.RegisterRetinter(applyBoxTitle)
 
     local scroll = CreateFrame("ScrollFrame", nil, blacklistBox, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 6, -22)
@@ -326,7 +325,6 @@ local function BuildBlacklistCard(tab, boxY)
     dimHintLine1:SetPoint("TOP", optionsFrame, "BOTTOM", 0, -12)
     local function applyDimHint() dimHintLine1:SetText("|cFF" .. Theme.ACCENT_HEX .. "Click the spells you want to block|r") end
     applyDimHint()
-    Theme.RegisterRetinter(applyDimHint)
     local dimHintLine2 = panelDim:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     dimHintLine2:SetPoint("TOP", dimHintLine1, "BOTTOM", 0, -4)
     dimHintLine2:SetText("|cFF888888Go ahead, click away.\nThis is the one time we'll allow it.|r")
@@ -475,7 +473,6 @@ local function BuildHomeTab()
             .. "minimap button.")
     end
     applyDescText()
-    Theme.RegisterRetinter(applyDescText)
 
     local urlLabel = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     urlLabel:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -16)
@@ -514,7 +511,6 @@ local function BuildHomeTab()
             .. "setting, or map location.")
     end
     applyPromo()
-    Theme.RegisterRetinter(applyPromo)
     promo:SetHeight((promoText:GetStringHeight() or 48) + 2)
 
     promo:SetScript("OnHyperlinkClick", function(_, link)
@@ -548,42 +544,6 @@ local function BuildGeneralTab()
     local tab = nav:AddTab("General")
     local y = -6
     local _
-
-    local themeChoices = {}
-    for i = 1, #Theme.THEME_ORDER do
-        local name = Theme.THEME_ORDER[i]
-        themeChoices[i] = { label = name, value = name }
-    end
-    _, y = AddFlyoutRow(tab, y, "Color Theme", themeChoices,
-        function() return BoundToLearn.db.options.colorTheme end,
-        function(value)
-            if BoundToLearn.db.options.colorTheme == value then return end
-            BoundToLearn.db.options.colorTheme = value
-            -- Apply immediately: ApplyTheme mutates the palette and re-runs the
-            -- registered retinters, so the open window recolors with no reload.
-            if Theme.ApplyTheme then Theme.ApplyTheme(value) end
-        end,
-        {
-            -- Closed selector shows a dot in the active accent.
-            swatch = function(value)
-                local preset = Theme.THEMES[value]
-                return preset and preset[1] or nil
-            end,
-            -- Each flyout row shows its own accent dot.
-            styleFn = function(optBtn, choice, lbl)
-                local preset = Theme.THEMES[choice.value]
-                if not preset then return end
-                local dot = CreateFrame("Frame", nil, optBtn)
-                dot:SetSize(12, 12)
-                dot:SetPoint("RIGHT", optBtn, "RIGHT", -6, 0)
-                Theme.Round(dot)
-                Theme.SetBarHeight(dot, 12)
-                Theme.SetBorderShown(dot, false)
-                Theme.SetFillColor(dot, preset[1])
-                lbl:SetPoint("RIGHT", optBtn, "RIGHT", -22, 0)
-                optBtn._rightIconW = 12 + 8
-            end,
-        })
 
     _, y = AddCheckbox(tab, y, "Mute Chat Messages",
         function() return BoundToLearn.db.options.muteChat end,
@@ -829,7 +789,7 @@ local function BuildFrame()
         end
         if linkDialog then linkDialog:Hide() end
     end)
-    tinsert(UISpecialFrames, "BoundToLearnOptionsFrame")
+    Utils.CloseOnEscape(optionsFrame)
 
     local close = Theme.CreateCloseButton(optionsFrame, function() optionsFrame:Hide() end)
     close:SetPoint("TOPRIGHT", -8, -8)

@@ -262,6 +262,10 @@ end
 
 function PingGame:Resume()
     if not isPaused then return end
+    if InCombatLockdown() then
+        BoundToLearn:Print("Resume once you are out of combat.")
+        return
+    end
     isPaused = false
     local pauseDuration = GetTime() - pauseStartTime
     gameStartTime = gameStartTime + pauseDuration

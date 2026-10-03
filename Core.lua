@@ -6,6 +6,7 @@ local pairs   = Utils.pairs
 local type    = Utils.type
 local mmin, mmax = Utils.mmin, Utils.mmax
 local mfloor  = Utils.mfloor
+local mceil   = Utils.mceil
 local ipairs  = Utils.ipairs
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK
@@ -103,7 +104,6 @@ local DB_DEFAULTS = {
         firstRun = true,
         showGameWarning = true,
         muteChat = false,
-        colorTheme = "Blue",
     },
     leaderboard = {
         Easy = {},
@@ -170,10 +170,7 @@ local function OnInitialize()
         BoundToLearnDB.stats.scoreScaleV2 = true
     end
 
-    -- Apply the saved color theme before any UI is built.
-    if ns.Theme and ns.Theme.ApplyTheme then
-        ns.Theme.ApplyTheme(BoundToLearnDB.options.colorTheme)
-    end
+    BoundToLearnDB.options.colorTheme = nil   -- the color themes are gone
 
     -- Crash recovery for the round music fade: if a round set the Music volume
     -- low/zero for a fade and a crash skipped the restore, put it back.
@@ -355,6 +352,18 @@ local function OnInitialize()
             if ns.PingGameUI then ns.PingGameUI:ToggleDebugHitbox() end
         elseif msg == "wheeldbg" then
             if ns.GameUI then ns.GameUI:DumpWheel() end
+        elseif msg:sub(1, 11) == "layoutcheck" then
+            ns.LayoutCheck:Run(msg:sub(13))
+        elseif msg == "first" then
+            BoundToLearn:ShowWelcome()
+        elseif msg == "songcheck" then
+            local unplayable, disagree, total = ns.SongData.CheckTracks()
+            Utils.Print(sformat("%d of %d tracks play here. Unplayable: %s",
+                total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none"))
+            if Utils.IS_FOREVER then
+                Utils.Print(sformat("Differs from the Forever list: %s",
+                    #disagree > 0 and table.concat(disagree, " ") or "none"))
+            end
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
@@ -392,7 +401,9 @@ local function OnPlayerLogin()
         end
     end)
 
+    -- Once per account, for a new install: the flag clears as it is queued.
     if BoundToLearn.db.options.firstRun then
+        BoundToLearn.db.options.firstRun = false
         C_Timer.After(2, function()
             BoundToLearn:ShowWelcome()
         end)
@@ -609,9 +620,8 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:EnableMouse(true)
         ns.Theme.StylePanel(minimapMenu, 0.97)
         minimapMenu:Hide()
-        -- Register with the escape stack so Esc closes the menu instead of falling
-        -- through and opening the game menu.
-        tinsert(UISpecialFrames, "BoundToLearnMinimapMenu")
+        -- Esc closes the menu instead of falling through to the game menu.
+        Utils.CloseOnEscape(minimapMenu)
 
         local menuEntries = {
             { header = "Games" },
@@ -675,9 +685,16 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:SetSize(140, -yOff + 5)
 
         minimapMenu:SetScript("OnShow", function(self)
+            -- 130 is a floor: rows widen to the longest label.
+            local rowWidth = 130
             for _, entry in ipairs(menuBtns) do
                 entry.btn:SetText(entry.getText())
+                rowWidth = mmax(rowWidth, mfloor(entry.btn:GetFontString():GetStringWidth()) + 20)
             end
+            for _, entry in ipairs(menuBtns) do
+                entry.btn:SetWidth(rowWidth)
+            end
+            self:SetWidth(rowWidth + 10)
             self:SetScript("OnUpdate", function(self)
                 if not self:IsMouseOver() and not (minimapButton and minimapButton:IsMouseOver())
                    and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
@@ -735,44 +752,52 @@ function BoundToLearn:ShowWelcome()
     titleRule:SetPoint("TOPLEFT", 16, -40)
     titleRule:SetPoint("TOPRIGHT", -16, -40)
 
-    local GOLD, ACC, WARN = ns.Theme.GOLD_HEX, ns.Theme.ACCENT_HEX, ns.Theme.OKAY_HEX
-    local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    body:SetPoint("TOPLEFT", 20, -52)
-    body:SetPoint("TOPRIGHT", -20, -52)
-    body:SetJustifyH("LEFT")
-    body:SetSpacing(3)
-    body:SetText(
-        "|cFF" .. GOLD .. "Keybind Tracker|r\n" ..
-        "Automatically tracks whether you use keybinds or click " ..
-        "your abilities. A small floating widget shows your keybind " ..
-        "ratio in real time. The goal: build muscle memory so " ..
-        "keybinds become second nature.\n\n" ..
-        "|cFF" .. GOLD .. "Practice Game|r\n" ..
-        "A rhythm-based minigame where spell icons fall toward " ..
-        "your action bar. Press the correct keybind at the right time " ..
-        "to score points. Build combos for multipliers and bonus rewards.\n\n" ..
-        "|cFF" .. WARN .. "Note:|r Starting the practice game will |cFF" .. WARN .. "temporarily " ..
-        "disable your abilities|r so keypresses are scored instead of " ..
-        "casting spells. Your abilities return to normal the moment the " ..
-        "game ends. The game cannot run during combat.\n\n" ..
-        "|cFF" .. GOLD .. "Getting Started|r\n" ..
-        "Use |cFF" .. ACC .. "/btl|r to see all commands, or right-click the " ..
-        "minimap button for quick access to options."
-    )
+    -- Sections: a centered header over a left-aligned paragraph.
+    local ACC = ns.Theme.ACCENT_HEX
+    local sections = {
+        { "Keybind Tracker",
+          "Automatically tracks whether you use keybinds or click your abilities. " ..
+          "A small floating widget shows your keybind ratio in real time. The goal: " ..
+          "build muscle memory so keybinds become second nature." },
+        { "Practice Game",
+          "A rhythm-based minigame where spell icons fall toward your action bar. " ..
+          "Press the correct keybind at the right time to score points. Build combos " ..
+          "for multipliers and bonus rewards." },
+        { "Getting Started",
+          "Use |cFF" .. ACC .. "/btl|r to see all commands, or right-click the minimap " ..
+          "button for quick access to options." },
+    }
+    local PAD, y = 20, -52
+    local textWidth = f:GetWidth() - PAD * 2
+    for _, section in ipairs(sections) do
+        local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOP", 0, y)
+        header:SetText(section[1])
+        y = y - header:GetStringHeight() - 4
+        local text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("TOPLEFT", PAD, y)
+        text:SetWidth(textWidth)
+        text:SetJustifyH("LEFT")
+        text:SetSpacing(3)
+        text:SetText(section[2])
+        y = y - text:GetStringHeight() - 14
+    end
 
-    local cb = ns.Theme.CreateToggle(f, "Don't show this again", nil, 190)
-    cb:SetPoint("BOTTOMLEFT", 16, 18)
-    cb:SetChecked(false)
+    -- Shown once per account; unticking the box brings it back next login.
+    local cb = ns.Theme.CreateToggle(f, "Don't show again")
+    cb:SetWidth(mceil(cb.Text:GetUnboundedStringWidth()) + 26)
+    cb:SetPoint("BOTTOMRIGHT", -14, 14)
+    cb:SetChecked(true)
 
-    local btn = ns.Theme.CreateAccentButton(f, "Got It", 100, 26)
-    btn:SetPoint("BOTTOMRIGHT", -16, 16)
     local function dismiss()
-        if cb:GetChecked() then
-            BoundToLearn.db.options.firstRun = false
-        end
+        BoundToLearn.db.options.firstRun = not cb:GetChecked()
         f:Hide()
     end
+    local btn = ns.Theme.CreateAccentButton(f, "Got It", 100, 26)
+    btn:SetPoint("BOTTOM", 0, 16)
     btn:SetScript("OnClick", dismiss)
+    -- Tall enough for the text above the button row.
+    f:SetHeight(-y + 50)
 
     local close = ns.Theme.CreateCloseButton(f, dismiss)
     close:SetPoint("TOPRIGHT", -8, -8)
@@ -789,7 +814,9 @@ local function ShowGameConfirm()
         local f = CreateFrame("Frame", "BoundToLearnGameConfirm", UIParent)
         f:SetSize(340, 200)
         f:SetPoint("CENTER", 0, 60)
-        f:SetFrameStrata("DIALOG")
+        -- Above the song select (FULLSCREEN), which Start is pressed from.
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetFrameLevel(200)
         ns.Theme.StylePanel(f)
         f:EnableMouse(true)
 
@@ -805,8 +832,9 @@ local function ShowGameConfirm()
             "Your abilities return to normal when the game ends."
         )
 
+        -- Own row above the buttons, which fill the bottom edge.
         local cb = ns.Theme.CreateToggle(f, "Don't ask again", nil, 160)
-        cb:SetPoint("BOTTOMLEFT", 16, 16)
+        cb:SetPoint("BOTTOM", 0, 52)
         f.dontAsk = cb
 
         local startBtn = ns.Theme.CreateAccentButton(f, "Start", 100, 26)
@@ -825,22 +853,16 @@ local function ShowGameConfirm()
             f:Hide()
         end)
 
-        f:SetScript("OnKeyDown", function(self, key)
-            if key == "ESCAPE" then
-                self:SetPropagateKeyboardInput(false)
-                self:Hide()
-            else
-                self:SetPropagateKeyboardInput(true)
-            end
-        end)
-
         f:Hide()
+        Utils.CloseOnEscape(f)
         gameConfirmFrame = f
     end
 
     gameConfirmFrame.dontAsk:SetChecked(false)
     gameConfirmFrame:Show()
 end
+
+BoundToLearn.ShowGameConfirm = ShowGameConfirm
 
 function BoundToLearn:OpenGame()
     if ns.Game and ns.Game:IsRunning() then

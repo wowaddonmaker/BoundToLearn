@@ -113,6 +113,8 @@ local BACKGROUNDS = {
     { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 12000, label = "Score 12000+" } },
     { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 45, label = "45+ combo" } },
 }
+-- Forever has no Midnight backdrop art.
+if Utils.IS_FOREVER then BACKGROUNDS[#BACKGROUNDS] = nil end
 for i = 1, #BACKGROUNDS do
     local bg = BACKGROUNDS[i]
     bg.name = _G[bg.nameKey] or bg.nameFallback or bg.nameKey
@@ -592,10 +594,13 @@ function PingGameUI:CreateUI()
     mainFrame:SetScript("OnDragStop", mainFrame.StopMovingOrSizing)
     mainFrame:Hide()
     mainFrame:SetScript("OnHide", function()
+        -- Closing the window ends a round still in play (or paused).
+        local PG = ns.PingGame
+        if PG and PG:IsRunning() then PG:Stop() end
         StopBackgroundMusic()
     end)
 
-    tinsert(UISpecialFrames, "BoundToLearnPingGame")
+    Utils.CloseOnEscape(mainFrame)
 
     -- Title
     local title = ns.Theme.CreateTitle(mainFrame, "Ping Trainer", 20)
@@ -706,6 +711,7 @@ function PingGameUI:CreateUI()
 
     -- Game area with background
     gameArea = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    gameArea._btlNoLayoutCheck = true   -- targets spawn anywhere, over each other
     gameArea:SetSize(GAME_WIDTH, GAME_HEIGHT)
     gameArea:SetPoint("TOP", 0, -54)
     gameArea:SetBackdrop({
@@ -1094,7 +1100,8 @@ function PingGameUI:CreateStartScreen()
     -- ===== Start button (centered, above bottom section) =====
     local startBtn = ns.Theme.CreateAccentButton(startFrame, "Start", 180, 42)
     startBtn:SetPoint("BOTTOM", 0, 110)
-    startBtn._label:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
+    startBtn:SetNormalFontObject("GameFontNormalLarge")
+    startBtn:SetHighlightFontObject("GameFontHighlightLarge")
     startBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         if ns.PingGame then ns.PingGame:Start() end
@@ -1348,7 +1355,7 @@ function PingGameUI:CreateStartScreen()
         startFrame.keybindBtns[i] = bindBtn
     end
 
-    startFrame:SetScript("OnHide", function()
+    local function CancelBinding()
         if bindingInProgress then
             bindingInProgress:EnableKeyboard(false)
             bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "|cFF666666unbound|r")
@@ -1356,9 +1363,14 @@ function PingGameUI:CreateStartScreen()
             ns.Theme.SetFillColor(bindingInProgress, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
         end
+    end
+    startFrame:SetScript("OnHide", function()
+        CancelBinding()
         if mapDropdown then mapDropdown:Hide() end
-
     end)
+    -- A key capture cannot be released in a fight; drop it at the pull.
+    startFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    startFrame:SetScript("OnEvent", CancelBinding)
 
     startFrame:Hide()
 end
@@ -2019,10 +2031,14 @@ function PingGameUI:ReleaseTarget(target)
     activeTargetFrames[target.id] = nil
 end
 
+-- The key catcher goes with the pause: combat pauses the round, and a
+-- catcher left up in a fight can swallow every key.
 function PingGameUI:ShowPause()
     if pauseOverlay then pauseOverlay:Show() end
+    if gameArea then gameArea.inputFrame:Hide() end
 end
 
 function PingGameUI:HidePause()
     if pauseOverlay then pauseOverlay:Hide() end
+    if gameArea then gameArea.inputFrame:Show() end
 end

@@ -11,9 +11,8 @@ ns.Theme = Theme
 local Utils = ns.Utils
 local CreateFrame = CreateFrame
 local unpack, pairs = unpack, pairs
-local mmin, mmax, mfloor = math.min, math.max, math.floor
+local mmax, mfloor = math.max, math.floor
 local mpi = math.pi
-local CreateColor = CreateColor
 
 local TEX_FILL   = "Interface\\AddOns\\BoundToLearn\\media\\CombinedFill"
 local TEX_BORDER = "Interface\\AddOns\\BoundToLearn\\media\\CombinedBorder"
@@ -40,11 +39,6 @@ local C = {
     BTN_DISABLED     = {0.090, 0.080, 0.072},
 
     -- Toggle track states
-    TOGGLE_ON        = {0.92, 0.50, 0.16},
-    TOGGLE_ON_DIS    = {0.42, 0.26, 0.12},
-    TOGGLE_OFF       = {0.23, 0.22, 0.21},
-    TOGGLE_OFF_DIS   = {0.14, 0.13, 0.12},
-    KNOB             = {0.97, 0.96, 0.95},
 
     -- Text
     TEXT_PRIMARY     = {1.00, 0.97, 0.86},      -- cream headings
@@ -76,34 +70,6 @@ function Theme.RGB(c, alpha)
     return c[1], c[2], c[3], alpha
 end
 local RGB = Theme.RGB
-
---------------------------------------------------------------------------
--- Live retint: themed elements register a closure that re-applies their
--- accent-family colors from Theme.C. Theme.ApplyTheme mutates the palette in
--- place, then runs every registered closure so already-built frames recolor
--- without a reload. Each run is guarded so one bad element cannot break the
--- pass; registration is once-per-frame so the registry stays bounded.
---------------------------------------------------------------------------
-Theme._retinters = {}
-function Theme.RegisterRetinter(fn)
-    Theme._retinters[#Theme._retinters + 1] = fn
-end
-
-function Theme.RunRetinters()
-    local rt = Theme._retinters
-    for i = 1, #rt do
-        pcall(rt[i])
-    end
-end
-
--- The exact C tables ApplyTheme mutates. A rounded-rect fill painted from one
--- of these must retint; fills from fixed neutrals (greys, dark chrome, knob,
--- gold, insets) never change hue and are left alone.
-local THEMED_FILLS = {
-    [C.ACCENT] = true, [C.ACCENT_DIM] = true, [C.ACCENT_BRIGHT] = true,
-    [C.TOGGLE_ON] = true, [C.TOGGLE_ON_DIS] = true,
-    [C.BTN_NORMAL] = true, [C.BTN_HOVER] = true, [C.BTN_PRESSED] = true,
-}
 
 -- Delayed hover tooltip where the caller populates GameTooltip themselves.
 -- buildFn(self) runs 0.4s after mouse-enter (a short grace delay); the
@@ -226,24 +192,6 @@ end
 
 function Theme.SetFillColor(frame, color, a)
     Theme.SetFill(frame, color[1], color[2], color[3], a or color[4] or 1)
-    -- Remember accent-family fills (matched by table identity) so a later
-    -- theme switch can re-apply them live. Register once per frame.
-    if THEMED_FILLS[color] then
-        frame._themedFill = color
-        frame._themedFillAlpha = a
-        if not frame._fillRetinter then
-            frame._fillRetinter = true
-            Theme.RegisterRetinter(function()
-                local col = frame._themedFill
-                if col and frame.rr then
-                    Theme.SetFill(frame, col[1], col[2], col[3],
-                        frame._themedFillAlpha or col[4] or 1)
-                end
-            end)
-        end
-    else
-        frame._themedFill = nil
-    end
 end
 
 function Theme.SetBorderColor(frame, r, g, b, a)
@@ -348,70 +296,45 @@ function Theme.ShowArt(frame, shown)
 end
 
 --------------------------------------------------------------------------
--- Panel gloss: single vertical gradient sampled per 9-slice cell, brightness
--- ramp packed into the bottom 10% so banding collapses to a few pixels.
+-- Panels wear the client's own frame art, body and border, so retail,
+-- Forever and Era each show their native look: the dark dialog frame on
+-- windows, the tooltip frame on menus and small panels.
 --------------------------------------------------------------------------
-local GLOSS_DARK_FRAC = 0.90
-local function Smoothstep(t)
-    if t <= 0 then return 0 end
-    if t >= 1 then return 1 end
-    return t * t * (3 - 2 * t)
-end
-local function Lerp(a, b, t) return a + (b - a) * t end
+local DIALOG_BG = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark"
+local DIALOG_BG_INSET = 7
 
-local function GlossColorAt(y, height, base, top)
-    local t = y / height
-    if t < GLOSS_DARK_FRAC then
-        t = 0
-    else
-        t = Smoothstep((t - GLOSS_DARK_FRAC) / (1 - GLOSS_DARK_FRAC))
-    end
-    return Lerp(base[1], top[1], t), Lerp(base[2], top[2], t), Lerp(base[3], top[3], t)
-end
-
-local function GlossRamp(cell, yTop, yBot, height, base, top)
-    if not cell then return end
-    local r1, g1, b1 = GlossColorAt(yTop, height, base, top)
-    local r2, g2, b2 = GlossColorAt(yBot, height, base, top)
-    cell:SetGradient("VERTICAL", CreateColor(r2, g2, b2, 1), CreateColor(r1, g1, b1, 1))
+local function CreateWindowArt(frame)
+    local art = CreateFrame("Frame", nil, frame, "NineSlicePanelTemplate")
+    art:SetUsingParentLevel(true)
+    -- Border over the window's own art; the client's default layer is under it.
+    art.layoutTextureLayer = "OVERLAY"
+    NineSliceUtil.ApplyLayoutByName(art, "Dialog")
+    local bg = art:CreateTexture(nil, "BACKGROUND", nil, -5)
+    bg:SetTexture(DIALOG_BG, "REPEAT", "REPEAT")
+    bg:SetHorizTile(true)
+    bg:SetVertTile(true)
+    bg:SetPoint("TOPLEFT", DIALOG_BG_INSET, -DIALOG_BG_INSET)
+    bg:SetPoint("BOTTOMRIGHT", -DIALOG_BG_INSET, DIALOG_BG_INSET)
+    return art
 end
 
-local GLOSS_BASE = {0.036, 0.033, 0.030}
-local GLOSS_TOP  = {0.22, 0.15, 0.09}
-
-local function ApplyGloss(frame)
-    local fill = frame.rr and frame.rr.fill
-    if not fill then return end
-    local height = frame:GetHeight()
-    if not height or height <= 0 then return end
-    local corner = (frame.rrBarHeight or 32) / 2
-    GlossRamp(fill.tl, 0, corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.tm, 0, corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.tr, 0, corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.ml, corner, height - corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.mm, corner, height - corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.mr, corner, height - corner, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.bl, height - corner, height, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.bm, height - corner, height, height, GLOSS_BASE, GLOSS_TOP)
-    GlossRamp(fill.br, height - corner, height, height, GLOSS_BASE, GLOSS_TOP)
+local function CreateMenuArt(frame)
+    local art = CreateFrame("Frame", nil, frame, "TooltipBackdropTemplate")
+    art:SetAllPoints()
+    art:SetUsingParentLevel(true)
+    return art
 end
-Theme.ApplyGloss = ApplyGloss
 
--- One-call dark glossy panel background (window bodies, popups). The outline is
--- the addon's own soft rounded-rect nine-slice (the same CombinedBorder texture
--- the search results window uses), not a low-res tooltip/dialog edge.
-function Theme.StylePanel(frame, alpha)
-    Theme.Round(frame)
-    Theme.SetBarHeight(frame, 24)
-    Theme.SetBorderShown(frame, true)
-    Theme.SetFill(frame, 0.045, 0.042, 0.038, 1)
-    Theme.SetFillAlpha(frame, alpha or 1)
-    ApplyGloss(frame)
-    if not frame._btlGlossHooked then
-        frame._btlGlossHooked = true
-        frame:HookScript("OnSizeChanged", ApplyGloss)
-        -- The bottom sheen is tinted from the accent; re-apply it on a switch.
-        Theme.RegisterRetinter(function() ApplyGloss(frame) end)
+-- One-call native panel (window bodies, popups). kind is "window" or
+-- "menu"; a panel given an alpha is a menu.
+-- Every styled panel, for the layout checker at the end of this file.
+Theme.panels = {}
+
+function Theme.StylePanel(frame, alpha, kind)
+    if not frame._btlArt then
+        kind = kind or (alpha and "menu" or "window")
+        frame._btlArt = (kind == "window" and CreateWindowArt or CreateMenuArt)(frame)
+        Theme.panels[#Theme.panels + 1] = frame
     end
     return frame
 end
@@ -434,127 +357,50 @@ function Theme.StyleCard(frame, color, barH, showBorder)
 end
 
 --------------------------------------------------------------------------
--- Modern pill button
+-- Buttons are the client's own, so each client shows its native art.
 --------------------------------------------------------------------------
 function Theme.CreateButton(parent, text, width, height)
-    local btn = CreateFrame("Button", nil, parent)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetSize(width or 120, height or 24)
-    Theme.Round(btn)
-    Theme.SetBarHeight(btn, mmin(height or 24, 11))
-    Theme.SetBorderShown(btn, false)
-    Theme.SetFillColor(btn, C.BTN_NORMAL)
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("CENTER")
-    label:SetText(text or "")
-    label:SetTextColor(RGB(C.TEXT_PRIMARY, 1))
-    btn._label = label
-    btn.SetText = function(self, v) self._label:SetText(v or "") end
-    btn.GetText = function(self) return self._label:GetText() or "" end
-    btn.SetTextColor = function(self, ...) self._label:SetTextColor(...) end
-
-    local function paint(color)
-        if btn:IsEnabled() then Theme.SetFillColor(btn, color) end
-    end
-    btn:SetScript("OnEnter", function() paint(C.BTN_HOVER) end)
-    btn:SetScript("OnLeave", function() paint(C.BTN_NORMAL) end)
-    btn:SetScript("OnMouseDown", function() paint(C.BTN_PRESSED) end)
-    btn:SetScript("OnMouseUp", function()
-        paint(btn:IsMouseOver() and C.BTN_HOVER or C.BTN_NORMAL)
-    end)
-    btn:HookScript("OnDisable", function() Theme.SetFillColor(btn, C.BTN_DISABLED); label:SetTextColor(RGB(C.TEXT_DISABLED, 1)) end)
-    btn:HookScript("OnEnable", function() Theme.SetFillColor(btn, C.BTN_NORMAL); label:SetTextColor(RGB(C.TEXT_PRIMARY, 1)) end)
+    btn:SetText(text or "")
+    btn._label = btn:GetFontString()
     return btn
 end
 
--- Primary (accent-filled) action button variant.
-function Theme.CreateAccentButton(parent, text, width, height)
-    local btn = Theme.CreateButton(parent, text, width, height)
-    local function paint(color) if btn:IsEnabled() then Theme.SetFillColor(btn, color) end end
-    Theme.SetFillColor(btn, C.ACCENT_DIM)
-    btn:SetScript("OnEnter", function() paint(C.ACCENT) end)
-    btn:SetScript("OnLeave", function() paint(C.ACCENT_DIM) end)
-    btn:SetScript("OnMouseDown", function() paint(C.ACCENT_DIM) end)
-    btn:SetScript("OnMouseUp", function() paint(btn:IsMouseOver() and C.ACCENT or C.ACCENT_DIM) end)
-    btn._label:SetTextColor(1, 1, 1, 1)
-    -- CreateButton's OnEnable restores the neutral fill; re-assert the accent
-    -- fill so a disabled-then-enabled accent button keeps its accent look.
-    btn:HookScript("OnEnable", function()
-        Theme.SetFillColor(btn, C.ACCENT_DIM)
-        btn._label:SetTextColor(1, 1, 1, 1)
-    end)
-    return btn
-end
+-- The client has one button style; a primary action is told by its place.
+Theme.CreateAccentButton = Theme.CreateButton
 
 --------------------------------------------------------------------------
--- Toggle switch (drop-in for a check button: SetChecked/GetChecked/OnClick)
+-- Checkbox: the client's own check art in a row that is clickable across
+-- its whole width (SetChecked/GetChecked/OnClick as on any check button).
+-- A row with no label holds the caller's own content, so its box sits right.
 --------------------------------------------------------------------------
 function Theme.CreateToggle(parent, labelText, tooltipText, width)
-    local ROW_H, TW, TH = 26, 32, 16
-    local KNOB = TH - 2
-    local cb = CreateFrame("CheckButton", nil, parent)
+    local ROW_H, BOX = 26, 24
+    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonArtTemplate")
     cb:SetSize(width or 280, ROW_H)
     cb:RegisterForClicks("LeftButtonUp")
 
-    local text = cb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    text:SetPoint("LEFT", cb, "LEFT", 2, 0)
+    local side = (labelText and labelText ~= "") and "LEFT" or "RIGHT"
+    for _, art in ipairs({ cb:GetNormalTexture(), cb:GetPushedTexture(), cb:GetHighlightTexture(),
+                           cb:GetCheckedTexture(), cb:GetDisabledCheckedTexture() }) do
+        art:ClearAllPoints()
+        art:SetPoint(side, cb, side, 0, 0)
+        art:SetSize(BOX, BOX)
+    end
+
+    local text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("LEFT", cb, "LEFT", BOX - 2, 0)
+    text:SetPoint("RIGHT", cb, "RIGHT", -2, 0)
     text:SetJustifyH("LEFT")
     text:SetText(labelText or "")
     cb.Text = text
 
-    local track = CreateFrame("Frame", nil, cb)
-    track:SetSize(TW, TH)
-    track:SetPoint("RIGHT", cb, "RIGHT", -2, 0)
-    Theme.Round(track)
-    Theme.SetBarHeight(track, TH)
-    Theme.SetBorderShown(track, false)
-    cb.track = track
-    text:SetPoint("RIGHT", track, "LEFT", -8, 0)
-
-    local knob = CreateFrame("Frame", nil, track)
-    knob:SetSize(KNOB, KNOB)
-    Theme.Round(knob)
-    Theme.SetBarHeight(knob, KNOB)
-    Theme.SetBorderShown(knob, false)
-    Theme.SetFillColor(knob, C.KNOB)
-    cb.knob = knob
-
-    local function paint(self)
-        local enabled = self:IsEnabled()
-        local checked = self:GetChecked()
-        if checked and enabled then
-            Theme.SetFillColor(track, C.TOGGLE_ON); text:SetTextColor(1, 1, 1, 1)
-        elseif checked then
-            Theme.SetFillColor(track, C.TOGGLE_ON_DIS); text:SetTextColor(0.55, 0.55, 0.55, 1)
-        elseif enabled then
-            Theme.SetFillColor(track, C.TOGGLE_OFF); text:SetTextColor(RGB(C.TEXT_BODY, 1))
-        else
-            Theme.SetFillColor(track, C.TOGGLE_OFF_DIS); text:SetTextColor(0.45, 0.45, 0.45, 1)
-        end
-        knob:ClearAllPoints()
-        knob:SetPoint(checked and "RIGHT" or "LEFT", track, checked and "RIGHT" or "LEFT", checked and -1 or 1, 0)
-    end
-
-    local rawSet = cb.SetChecked
-    cb.SetChecked = function(self, v) rawSet(self, v) paint(self) end
-    cb.RefreshVisual = paint
-    local rawSetScript = cb.SetScript
-    cb.SetScript = function(self, t, h)
-        if t == "OnClick" and h then
-            rawSetScript(self, "OnClick", function(s, ...) paint(s) h(s, ...) end)
-        else
-            rawSetScript(self, t, h)
-        end
-    end
-    cb:HookScript("OnClick", paint)
-    cb:HookScript("OnEnable", paint)
-    cb:HookScript("OnDisable", paint)
+    cb:HookScript("OnEnable", function() text:SetFontObject("GameFontHighlightSmall") end)
+    cb:HookScript("OnDisable", function() text:SetFontObject("GameFontDisableSmall") end)
     if tooltipText then
         Theme.AttachTooltip(cb, labelText, tooltipText)
     end
-    paint(cb)
-    -- Re-run the on/off visual on a theme switch so the accent track recolors.
-    Theme.RegisterRetinter(function() if cb.track then paint(cb) end end)
     return cb
 end
 
@@ -562,29 +408,10 @@ end
 -- Close button (styled X, replaces UIPanelCloseButton)
 --------------------------------------------------------------------------
 function Theme.CreateCloseButton(parent, onClose)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(18, 18)
-    -- Two rotated strokes make the x; no button shape, just the mark itself,
-    -- faint at rest and lighting up on hover. Strokes track the button size so
-    -- callers can resize freely.
-    local function MakeStroke()
-        local t = btn:CreateTexture(nil, "OVERLAY")
-        t:SetTexture("Interface\\Buttons\\WHITE8x8")
-        t:SetPoint("CENTER")
-        return t
-    end
-    local s1 = MakeStroke(); s1:SetRotation(math.pi / 4)
-    local s2 = MakeStroke(); s2:SetRotation(-math.pi / 4)
-    local function SizeStrokes(w, h)
-        local len = mmin(w, h) * 0.62   -- smaller mark with padding, not edge-to-edge
-        s1:SetSize(len, 1.6); s2:SetSize(len, 1.6)
-    end
-    SizeStrokes(btn:GetSize())
-    btn:HookScript("OnSizeChanged", function(_, w, h) SizeStrokes(w, h) end)
-    local function setX(r, g, b, a) s1:SetVertexColor(r, g, b, a); s2:SetVertexColor(r, g, b, a) end
-    setX(RGB(C.TEXT_DIM, 1))
-    btn:SetScript("OnEnter", function() setX(1, 1, 1, 1) end)
-    btn:SetScript("OnLeave", function() setX(RGB(C.TEXT_DIM, 1)) end)
+    -- The client's own close button, to match its border art.
+    local btn = CreateFrame("Button", nil, parent, "UIPanelCloseButtonNoScripts")
+    btn:SetSize(22, 22)
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
     btn:SetScript("OnClick", function()
         if Utils.PlayUISound then Utils.PlayUISound(Utils.SOUND_CLOSE) end
         if onClose then onClose() end
@@ -842,17 +669,6 @@ function Theme.CreateSidebar(parent, opts)
         return tabContent
     end
 
-    -- Nav buttons paint via SetFill (raw), so they are not caught by the
-    -- fill-color retinter; re-assert each button's current state on a switch.
-    Theme.RegisterRetinter(function()
-        for i = 1, #nav.buttons do
-            local navBtn = nav.buttons[i]
-            if navBtn and navBtn.label then
-                PaintNavButton(navBtn, nav.current == navBtn._navIndex and "active" or "clear")
-            end
-        end
-    end)
-
     return nav
 end
 
@@ -1047,8 +863,6 @@ function Theme.CreateFlyoutRow(parent, labelText, choices, getter, setter, opts)
     btnText:SetText(LabelFor(getter()))
     if updateSwatch then
         updateSwatch(getter())
-        -- Keep the closed swatch showing the active theme after a switch.
-        Theme.RegisterRetinter(function() updateSwatch(getter()) end)
     end
     local flyout = Theme.CreateFlyoutPanel(btn, btnW, #choices)
     Theme.AddFlyoutOptions(flyout, choices, btnW - 6, function(choice)
@@ -1202,8 +1016,8 @@ local DIALOG_STRATA = "TOOLTIP"
 local DIALOG_LEVEL = 5000
 
 -- A themed panel with a title line and a close-X, floating above everything.
--- The caller fills in body/buttons. name (if given) registers with
--- UISpecialFrames so Escape closes it. Returns the frame; call frame:Present()
+-- The caller fills in body/buttons. A named dialog closes on Escape
+-- (Utils.CloseOnEscape). Returns the frame; call frame:Present()
 -- to show it and re-assert its top-of-stack strata/level.
 function Theme.CreateDialogShell(name, width, height)
     local f = CreateFrame("Frame", name, UIParent)
@@ -1214,7 +1028,7 @@ function Theme.CreateDialogShell(name, width, height)
     f:SetFrameLevel(DIALOG_LEVEL)
     Theme.StylePanel(f)
     f:EnableMouse(true)
-    if name then Utils.tinsert(UISpecialFrames, name) end
+    if name then Utils.CloseOnEscape(f) end
 
     local titleFS = Theme.CreateTitle(f, "", 15)
     titleFS:SetPoint("TOP", 0, -14)
@@ -1339,54 +1153,283 @@ function Theme.ShowPrompt(opts)
 end
 
 --------------------------------------------------------------------------
--- Color themes: a preset accent hue drives the whole interactive palette.
--- Each preset gives the accent RGB + a text-safe hex; the button/toggle/gloss
--- tints are derived, so adding a theme is one line. Applied once on load from
--- the saved setting (a full effect requires reopening windows / reload).
+-- Accent family: the client's own gold, for the few themed pieces left.
 --------------------------------------------------------------------------
-Theme.THEMES = {
-    Orange = { {0.92, 0.50, 0.16}, "FF8A33" },
-    Blue   = { {0.26, 0.56, 0.92}, "4F9BFF" },
-    Green  = { {0.30, 0.72, 0.40}, "5FC46B" },
-    Yellow = { {0.95, 0.77, 0.16}, "FFD23F" },
-    Red    = { {0.86, 0.30, 0.30}, "F26666" },
-    Purple = { {0.62, 0.44, 0.90}, "B98CFF" },
-    Teal   = { {0.18, 0.70, 0.66}, "3FC7BC" },
-    Gray   = { {0.56, 0.58, 0.62}, "AEB2B8" },
-}
--- Blue is the default look, so it leads the picker order.
-Theme.THEME_ORDER = { "Blue", "Orange", "Green", "Yellow", "Red", "Purple", "Teal", "Gray" }
-Theme.activeTheme = "Orange"
-
 local function setC(key, r, g, b)
     local t = C[key]
     t[1], t[2], t[3] = r, g, b
 end
-
-function Theme.ApplyTheme(name)
-    local preset = Theme.THEMES[name]
-    if not preset then name, preset = "Orange", Theme.THEMES.Orange end
-    Theme.activeTheme = name
-    local ac = preset[1]
-    local r, g, b = ac[1], ac[2], ac[3]
-    setC("ACCENT", r, g, b)
-    setC("ACCENT_DIM", r * 0.48, g * 0.48, b * 0.48)
-    setC("ACCENT_BRIGHT", mmin(1, r * 1.15 + 0.10), mmin(1, g * 1.15 + 0.10), mmin(1, b * 1.15 + 0.10))
-    setC("TOGGLE_ON", r, g, b)
-    setC("TOGGLE_ON_DIS", r * 0.5, g * 0.5, b * 0.5)
-    -- Nudge the neutral button grays toward the accent hue.
-    setC("BTN_NORMAL", 0.17 + r * 0.05, 0.17 + g * 0.05, 0.17 + b * 0.05)
-    setC("BTN_HOVER", 0.24 + r * 0.07, 0.24 + g * 0.07, 0.24 + b * 0.07)
-    setC("BTN_PRESSED", 0.115 + r * 0.03, 0.115 + g * 0.03, 0.115 + b * 0.03)
-    Theme.ACCENT_HEX = preset[2]
-    GLOSS_TOP[1], GLOSS_TOP[2], GLOSS_TOP[3] = r * 0.22, g * 0.22, b * 0.22
-    -- Re-apply live: already-built frames read the mutated palette. Safe on
-    -- the login path too, where the registry is still empty.
-    Theme.RunRetinters()
-end
-
--- Blue is the addon's default look, so the factory colours are blue too (not the orange
--- literals above); Core re-applies the player's saved theme on login.
-Theme.ApplyTheme("Blue")
+setC("ACCENT", 1.00, 0.82, 0.00)
+setC("ACCENT_DIM", 0.48, 0.39, 0.00)
+setC("ACCENT_BRIGHT", 1.00, 0.90, 0.35)
+Theme.ACCENT_HEX = "FFD100"
 
 ns.Theme = Theme
+
+--------------------------------------------------------------------------
+do
+-- Layout checker (/btl layoutcheck): opens every screen in turn, reads the
+-- live screen rectangles of everything inside the addon's shown panels and
+-- reports controls or text that sit on top of each other or are crowded.
+-- "/btl layoutcheck here" checks only what is open. Findings also go to
+-- BoundToLearnDB.layoutReport.
+local LayoutCheck = {}
+ns.LayoutCheck = LayoutCheck
+
+local Utils = ns.Utils
+local sformat, mmax, mmin, mfloor = Utils.sformat, Utils.mmax, Utils.mmin, Utils.mfloor
+local tinsert, ipairs = Utils.tinsert, Utils.ipairs
+
+local MIN_OVERLAP = 3          -- screen pixels on both axes before it counts
+local MIN_GAP = 4              -- controls on one row closer than this are crowded
+local CONTROL_TYPES = { Button = true, CheckButton = true, EditBox = true, Slider = true }
+
+local function Label(obj)
+    local text = obj.GetText and obj:GetText()
+    if (not text or text == "") and obj.GetFontString then
+        local fs = obj:GetFontString()
+        text = fs and fs:GetText()
+    end
+    text = text and text:gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", "")
+    if text and text ~= "" then return '"' .. text:sub(1, 28) .. '"' end
+    return obj:GetDebugName():match("[^%.]+$") or obj:GetObjectType()
+end
+
+-- Screen rectangle of what is drawn: text uses its real width, not its anchors.
+local function ScreenRect(obj, isText)
+    local left, bottom, width, height = obj:GetRect()
+    if not left or width <= 0 or height <= 0 then return nil end
+    if isText then
+        local textW = mmin(width, obj:GetStringWidth())
+        local textH = mmin(height, obj:GetStringHeight())
+        local justify = obj:GetJustifyH()
+        if justify == "CENTER" then
+            left = left + (width - textW) / 2
+        elseif justify == "RIGHT" then
+            left = left + width - textW
+        end
+        bottom = bottom + (height - textH) / 2
+        width, height = textW, textH
+    end
+    local scale = obj:GetEffectiveScale()
+    return left * scale, bottom * scale, (left + width) * scale, (bottom + height) * scale
+end
+
+local function Clip(l, b, r, t, clip)
+    if not clip then return l, b, r, t end
+    return mmax(l, clip[1]), mmax(b, clip[2]), mmin(r, clip[3]), mmin(t, clip[4])
+end
+
+local function Shown(obj)
+    return obj:IsVisible() and obj:GetEffectiveAlpha() > 0.05
+end
+
+-- Walk a panel: collect controls and texts with their clipped screen rects.
+local function Collect(frame, items, clip, panelArea)
+    if frame._btlNoLayoutCheck or not Shown(frame) then return end
+    if frame.DoesClipChildren and frame:DoesClipChildren() then
+        local l, b, r, t = ScreenRect(frame)
+        if l then clip = { Clip(l, b, r, t, clip) } end
+    end
+    -- A control's own label is covered by the control's rectangle.
+    local ownText = not CONTROL_TYPES[frame:GetObjectType()]
+    for _, region in ipairs({ frame:GetRegions() }) do
+        if ownText and region:GetObjectType() == "FontString" and Shown(region) and (region:GetText() or "") ~= "" then
+            local l, b, r, t = ScreenRect(region, true)
+            if l then
+                l, b, r, t = Clip(l, b, r, t, clip)
+                if r - l > 0 and t - b > 0 then
+                    tinsert(items, { obj = region, owner = frame, text = true, l, b, r, t })
+                end
+            end
+        end
+    end
+    for _, child in ipairs({ frame:GetChildren() }) do
+        if CONTROL_TYPES[child:GetObjectType()] and Shown(child) and not child._btlNoLayoutCheck then
+            local l, b, r, t = ScreenRect(child)
+            if l then
+                l, b, r, t = Clip(l, b, r, t, clip)
+                -- A catcher or backdrop the size of the panel is not a control.
+                if r - l > 0 and t - b > 0 and (r - l) * (t - b) < panelArea * 0.5 then
+                    tinsert(items, { obj = child, owner = child, l, b, r, t })
+                end
+            end
+        end
+        Collect(child, items, clip, panelArea)
+    end
+end
+
+local function Inside(frame, ancestor)
+    while frame do
+        if frame == ancestor then return true end
+        frame = frame:GetParent()
+    end
+    return false
+end
+
+-- A control's own label, or something built inside it, is not an overlap.
+local function Related(a, b)
+    return Inside(a.owner, b.owner) or Inside(b.owner, a.owner)
+end
+
+function LayoutCheck:Scan()
+    local found = {}
+    local isPanel = {}
+    for _, panel in ipairs(ns.Theme.panels) do isPanel[panel] = true end
+    for _, panel in ipairs(ns.Theme.panels) do
+        -- A panel inside another panel is covered by the outer one's walk.
+        local nested, up = false, panel:GetParent()
+        while up do
+            if isPanel[up] then nested = true break end
+            up = up:GetParent()
+        end
+        if Shown(panel) and not nested then
+            local pl, pb, pr, pt = ScreenRect(panel)
+            if pl then
+                local items = {}
+                Collect(panel, items, nil, (pr - pl) * (pt - pb))
+                for i = 1, #items do
+                    local a = items[i]
+                    for j = i + 1, #items do
+                        local b = items[j]
+                        -- Text on text inside one frame is a deliberate stack more often than not.
+                        if not (a.text and b.text and a.owner == b.owner) and not Related(a, b) then
+                            local w = mmin(a[3], b[3]) - mmax(a[1], b[1])
+                            local h = mmin(a[4], b[4]) - mmax(a[2], b[2])
+                            if w >= MIN_OVERLAP and h >= MIN_OVERLAP then
+                                tinsert(found, sformat("%s over %s (%dx%d px) in %s",
+                                    Label(a.obj), Label(b.obj), mfloor(w), mfloor(h), Label(panel)))
+                            elseif not a.text and not b.text and h >= MIN_OVERLAP and w > -MIN_GAP then
+                                -- Side by side on one row with next to no gap.
+                                tinsert(found, sformat("%s crowds %s (%d px gap) in %s",
+                                    Label(a.obj), Label(b.obj), mfloor(mmax(0, -w)), Label(panel)))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return found
+end
+
+-- Screens the sweep can open by itself. Rounds in play (the in-round HUD,
+-- the quiz, a ping round) are left out: they take over the action bars.
+local FAKE_RESULTS = {
+    score = 1362, maxCombo = 15, totalNotes = 30, chartTotal = 96, notesShown = 30,
+    difficulty = "Medium", mode = "practice", duration = 60,
+    hitCounts = { perfect = 13, great = 12, good = 3, miss = 2, redHerring = 0 },
+}
+
+local function HideNamed(name)
+    local frame = _G[name]
+    if frame then frame:Hide() end
+end
+
+local function BuildScreens()
+    local GameUI, screens = ns.GameUI, {}
+    local function add(name, open, close) tinsert(screens, { name = name, open = open, close = close }) end
+
+    add("minimap menu", function() HideNamed("BoundToLearnMinimapMenu"); BoundToLearn:ShowMinimapMenu() end,
+        function() HideNamed("BoundToLearnMinimapMenu") end)
+    add("welcome", function() BoundToLearn:ShowWelcome() end, function() HideNamed("BoundToLearnWelcome") end)
+    add("start confirm", function() BoundToLearn.ShowGameConfirm() end, function() HideNamed("BoundToLearnGameConfirm") end)
+
+    add("game menu", function() GameUI:Initialize(); GameUI:ShowMainMenu() end, function() GameUI:HideMainMenu() end)
+    add("track select", function() GameUI:ShowSongSelect() end)
+    add("stats summary", function() GameUI:ShowStatsPage(); GameUI:SetStatsView("summary") end)
+    add("stats by song", function() GameUI:SetStatsView("song") end, function() GameUI:HideStatsPage() end)
+    local keptResults
+    add("round over", function()
+        keptResults = GameUI.lastResults
+        GameUI:ShowResultsOnSelect(FAKE_RESULTS)
+    end, function()
+        GameUI:ExitResultsMode()
+        GameUI.lastResults = keptResults
+        GameUI:HideSongSelect()
+    end)
+
+    ns.Options:Show()
+    local nav = BoundToLearnOptionsFrame.nav
+    for i = 1, #nav.buttons do
+        add("options tab " .. i, function() ns.Options:Show(); nav:SwitchToTab(i) end,
+            i == #nav.buttons and function() ns.Options:Hide() end or nil)
+    end
+    ns.Options:Hide()
+
+    for _, key in ipairs({ "tracker", "game", "quiz" }) do
+        add("statistics: " .. key, function() ns.StatsUI:Show(); ns.StatsUI:SetTab(key) end,
+            key == "quiz" and function() ns.StatsUI:Hide() end or nil)
+    end
+
+    local Audit = ns.KeybindAuditUI
+    add("audit setup", function() Audit:Show(); Audit:ShowSetup() end)
+    add("audit results", function() Audit:ShowResults() end)
+    add("audit methodology", function() Audit:ToggleMethodology() end,
+        function() Audit:ToggleMethodology(); Audit:Hide() end)
+
+    add("ping trainer", function() HideNamed("BoundToLearnPingGame"); ns.PingGameUI:Toggle() end,
+        function() HideNamed("BoundToLearnPingGame") end)
+    return screens
+end
+
+local function Record(line)
+    Utils.Print(line)
+    local log = BoundToLearnDB.layoutReport
+    log[#log + 1] = line
+end
+
+-- Scan what is on screen now and record it under a screen name.
+local function ScanScreen(name)
+    local found = LayoutCheck:Scan()
+    for _, line in ipairs(found) do Record(sformat("[%s] %s", name, line)) end
+    return #found
+end
+
+local SETTLE = 0.35   -- seconds for a screen to lay out before it is read
+local sweeping = false
+
+function LayoutCheck:Run(arg)
+    BoundToLearnDB.layoutReport = {}
+    if arg == "here" then
+        if ScanScreen("open now") == 0 then Utils.Print("No overlaps in what is open now.") end
+        return
+    end
+    if sweeping then return end
+    if InCombatLockdown() then
+        Utils.Print("Layout check runs out of combat.")
+        return
+    end
+
+    local screens = BuildScreens()
+    local index, total, failed = 0, 0, 0
+    sweeping = true
+    Utils.Print(sformat("Layout check: opening %d screens, hands off for %d seconds.",
+        #screens, mfloor(#screens * SETTLE) + 1))
+
+    local function Step()
+        local prev = screens[index]
+        if prev then
+            if not prev.skip then total = total + ScanScreen(prev.name) end
+            if prev.close then pcall(prev.close) end
+        end
+        index = index + 1
+        local screen = screens[index]
+        if not screen or InCombatLockdown() then
+            sweeping = false
+            Record(sformat("Layout check done: %d findings on %d screens, %d could not open.",
+                total, index - 1, failed))
+            return
+        end
+        -- One broken screen must not end the sweep; it is reported instead.
+        local ok, err = pcall(screen.open)
+        if not ok then
+            failed = failed + 1
+            Record(sformat("[%s] could not open: %s", screen.name, tostring(err)))
+            screens[index] = { name = screen.name, close = screen.close, skip = true }
+        end
+        C_Timer.After(SETTLE, Step)
+    end
+    Step()
+end
+end

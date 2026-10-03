@@ -34,6 +34,7 @@ local currentMode = "timed"  -- "timed", "practice", "competitive"
 local activeNotes = {}
 local availableSlots = {}
 local destroyedLanes = {}  -- [slotIndex] = expireTime
+local barExtents = {}      -- [barKey] = { l, r, b, t } screen px of each included bar
 
 -- Reverse lookup: keybind string -> slotInfo
 local keybindToSlot = {}
@@ -60,6 +61,24 @@ local gameModifiers = {}
 local SCORE_CAP = 10000
 local JUDGE_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.45, miss = 0 }
 local COMBO_THRESHOLDS = { 5, 10, 20, 35 }
+
+-- Bomb fuse and fake-note laugh. Forever lacks the two sound kits but ships
+-- their files, so it plays those directly.
+local FUSE_FILES = { 2066602, 2066603 }
+local LAUGH_FILES = { 541902, 541940, 541894, 541985 }
+local function PlayFuseSound()
+    if Utils.IS_FOREVER then
+        return PlaySoundFile(FUSE_FILES[math.random(#FUSE_FILES)], "SFX")
+    end
+    return PlaySound(268433, "SFX", false)
+end
+local function PlayLaughSound()
+    if Utils.IS_FOREVER then
+        PlaySoundFile(LAUGH_FILES[math.random(#LAUGH_FILES)], "SFX")
+    else
+        PlaySound(23330)
+    end
+end
 
 -- Focus (health) system
 local MAX_FOCUS = 100
@@ -302,12 +321,25 @@ function Game:DiscoverSlots()
         { key = "bar8",        bindPrefix = "MULTIACTIONBAR7BUTTON",  btnPrefix = "MultiBar7Button",           startSlot = 169 },
     }
     local seenTextures = {}
+    wipe(barExtents)
     for _, bar in ipairs(barMappings) do
         if bars[bar.key] then
             for i = 1, 12 do
                 local slot = bar.startSlot + (i - 1)
                 local btn = _G[bar.btnPrefix .. i]
                 if btn and btn:IsShown() then
+                    -- The whole bar counts, bound or not: the HUD spans it.
+                    local left = btn:GetLeft()
+                    if left then
+                        local scale = btn:GetEffectiveScale()
+                        local e = barExtents[bar.key]
+                        if not e then
+                            e = { l = math.huge, r = -math.huge, b = math.huge, t = -math.huge }
+                            barExtents[bar.key] = e
+                        end
+                        e.l, e.r = mmin(e.l, left * scale), mmax(e.r, btn:GetRight() * scale)
+                        e.b, e.t = mmin(e.b, btn:GetBottom() * scale), mmax(e.t, btn:GetTop() * scale)
+                    end
                     -- Read the button's CURRENT action, not the raw page slot.
                     -- Druid forms (and stance/bonus bars) remap the main bar,
                     -- so GetActionTexture(slot) returns a hidden other-form
@@ -972,13 +1004,29 @@ function Game:ComputeNoteLine(settings)
     return topY + settings.fallDistance + START_LINE_LIFT
 end
 
+-- Screen-pixel span (left, right) of the included horizontal bars, from the
+-- leftmost to the rightmost button. With only vertical bars, every bar counts.
+function Game:ComputeNoteSpan()
+    local left, right
+    for pass = 1, 2 do
+        for _, e in pairs(barExtents) do
+            if pass == 2 or (e.r - e.l) >= (e.t - e.b) then
+                left = left and mmin(left, e.l) or e.l
+                right = right and mmax(right, e.r) or e.r
+            end
+        end
+        if left then break end
+    end
+    return left, right
+end
+
 -- Place the start line + health bar up front (at game start) so neither jumps into
 -- place when the first notes spawn.
 function Game:PlaceNoteLine()
     local lineY = self:ComputeNoteLine(self:GetSettings())
     if lineY and ns.GameUI then
         ns.GameUI.noteHighwayTop = lineY
-        ns.GameUI:PlaceHealthBarAtLine(lineY)
+        ns.GameUI:PlaceHealthBarAtLine(lineY, self:ComputeNoteSpan())
     end
 end
 
@@ -989,7 +1037,7 @@ function Game:PrepChart(settings)
         if not lineY then return false end
         if ns.GameUI then
             ns.GameUI.noteHighwayTop = lineY
-            ns.GameUI:PlaceHealthBarAtLine(lineY)
+            ns.GameUI:PlaceHealthBarAtLine(lineY, self:ComputeNoteSpan())
         end
     end
     local fallSpeed = settings.fallSpeed
@@ -1180,7 +1228,7 @@ function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime, forcedFallT
     if ns.GameUI then ns.GameUI:AcquireNote(note) end
 
     if isBomb and BoundToLearn.db.game.soundEnabled then
-        local willPlay, handle = PlaySound(268433, "SFX", false)
+        local willPlay, handle = PlayFuseSound()
         if willPlay then note.bombSoundHandle = handle end
     end
 end
@@ -1380,7 +1428,7 @@ function Game:EvaluateRedHerring(note)
     end
 
     if BoundToLearn.db.game.soundEnabled then
-        PlaySound(23330)  -- goblin male laugh
+        PlayLaughSound()
     end
 
     UpdateFocus(-FOCUS_DRAIN.redHerring * GetFocusDrainScale())

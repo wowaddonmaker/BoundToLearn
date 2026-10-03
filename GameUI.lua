@@ -963,40 +963,12 @@ local function SetDonut(d, frac, r, g, b)
     end
 end
 
--- A renown-button textured bubble button, desaturated to the same cool silver as
--- the song wheel bubbles so the whole panel shares one colour scheme. An additive
--- highlight of the same shape gives a clear hover glow.
-local BUBBLE_SILVER = { 0.80, 0.83, 0.88 }
+-- The song select's buttons: the client's own button art.
 local function MakeBubbleButton(parent, text, w, h)
-    local b = CreateFrame("Button", nil, parent)
+    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(w, h)
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetAtlas("UI-Journeys-Renown-Button")
-    bg:SetDesaturated(true)
-    bg:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3])
-    b.bg = bg
-    local pressed = b:CreateTexture(nil, "BACKGROUND")
-    pressed:SetAllPoints()
-    pressed:SetAtlas("UI-Journeys-Renown-Button-pressed")
-    pressed:SetDesaturated(true)
-    pressed:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3])
-    pressed:Hide()
-    local hl = b:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetAllPoints()
-    hl:SetAtlas("UI-Journeys-Renown-Button")
-    hl:SetBlendMode("ADD")
-    hl:SetAlpha(0.28)
-    local label = b:CreateFontString(nil, "OVERLAY")
-    label:SetFont("Fonts\\FRIZQT__.TTF", mmax(12, mfloor(h * 0.5)), "OUTLINE")
-    label:SetPoint("CENTER")
-    label:SetText(text)
-    label:SetTextColor(1, 1, 1)
-    b.label = label
-    b:SetScript("OnMouseDown", function() bg:Hide(); pressed:Show() end)
-    b:SetScript("OnMouseUp", function() pressed:Hide(); bg:Show() end)
-    b:HookScript("OnEnter", function() bg:SetVertexColor(1.0, 1.04, 1.12) end)
-    b:HookScript("OnLeave", function() bg:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3]) end)
+    b:SetText(text)
+    b.label = b:GetFontString()
     return b
 end
 
@@ -1069,18 +1041,8 @@ function GameUI:ShowSongContextMenu(slot)
         catcher:RegisterForClicks("AnyUp")
         catcher:Hide()
         catcher:SetScript("OnClick", function(self) self:Hide() end)
-        -- First Esc closes just this menu: capture the key here and swallow it so
-        -- it doesn't fall through to close the whole song-select window.
-        catcher:SetScript("OnShow", function(self)
-            if InCombatLockdown() then return end
-            self:EnableKeyboard(true)
-            self:SetPropagateKeyboardInput(true)
-        end)
-        catcher:SetScript("OnKeyDown", function(self, key)
-            if InCombatLockdown() then return end
-            self:SetPropagateKeyboardInput(key ~= "ESCAPE")
-            if key == "ESCAPE" then self:Hide() end
-        end)
+        -- First Esc closes just this menu, not the song-select window under it.
+        Utils.CloseOnEscape(catcher)
 
         menu = CreateFrame("Frame", nil, catcher)
         menu:SetSize(150, 62)
@@ -1111,6 +1073,8 @@ function GameUI:ShowSongContextMenu(slot)
     menu.songKey = key
     local song = ns.SongData and ns.SongData.Get(key)
     menu.title:SetText((song and song.title) or key)
+    -- 150 is a floor: a long song title widens the menu to fit.
+    menu:SetWidth(mmax(150, mfloor(menu.title:GetUnboundedStringWidth()) + 24))
 
     local scale = UIParent:GetEffectiveScale()
     local cx, cy = GetCursorPosition()
@@ -1127,7 +1091,7 @@ function GameUI:CreateSongSelect()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     f:SetFrameStrata("FULLSCREEN")
     f:SetFrameLevel(70)
-    Theme.StylePanel(f, 0.96)
+    Theme.StylePanel(f, 0.96, "window")
     f:EnableMouse(true)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
@@ -1191,16 +1155,18 @@ function GameUI:CreateSongSelect()
     -- Slots live in an inset viewport so they are cut off at the interior
     -- border of the background art, not at the outer window edge.
     local wheelClip = CreateFrame("Frame", nil, f)
-    wheelClip:SetPoint("TOPLEFT", 250, -70)      -- dropped below the header row + search
+    wheelClip:SetPoint("TOPLEFT", 250, -86)      -- dropped below the header row + search
     wheelClip:SetPoint("BOTTOMRIGHT", -24, 14)   -- right edge sits at the interior border
     wheelClip:SetClipsChildren(true)
+    wheelClip._btlNoLayoutCheck = true   -- wheel bubbles stack by design
     f.wheelClip = wheelClip
 
     -- Search box above the wheel: filters the carousel by title or artist.
     local search = CreateFrame("EditBox", nil, f)
-    -- Below the header row (title + buttons), so it and the wheel sit clear of it.
-    search:SetPoint("TOPLEFT", 250, -40)
-    search:SetPoint("TOPRIGHT", -24, -40)
+    -- Under the backdrop art's header band (its gold line ends near -55) and
+    -- above the wheel, clear of both.
+    search:SetPoint("TOPLEFT", 250, -60)
+    search:SetPoint("TOPRIGHT", -24, -60)
     search:SetHeight(22)
     search:SetAutoFocus(false)
     search:SetFontObject("GameFontHighlightSmall")
@@ -1431,7 +1397,7 @@ function GameUI:CreateSongSelect()
     self:CreateResultsPanel(f)
 
     -- ESC closes the menu (and stops the preview music when it hides).
-    tinsert(UISpecialFrames, "BoundToLearnSongSelect")
+    Utils.CloseOnEscape(f)
     f:HookScript("OnHide", function() GameUI:StopSongPreview() end)
 
     songSelect = f
@@ -1552,10 +1518,11 @@ function GameUI:CreateResultsPanel(f)
     rp.songArtist:SetPoint("TOP", rp.songTitle, "BOTTOM", 0, -1)
     rp.songArtist:SetTextColor(1, 1, 1, 0.7)
 
-    -- Back to Tracks sits top-left like a return button (with a left arrow); Try
-    -- Again and Share are the primary actions, centered as a pair along the bottom.
-    rp.backBtn = MakeBubbleButton(rp, "|TInterface\\Buttons\\UI-SpellbookIcon-PrevPage-Up:14:14|t Back to Tracks", 150, 24)
+    -- A small Back top-left (its tooltip says where to); Try Again and Share
+    -- are the primary actions, centered as a pair along the bottom.
+    rp.backBtn = MakeBubbleButton(rp, "Back", 66, 22)
     rp.backBtn:SetPoint("TOPLEFT", 2, -4)
+    Theme.AttachTooltip(rp.backBtn, "Back to tracks")
     rp.backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ExitResultsMode()
@@ -1645,6 +1612,7 @@ function GameUI:ShowResultsOnSelect(results)
     for _, control in ipairs(songSelect.leftControls) do control:Hide() end
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
 
     local rp = songSelect.resultsPanel
     local totalNotes = results.totalNotes or 0
@@ -1742,6 +1710,7 @@ function GameUI:ExitResultsMode()
     for _, control in ipairs(songSelect.leftControls) do control:Show() end
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -1780,30 +1749,29 @@ function GameUI:CreateStatsPanel(f)
     -- the carousel.
     local backBtn = MakeBubbleButton(sp, "Back", 66, 22)
     backBtn:SetPoint("TOPLEFT", 2, -4)
+    Theme.AttachTooltip(backBtn, "Back to tracks")
     backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:HideStatsPage()
     end)
 
     local resetBtn = MakeBubbleButton(sp, "Reset Stats", 92, 22)
-    resetBtn:SetPoint("LEFT", backBtn, "RIGHT", 6, 0)
+    resetBtn:SetPoint("BOTTOMLEFT", 2, 10)
     resetBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ConfirmResetStats()
     end)
 
-    local title = sp:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
+    local title = sp:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -8)
     title:SetText("Your Stats")
-    title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     -- Summary / By Song toggle.
     sp.summaryBtn = MakeBubbleButton(sp, "Summary", 78, 20)
-    sp.summaryBtn:SetPoint("TOPRIGHT", -102, -5)
+    sp.summaryBtn:SetPoint("TOPRIGHT", -118, -5)
     sp.summaryBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("summary") end)
     sp.songBtn = MakeBubbleButton(sp, "By Song", 78, 20)
-    sp.songBtn:SetPoint("TOPRIGHT", -20, -5)
+    sp.songBtn:SetPoint("TOPRIGHT", -32, -5)
     sp.songBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("song") end)
 
     -- ===== Summary view: lifetime / overall stats =====
@@ -1812,22 +1780,17 @@ function GameUI:CreateStatsPanel(f)
     sp.summaryGroup = sum
     sp.values = {}
     local function stat(offsetX, y, key, label, big)
-        local val = sum:CreateFontString(nil, "OVERLAY")
-        val:SetFont("Fonts\\FRIZQT__.TTF", big and 28 or 19, "OUTLINE")
+        local val = sum:CreateFontString(nil, "OVERLAY", big and "GameFontHighlightHuge" or "GameFontHighlightLarge")
         val:SetPoint("TOP", sum, "TOP", offsetX, y)
-        val:SetTextColor(1, 1, 1)
         local lbl = sum:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("TOP", val, "BOTTOM", 0, -2)
         lbl:SetText(label)
-        lbl:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
         sp.values[key] = val
     end
     local function header(y, text)
-        local h = sum:CreateFontString(nil, "OVERLAY")
-        h:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        local h = sum:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h:SetPoint("TOP", 0, y)
         h:SetText(text)
-        h:SetTextColor(1, 0.82, 0)
         local line = sum:CreateTexture(nil, "ARTWORK")
         line:SetPoint("TOP", h, "BOTTOM", 0, -3)
         line:SetSize(360, 1)
@@ -1899,8 +1862,7 @@ function GameUI:BuildStatsSongView(sg, sp)
     nxt:SetPoint("TOPRIGHT", -20, -104)
     nxt:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:CycleStatsSong(1) end)
 
-    local nameFS = sg:CreateFontString(nil, "OVERLAY")
-    nameFS:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
+    local nameFS = sg:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     nameFS:SetPoint("LEFT", prev, "RIGHT", 6, 1)
     nameFS:SetPoint("RIGHT", nxt, "LEFT", -6, 1)
     nameFS:SetJustifyH("CENTER")
@@ -2250,6 +2212,7 @@ function GameUI:ShowStatsPage(songKey)
     for _, control in ipairs(songSelect.leftControls) do control:Hide() end
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
     if songSelect.searchBox then
         songSelect.searchBox:SetText("")
         songSelect.searchBox:Hide()
@@ -2268,6 +2231,7 @@ function GameUI:HideStatsPage()
     for _, control in ipairs(songSelect.leftControls) do control:Show() end
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -2870,11 +2834,23 @@ end
 
 -- Sit the health bar just above the note start line, so notes appear to fall out from
 -- under it. screenY is the shared start line in screen pixels (from PrepChart).
-function GameUI:PlaceHealthBarAtLine(screenY)
+-- spanLeft/spanRight (screen pixels) are the included horizontal action bars:
+-- the bar takes their full width, centered on them, and the life gauge takes
+-- up the slack. HUD_FIXED_W is everything on the bar but the gauge.
+local HUD_FIXED_W, HUD_MIN_GAUGE = 472, 60
+function GameUI:PlaceHealthBarAtLine(screenY, spanLeft, spanRight)
     local hf = self.healthFrame
     if not hf or not screenY then return end
+    local scale = hf:GetEffectiveScale()
     hf:ClearAllPoints()
-    hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / hf:GetEffectiveScale())
+    if spanLeft then
+        local width = mmax(HUD_FIXED_W + HUD_MIN_GAUGE, (spanRight - spanLeft) / scale)
+        hf:SetWidth(width)
+        hf.lifeBar:SetWidth(width - HUD_FIXED_W)
+        hf:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", (spanLeft + spanRight) / 2 / scale, (screenY + 6) / scale)
+    else
+        hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / scale)
+    end
 end
 
 function GameUI:UpdateLifeBar(pct)
@@ -3181,21 +3157,21 @@ function GameUI:CreateMainMenu()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     f:SetFrameStrata("FULLSCREEN")
     f:SetFrameLevel(70)
-    Theme.StylePanel(f, 0.96)
+    Theme.StylePanel(f, 0.96, "window")
     f:EnableMouse(true)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
-    tinsert(UISpecialFrames, "BoundToLearnIconGameMenu")
+    Utils.CloseOnEscape(f)
     f:Hide()
 
     local xbg = f:CreateTexture(nil, "ARTWORK")
     xbg:SetPoint("TOPLEFT", 7, -7)
     xbg:SetPoint("BOTTOMRIGHT", -7, 7)
     xbg:SetAlpha(0.85)
-    xbg:SetAtlas("ui-ej-midnight")
+    xbg:SetAtlas(ns.SongData.DEFAULT_BG)
     f.xpacBg = xbg
 
     local title = f:CreateFontString(nil, "OVERLAY")
@@ -3218,7 +3194,8 @@ function GameUI:CreateMainMenu()
     -- are chosen and the round begins.
     local startBtn = Theme.CreateAccentButton(f, "Start", 200, 42)
     startBtn:SetPoint("BOTTOM", 0, 24)
-    startBtn._label:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    startBtn:SetNormalFontObject("GameFontNormalLarge")
+    startBtn:SetHighlightFontObject("GameFontHighlightLarge")
     startBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         f:Hide()
@@ -4267,6 +4244,8 @@ function GameUI:ToggleShareMenu(parent)
             { label = "Guild",   chat = "GUILD" },
         }
 
+        -- 90 is a floor: rows widen to the longest channel name.
+        local rowWidth, rows = 90, {}
         for i, ch in ipairs(channels) do
             local btn = CreateFrame("Button", nil, menu)
             btn:SetSize(90, 22)
@@ -4274,6 +4253,8 @@ function GameUI:ToggleShareMenu(parent)
             btn:SetNormalFontObject("GameFontHighlightSmall")
             btn:SetHighlightFontObject("GameFontNormalSmall")
             btn:SetText(ch.label)
+            rowWidth = mmax(rowWidth, mfloor(btn:GetFontString():GetStringWidth()) + 20)
+            rows[i] = btn
             btn:SetScript("OnClick", function()
                 PlayUISound(SOUND_CLICK)
                 if self.lastResults then
@@ -4283,6 +4264,8 @@ function GameUI:ToggleShareMenu(parent)
                 menu:Hide()
             end)
         end
+        for i = 1, #rows do rows[i]:SetWidth(rowWidth) end
+        menu:SetWidth(rowWidth + 10)
 
         menu:SetScript("OnShow", function(self)
             self:SetScript("OnUpdate", function(self)

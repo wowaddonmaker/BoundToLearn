@@ -56,6 +56,88 @@ function Utils.PlayUISound(soundKitID)
     PlaySound(soundKitID)
 end
 
+-- WoW Forever (Interface 16001): mainline UI on the classic world.
+local tocVersion = select(4, GetBuildInfo())
+Utils.IS_FOREVER = tocVersion >= 16000 and tocVersion < 20000
+
+-- Esc closes our newest open window. Never UISpecialFrames: a frame of
+-- ours in that list taints the client's Esc walk. Escape is bound to our
+-- button while a window is up and handed back for combat.
+local InCombatLockdown = InCombatLockdown
+local escStack = {}
+local escClose = {}
+local escArmed = false
+local escPressed = false
+local escHeader = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+
+local function EscArm()
+    if InCombatLockdown() then return end
+    local want = #escStack > 0
+    if want == escArmed then return end
+    escArmed = want
+    if want then
+        escHeader:Execute([[ self:SetBindingClick(true, "ESCAPE", "BoundToLearnEscButton") ]])
+    else
+        escHeader:Execute([[ self:ClearBindings() ]])
+    end
+end
+
+local function EscRemove(frame)
+    for i = #escStack, 1, -1 do
+        if escStack[i] == frame then tremove(escStack, i) end
+    end
+end
+
+-- A bound button must be sized and placed or the key goes to the client.
+local escButton = CreateFrame("Button", "BoundToLearnEscButton", UIParent)
+escButton:SetSize(1, 1)
+escButton:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+escButton:EnableMouse(false)
+escButton:RegisterForClicks("AnyDown", "AnyUp")
+escButton:SetScript("OnClick", function(_, _, down)
+    -- A press can click on the way down and up; act on the first only.
+    if not down and escPressed then
+        escPressed = false
+        return
+    end
+    escPressed = down
+    local top = escStack[#escStack]
+    if not top then return end
+    local close = escClose[top]
+    if close then close() else top:Hide() end
+end)
+
+escHeader:RegisterEvent("PLAYER_REGEN_DISABLED")
+escHeader:RegisterEvent("PLAYER_REGEN_ENABLED")
+escHeader:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        EscArm()
+    elseif escArmed then
+        escArmed = false
+        escHeader:Execute([[ self:ClearBindings() ]])
+    end
+end)
+
+-- close (optional) runs in place of hiding the frame.
+function Utils.CloseOnEscape(frame, close)
+    escClose[frame] = close
+    -- Own child: the window's OnShow/OnHide scripts stay the caller's.
+    local watch = CreateFrame("Frame", nil, frame)
+    watch:SetScript("OnShow", function()
+        EscRemove(frame)
+        escStack[#escStack + 1] = frame
+        EscArm()
+    end)
+    watch:SetScript("OnHide", function()
+        EscRemove(frame)
+        EscArm()
+    end)
+    if frame:IsVisible() then
+        escStack[#escStack + 1] = frame
+        EscArm()
+    end
+end
+
 -- Brand orange (matches Theme.ACCENT_HEX); kept literal so chat output
 -- never depends on Theme load order.
 Utils.BRAND_HEX = "FF8A33"

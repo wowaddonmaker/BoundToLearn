@@ -556,18 +556,11 @@ local function CreateQuizUI()
     readyFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     readyFrame:SetFrameLevel(50)
     ns.Theme.StylePanel(readyFrame)
-    readyFrame:EnableKeyboard(true)
-    readyFrame:SetPropagateKeyboardInput(true)
-    readyFrame:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then
-            readyFrame:SetPropagateKeyboardInput(false)
-            readyFrame:Hide()
-            dimmer:Hide()
-        else
-            readyFrame:SetPropagateKeyboardInput(true)
-        end
-    end)
     readyFrame:Hide()
+    ns.Utils.CloseOnEscape(readyFrame, function()
+        readyFrame:Hide()
+        dimmer:Hide()
+    end)
 
     local readyTitle = ns.Theme.CreateTitle(readyFrame, "Keybind Quiz", 18)
     readyTitle:SetPoint("TOP", 0, -20)

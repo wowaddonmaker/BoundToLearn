@@ -306,7 +306,7 @@ function KeybindAuditUI:CreateFrame()
     auditFrame:SetScript("OnHide", function()
         self:HideBarOverlays()
     end)
-    tinsert(UISpecialFrames, "BoundToLearnAuditFrame")
+    Utils.CloseOnEscape(auditFrame)
 
     local close = ns.Theme.CreateCloseButton(auditFrame, function() auditFrame:Hide() end)
     close:SetPoint("TOPRIGHT", -8, -8)
