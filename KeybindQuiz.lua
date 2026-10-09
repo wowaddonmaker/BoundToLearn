@@ -127,7 +127,7 @@ local function DiscoverCards()
             end
 
             if HasAction(slot) then
-                local keybind = GetBindingKey(bar.bindPrefix .. i)
+                local keybind, keybind2 = GetBindingKey(bar.bindPrefix .. i)
                 if keybind and not seen[keybind] then
                     local skip = shouldIgnore and shouldIgnore(slot)
                     if not skip then
@@ -135,6 +135,7 @@ local function DiscoverCards()
                         tinsert(allCards, {
                             slot = slot,
                             keybind = keybind,
+                            keybind2 = keybind2,
                             texture = GetActionTexture(slot) or "Interface\\Icons\\INV_Misc_QuestionMark",
                             name = GetAbilityName(slot) or sformat("Slot %d", slot),
                         })
@@ -713,7 +714,7 @@ function KeybindQuiz:CheckAnswer(pressedKey)
     if currentIndex < 1 or currentIndex > #deck then return end
     local card = deck[currentIndex]
 
-    if pressedKey == card.keybind then
+    if pressedKey == card.keybind or pressedKey == card.keybind2 then
         tinsert(correctPile, card)
         FlashGlow()
         promptText:SetText("|cFF44DD44Correct!|r")

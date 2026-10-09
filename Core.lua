@@ -354,6 +354,8 @@ local function OnInitialize()
             if ns.GameUI then ns.GameUI:DumpWheel() end
         elseif msg:sub(1, 11) == "layoutcheck" then
             ns.LayoutCheck:Run(msg:sub(13))
+        elseif msg == "mousetest" then
+            BoundToLearn:ToggleMouseTest()
         elseif msg == "first" then
             BoundToLearn:ShowWelcome()
         elseif msg == "songcheck" then
@@ -448,6 +450,25 @@ function BoundToLearn:ToggleTracker()
         if ns.TrackerUI then
             ns.TrackerUI:OnSessionStart()
         end
+    end
+end
+
+-- Probe (/btl mousetest): Mouse Button 4 also presses Action Button 1 until
+-- run again. Never saved to the binding set; the old bind comes back.
+local mouseTestPrev
+function BoundToLearn:ToggleMouseTest()
+    if InCombatLockdown() then
+        self:Print("Out of combat only.")
+        return
+    end
+    if mouseTestPrev == nil then
+        mouseTestPrev = GetBindingAction("BUTTON4") or ""
+        SetBinding("BUTTON4", "ACTIONBUTTON1")
+        self:Print("TEST: Mouse Button 4 now presses action button 1. /btl mousetest again undoes it.")
+    else
+        SetBinding("BUTTON4", mouseTestPrev ~= "" and mouseTestPrev or nil)
+        mouseTestPrev = nil
+        self:Print("TEST over: Mouse Button 4 has its own bind back.")
     end
 end
 
