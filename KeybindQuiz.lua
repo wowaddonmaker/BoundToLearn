@@ -622,33 +622,37 @@ local function CreateQuizUI()
             return
         end
 
-        if quizFinished then
-            C_Timer.After(0, function() KeybindQuiz:Stop() end)
-            return
-        end
-
-        if waitingForNext then
-            CancelAdvanceTimer()
-            CancelWrongFlyTimer()
-            CompletePendingFly()
-            if pendingWrongIcon then
-                AddHeapIcon(pendingWrongIcon.texture, "wrong", pendingWrongIcon.anchorFrame)
-                pendingWrongIcon = nil
-                UpdateCounts()
-            end
-            waitingForNext = false
-            KeybindQuiz:NextCard()
-            return
-        end
-
         local fullKey = ""
         if IsAltKeyDown() then fullKey = fullKey .. "ALT-" end
         if IsControlKeyDown() then fullKey = fullKey .. "CTRL-" end
         if IsShiftKeyDown() then fullKey = fullKey .. "SHIFT-" end
-        fullKey = fullKey .. key
-
-        KeybindQuiz:CheckAnswer(fullKey)
+        KeybindQuiz:PressKey(fullKey .. key)
     end)
+end
+
+-- One answer press, from the key reader or the mouse catch (mouse binds).
+function KeybindQuiz:PressKey(fullKey)
+    if not isRunning then return end
+    if quizFinished then
+        C_Timer.After(0, function() KeybindQuiz:Stop() end)
+        return
+    end
+
+    if waitingForNext then
+        CancelAdvanceTimer()
+        CancelWrongFlyTimer()
+        CompletePendingFly()
+        if pendingWrongIcon then
+            AddHeapIcon(pendingWrongIcon.texture, "wrong", pendingWrongIcon.anchorFrame)
+            pendingWrongIcon = nil
+            UpdateCounts()
+        end
+        waitingForNext = false
+        KeybindQuiz:NextCard()
+        return
+    end
+
+    KeybindQuiz:CheckAnswer(fullKey)
 end
 
 -- Logic
@@ -948,6 +952,16 @@ function KeybindQuiz:BeginRound()
 
     HideActionBars()
     inputFrame:Show()
+    -- Mouse-bound answers come through the catch; their spells do not fire.
+    local mouseKeys = {}
+    for _, bar in ipairs(BAR_MAPPINGS) do
+        for i = 1, 12 do
+            for _, key in ipairs({ GetBindingKey(bar.bindPrefix .. i) }) do
+                if ns.Utils.IsMouseBind(key) then mouseKeys[#mouseKeys + 1] = key end
+            end
+        end
+    end
+    ns.Utils.CatchMouseBinds(mouseKeys, function(key) KeybindQuiz:PressKey(key) end)
 
     self:NextCard()
 end
@@ -961,6 +975,7 @@ function KeybindQuiz:Stop()
         CancelAdvanceTimer()
         CancelWrongFlyTimer()
         RestoreActionBars()
+        ns.Utils.ReleaseMouseBinds()
     end
     pendingFly = nil
     pendingWrongIcon = nil

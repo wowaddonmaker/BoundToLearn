@@ -138,6 +138,60 @@ function Utils.CloseOnEscape(frame, close)
     end
 end
 
+-- Mouse-button and wheel binds never reach a keyboard reader (OnKeyDown).
+-- While a game runs they are bound to our own button, which hands the bind's
+-- key string to the game; the spell does not fire. Left and right click stay
+-- the player's. Bound securely (EscArm's route); released for combat.
+local mouseHeader = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+local mouseHandler
+local mousePressed = {}
+
+local mouseCatch = CreateFrame("Button", "BoundToLearnMouseCatch", UIParent)
+mouseCatch:SetSize(1, 1)
+mouseCatch:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+mouseCatch:EnableMouse(false)
+mouseCatch:RegisterForClicks("AnyDown", "AnyUp")
+mouseCatch:SetScript("OnClick", function(_, key, down)
+    -- A bind can click on the way down and up; act on the first only.
+    if not down and mousePressed[key] then
+        mousePressed[key] = nil
+        return
+    end
+    mousePressed[key] = down or nil
+    if mouseHandler then mouseHandler(key) end
+end)
+
+function Utils.IsMouseBind(key)
+    local base = key and key:match("[^%-]+$")
+    if not base then return false end
+    if base:match("^MOUSEWHEEL") then return true end
+    return base:match("^BUTTON%d+$") ~= nil and base ~= "BUTTON1" and base ~= "BUTTON2"
+end
+
+-- keys: bind strings ("SHIFT-BUTTON4"); handler(key) runs on each press.
+function Utils.CatchMouseBinds(keys, handler)
+    if InCombatLockdown() then return end
+    mouseHandler = handler
+    wipe(mousePressed)
+    for i = 1, #keys do
+        mouseHeader:SetAttribute("btlkey", keys[i])
+        mouseHeader:Execute([[
+            local key = self:GetAttribute("btlkey")
+            self:SetBindingClick(true, key, "BoundToLearnMouseCatch", key)
+        ]])
+    end
+end
+
+function Utils.ReleaseMouseBinds()
+    mouseHandler = nil
+    if InCombatLockdown() then return end
+    mouseHeader:Execute([[ self:ClearBindings() ]])
+end
+
+-- Combat start: the binds go back to the player before lockdown begins.
+mouseHeader:RegisterEvent("PLAYER_REGEN_DISABLED")
+mouseHeader:SetScript("OnEvent", Utils.ReleaseMouseBinds)
+
 -- Brand orange (matches Theme.ACCENT_HEX); kept literal so chat output
 -- never depends on Theme load order.
 Utils.BRAND_HEX = "FF8A33"

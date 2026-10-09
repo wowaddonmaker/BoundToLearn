@@ -229,19 +229,30 @@ function Game:Initialize()
     end)
 end
 
+-- A mouse-bound note is pressed through Utils.CatchMouseBinds, not OnKeyDown.
+local function OnMouseBind(key)
+    if not isRunning or isPaused then return end
+    local slotInfo = keybindToSlot[key]
+    if slotInfo then Game:OnKeybindInput(slotInfo.slot) end
+end
+
 function Game:BlockActionBars()
-    -- Bind each action bar key to a nonexistent action so it does nothing
+    -- Keyboard binds go to a nonexistent action so they do nothing; mouse
+    -- binds go to our catch, which scores them.
+    local mouseKeys = {}
     for _, prefix in ipairs(ALL_BAR_PREFIXES) do
         for i = 1, 12 do
             local key1, key2 = GetBindingKey(prefix .. i)
-            if key1 then
-                SetOverrideBinding(inputFrame, true, key1, "BTLNOOP")
-            end
-            if key2 then
-                SetOverrideBinding(inputFrame, true, key2, "BTLNOOP")
+            for _, key in ipairs({ key1, key2 }) do
+                if Utils.IsMouseBind(key) then
+                    mouseKeys[#mouseKeys + 1] = key
+                else
+                    SetOverrideBinding(inputFrame, true, key, "BTLNOOP")
+                end
             end
         end
     end
+    Utils.CatchMouseBinds(mouseKeys, OnMouseBind)
     -- Block ping keybind
     local pingKey1, pingKey2 = GetBindingKey("PING")
     if pingKey1 then SetOverrideBinding(inputFrame, true, pingKey1, "BTLNOOP") end
@@ -250,6 +261,7 @@ end
 
 function Game:UnblockActionBars()
     ClearOverrideBindings(inputFrame)
+    Utils.ReleaseMouseBinds()
 end
 
 function Game:GetSettings()
@@ -346,7 +358,7 @@ function Game:DiscoverSlots()
                     -- icon. btn.action is what the player actually sees now.
                     local action = btn.action or slot
                     if HasAction(action) then
-                        local keybind = GetBindingKey(bar.bindPrefix .. i)
+                        local keybind, keybind2 = GetBindingKey(bar.bindPrefix .. i)
                         if keybind then
                             local texture = GetActionTexture(action)
                             -- Skip duplicate textures (same ability on 2 bars)
@@ -361,6 +373,8 @@ function Game:DiscoverSlots()
                                 }
                                 tinsert(availableSlots, slotInfo)
                                 keybindToSlot[keybind] = slotInfo
+                                -- Either bind of the button hits its notes.
+                                if keybind2 then keybindToSlot[keybind2] = slotInfo end
                             end
                         end
                     end
@@ -752,6 +766,8 @@ function Game:Pause()
     pauseStartTime = GetTime()
     gameFrame:Hide()
     inputFrame:Hide()
+    -- Combat pauses practice: the abilities must work in that fight.
+    self:UnblockActionBars()
     if ns.GameUI then
         ns.GameUI:CancelCountdown()
         ns.GameUI:OnGamePause()
@@ -765,6 +781,7 @@ function Game:Resume()
         return
     end
     isPaused = false
+    self:BlockActionBars()
 
     local function DoResume()
         local now = GetTime()
