@@ -1,4 +1,4 @@
-## Interface: 16001, 120001, 120000
+## Interface: 16001, 120100, 120007, 120005, 120001, 120000
 ## Title: BoundToLearn
 ## Notes: Click-vs-keybind tracking and keybind practice game
 ## Author: justawower
