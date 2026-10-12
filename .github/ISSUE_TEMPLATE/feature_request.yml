@@ -1,44 +1,31 @@
 name: Feature Request
-description: Suggest a new feature or improvement
+description: Something the addon should do
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        **Quickest way:** in game, click **Give feedback** in the window your idea is about (or type `/btl feedback`). It opens this tracker with the screen's details already filled in.
   - type: dropdown
     id: feature
     attributes:
       label: Which part of the addon?
       options:
-        - Keybind Tracker
-        - Practice Game (Icon Game)
-        - Ping Trainer
+        - Practice Game (track select, rounds, results)
         - Keybind Quiz
+        - Ping Trainer
         - Keybind Audit
+        - Keybind Tracker
         - Click Blocking
-        - Options / Settings
-        - New feature entirely
-        - Other
+        - Statistics
+        - Options
+        - Something new
     validations:
       required: true
-
   - type: textarea
-    id: description
+    id: request
     attributes:
       label: What would you like?
-      description: Describe the feature or improvement you have in mind.
+      description: What it should do and what it would be for. A screenshot or mockup helps.
     validations:
       required: true
-
-  - type: textarea
-    id: why
-    attributes:
-      label: Why would this be useful?
-      description: What problem does this solve, or how would it help you?
-    validations:
-      required: false
-
-  - type: textarea
-    id: extra
-    attributes:
-      label: Anything else?
-      description: Screenshots, mockups, examples, etc.
-    validations:
-      required: false

@@ -2,73 +2,77 @@ name: Bug Report
 description: Something isn't working as expected
 labels: ["bug"]
 body:
-  - type: input
-    id: version
+  - type: markdown
     attributes:
-      label: Addon version
-      description: You can find this in your addon list (AddOns button on the character select screen).
-      placeholder: "e.g. 1.0.1"
-    validations:
-      required: false
-
+      value: |
+        **Quickest way:** in game, click **Give feedback** in the window the problem is in (or type `/btl feedback`). It opens this tracker with your addon version, game client and the screen's details already filled in.
   - type: dropdown
     id: feature
     attributes:
       label: Which part of the addon?
       options:
-        - Keybind Tracker
-        - Practice Game (Icon Game)
-        - Ping Trainer
+        - Practice Game (track select, rounds, results)
         - Keybind Quiz
+        - Ping Trainer
         - Keybind Audit
+        - Keybind Tracker
         - Click Blocking
-        - Options / Settings
+        - Statistics
+        - Options
         - Other / Not sure
     validations:
       required: true
-
   - type: textarea
-    id: what-happened
+    id: report
     attributes:
       label: What happened?
-      description: Describe what went wrong.
-      placeholder: Tell us what you saw.
+      description: What you saw and what you expected instead.
     validations:
       required: true
-
-  - type: textarea
-    id: expected
-    attributes:
-      label: What did you expect to happen?
-      placeholder: Tell us what you expected instead.
-    validations:
-      required: true
-
   - type: textarea
     id: steps
     attributes:
-      label: How can we reproduce it?
-      description: What were you doing when it happened?
+      label: Steps to make it happen
+      description: What you clicked or pressed, in order, and whether you were in combat.
       placeholder: |
-        1. Open the Practice Game
-        2. Select a song
-        3. ...
+        1. Open the track select
+        2. Pick ...
     validations:
-      required: false
-
+      required: true
   - type: textarea
-    id: error
+    id: details
     attributes:
-      label: Error message (if any)
-      description: If you saw a Lua error, paste it here. An error-capturing addon can help you grab these.
-      render: shell
+      label: Addon details
+      description: |
+        In game, type `/btl feedback` and open that link instead of this page, or write your addon version and game client (Retail or WoW Forever) here.
+      render: text
     validations:
-      required: false
-
+      required: true
   - type: textarea
-    id: extra
+    id: errors
     attributes:
-      label: Anything else?
-      description: Screenshots, other addons that might conflict, or any other details.
+      label: Lua errors
+      description: |
+        If the game showed an error, paste the first one here (the first is the one that matters). To see errors, type `/console scriptErrors 1`, or install BugSack and BugGrabber (both are needed).
+      render: text
     validations:
       required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: A screenshot helps more than anything. Drag the image into this box.
+    validations:
+      required: false
+  - type: dropdown
+    id: alone
+    attributes:
+      label: Does it still happen with only BoundToLearn turned on?
+      description: Turn everything else off in the addon list, restart the interface and try once more. Another addon touching the same thing is the most common cause of a problem nobody else can reproduce.
+      options:
+        - "Yes, it still happens with only this addon on"
+        - "No, it goes away with the rest turned off (say which one above if you found it)"
+        - "I have no other addons"
+        - "I did not try"
+    validations:
+      required: true
