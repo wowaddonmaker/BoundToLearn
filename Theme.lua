@@ -1194,6 +1194,7 @@ local MIN_GAP = 4              -- controls on one row closer than this are crowd
 -- Border art is drawn inside the frame: content closer than this to an edge
 -- sits on it (UI units; the Dialog metal band, the tooltip edge).
 local EDGE = { window = 14, menu = 5 }
+local EDGE_NAMES = { "left", "bottom", "right", "top" }
 local CONTROL_TYPES = { Button = true, CheckButton = true, EditBox = true, Slider = true }
 
 local function Label(obj)
@@ -1287,6 +1288,21 @@ local function Related(a, b)
     return (not a.text and Inside(b.owner, a.owner)) or (not b.text and Inside(a.owner, b.owner))
 end
 
+-- A panel past the edge of the screen (one placed from computed coordinates,
+-- like the round HUD on the start line).
+local function OffScreen(panel, l, b, r, t)
+    local sl, sb, sr, st = ScreenRect(UIParent)
+    local past = { sl - l, sb - b, r - sr, t - st }
+    local side = 1
+    for i = 2, 4 do
+        if past[i] > past[side] then side = i end
+    end
+    if past[side] > 1 then
+        return sformat("%s goes past the %s edge of the screen by %d px",
+            Label(panel), EDGE_NAMES[side], mfloor(past[side]))
+    end
+end
+
 -- Two texts of one frame in the same words or the same spot are a shadow or
 -- a deliberate layer; anything else overlapping is a collision.
 local function Layered(a, b)
@@ -1298,7 +1314,6 @@ end
 
 -- Content on the border art of the panel it sits in. Things wholly outside
 -- the panel (tabs hung below it) are deliberate and not reported.
-local EDGE_NAMES = { "left", "bottom", "right", "top" }
 local function OnBorder(item, isPanel)
     local host, f = nil, item.owner
     while f and not host do
@@ -1338,6 +1353,8 @@ function LayoutCheck:Scan()
         end
         if Shown(panel) and not nested then
             local pl, pb, pr, pt = ScreenRect(panel)
+            local offScreen = pl and OffScreen(panel, pl, pb, pr, pt)
+            if offScreen then tinsert(found, offScreen) end
             if pl then
                 local items = {}
                 Collect(panel, items, nil, (pr - pl) * (pt - pb))
@@ -1367,9 +1384,9 @@ function LayoutCheck:Scan()
     return found
 end
 
--- Screens the sweep can open by itself. Rounds in play (the in-round HUD,
--- a ping round) are left out: they take over the action bars. The quiz round
--- is checked through its preview, which leaves the bars alone.
+-- Screens the sweep can open by itself. A ping round is left out: it takes
+-- over the action bars. The quiz round and the round HUD are checked through
+-- previews, which leave the bars alone.
 local FAKE_RESULTS = {
     score = 1362, maxCombo = 15, totalNotes = 30, chartTotal = 96, notesShown = 30,
     difficulty = "Medium", mode = "practice", duration = 60,
@@ -1391,6 +1408,7 @@ local function BuildScreens()
     add("start confirm", function() BoundToLearn.ShowGameConfirm() end, function() HideNamed("BoundToLearnGameConfirm") end)
     -- The quiz start screen; the bars are only taken once a mode is picked.
     add("quiz start", function() ns.KeybindQuiz:Start() end, function() ns.KeybindQuiz:CancelReady() end)
+    add("round HUD", function() ns.GameUI:HudPreview(true) end, function() ns.GameUI:HudPreview(false) end)
     add("quiz round", function() ns.KeybindQuiz:LayoutPreview(true) end,
         function() ns.KeybindQuiz:LayoutPreview(false) end)
 

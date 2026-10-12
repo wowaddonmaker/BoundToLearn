@@ -2853,6 +2853,24 @@ function GameUI:PlaceHealthBarAtLine(screenY, spanLeft, spanRight)
     end
 end
 
+-- Layout check: the health bar placed on the player's chosen bars as a round
+-- would place it, with no round running and the action bars left alone.
+function GameUI:HudPreview(show)
+    if ns.Game:IsRunning() then return end
+    if not show then
+        if self.healthFrame then self.healthFrame:Hide() end
+        if gameOverlay then gameOverlay:Hide() end
+        self.noteHighwayTop = nil
+        return
+    end
+    self:Initialize()
+    self:CreateHealthBar()
+    ns.Game:DiscoverSlots()
+    ns.Game:PlaceNoteLine()
+    gameOverlay:Show()
+    self.healthFrame:Show()
+end
+
 function GameUI:UpdateLifeBar(pct)
     local hf = self.healthFrame
     if hf and hf.lifeBar then SetLifeBar(hf.lifeBar, pct or 0) end

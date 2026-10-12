@@ -136,6 +136,9 @@ local RAPID_GAP = 0.22
 -- Extra screen-pixel lift of the shared note start line above the topmost bar, so
 -- notes (and the health bar sitting on the line) start higher for more reaction time.
 local START_LINE_LIFT = 180
+-- Room kept above the start line for the health bar that sits on it (UI units:
+-- its 6 px lift, 34 px height and a margin), so the bar never leaves the screen.
+local LINE_TOP_ROOM = 56
 
 local function bindMods(keybind)
     local m = ""
@@ -1018,7 +1021,10 @@ function Game:ComputeNoteLine(settings)
         end
     end
     if not topY then return nil end
-    return topY + settings.fallDistance + START_LINE_LIFT
+    -- A side bar reaches high up the screen; the line stops below the top
+    -- instead, and notes for the highest buttons get a shorter fall.
+    local ceiling = (UIParent:GetTop() - LINE_TOP_ROOM) * UIParent:GetEffectiveScale()
+    return mmin(topY + settings.fallDistance + START_LINE_LIFT, ceiling)
 end
 
 -- Screen-pixel span (left, right) of the included horizontal bars, from the
