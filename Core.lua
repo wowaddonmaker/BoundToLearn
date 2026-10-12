@@ -454,8 +454,9 @@ function BoundToLearn:ToggleTracker()
 end
 
 -- Probe (/btl mousetest): middle click (every mouse has one) also presses
--- Action Button 1 until run again. Never saved to the binding set; the old
--- bind comes back.
+-- Action Button 1 and wheel up Action Button 2, until run again. Never saved
+-- to the binding set; the old binds come back.
+local MOUSE_TEST = { { key = "BUTTON3", action = "ACTIONBUTTON1" }, { key = "MOUSEWHEELUP", action = "ACTIONBUTTON2" } }
 local mouseTestPrev
 function BoundToLearn:ToggleMouseTest()
     if InCombatLockdown() then
@@ -463,13 +464,19 @@ function BoundToLearn:ToggleMouseTest()
         return
     end
     if mouseTestPrev == nil then
-        mouseTestPrev = GetBindingAction("BUTTON3") or ""
-        SetBinding("BUTTON3", "ACTIONBUTTON1")
-        self:Print("TEST: middle click (press the scroll wheel) now casts your action bar 1 slot 1 ability. /btl mousetest again undoes it.")
+        mouseTestPrev = {}
+        for i, bind in ipairs(MOUSE_TEST) do
+            mouseTestPrev[i] = GetBindingAction(bind.key) or ""
+            SetBinding(bind.key, bind.action)
+        end
+        self:Print("TEST: middle click now casts action bar 1 slot 1, and wheel up casts slot 2. /btl mousetest again undoes it.")
     else
-        SetBinding("BUTTON3", mouseTestPrev ~= "" and mouseTestPrev or nil)
+        for i, bind in ipairs(MOUSE_TEST) do
+            local prev = mouseTestPrev[i]
+            SetBinding(bind.key, prev ~= "" and prev or nil)
+        end
         mouseTestPrev = nil
-        self:Print("TEST over: middle click has its own bind back.")
+        self:Print("TEST over: middle click and wheel up have their own binds back.")
     end
 end
 
