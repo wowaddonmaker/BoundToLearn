@@ -43,7 +43,7 @@ function StatsUI:CreateFrame()
     if statsFrame then return end
 
     statsFrame = CreateFrame("Frame", "BoundToLearnStatsFrame", UIParent)
-    statsFrame:SetSize(450, 400)
+    statsFrame:SetSize(480, 400)   -- room for Give feedback beside the tabs
     statsFrame:SetPoint("CENTER")
     statsFrame:SetFrameStrata("DIALOG")
     ns.Theme.StylePanel(statsFrame)
@@ -62,6 +62,12 @@ function StatsUI:CreateFrame()
 
     -- Tab buttons
     self:CreateTabs()
+
+    -- On the tab row, right of the tabs.
+    local feedbackBtn = ns.Feedback.CreateButton(statsFrame, function()
+        return "Statistics", { "Tab: " .. activeTab }
+    end)
+    feedbackBtn:SetPoint("TOPRIGHT", -15, -36)
 
     -- Content panels
     self:CreateTrackerPanel()

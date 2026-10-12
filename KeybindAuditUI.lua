@@ -315,6 +315,27 @@ function KeybindAuditUI:CreateFrame()
     local title = ns.Theme.CreateTitle(auditFrame, "Keybind Audit", 16)
     title:SetPoint("TOP", 0, -12)
 
+    -- Header, left of the close button.
+    local feedbackBtn = ns.Feedback.CreateButton(auditFrame, function()
+        local page = (resultsPage and resultsPage:IsShown() and "results")
+            or (methodologyPage and methodologyPage:IsShown() and "methodology")
+            or (categoryDetailPage and categoryDetailPage:IsShown() and "category detail")
+            or "setup"
+        local db = GetDb()
+        local bars = {}
+        for key, on in pairs(db.bars or {}) do
+            if on then bars[#bars + 1] = key end
+        end
+        table.sort(bars)
+        return "Keybind Audit", {
+            "Page: " .. page,
+            sformat("Keyboard: %s, MMO mouse: %s, grouping: %s", tostring(db.keyboardLayout),
+                tostring(db.mmoMouse), tostring(db.includeGrouping)),
+            "Bars: " .. (#bars > 0 and table.concat(bars, ", ") or "none"),
+        }
+    end)
+    feedbackBtn:SetPoint("TOPRIGHT", -34, -11)
+
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
     accent:SetSize(550, 2)
     accent:SetPoint("TOP", 0, -34)

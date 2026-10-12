@@ -1193,7 +1193,7 @@ local MIN_OVERLAP = 3          -- screen pixels on both axes before it counts
 local MIN_GAP = 4              -- controls on one row closer than this are crowded
 -- Border art is drawn inside the frame: content closer than this to an edge
 -- sits on it (UI units; the Dialog metal band, the tooltip edge).
-local EDGE = { window = 14, menu = 5 }
+local EDGE = { window = 11, menu = 5 }
 local EDGE_NAMES = { "left", "bottom", "right", "top" }
 local CONTROL_TYPES = { Button = true, CheckButton = true, EditBox = true, Slider = true }
 
@@ -1409,6 +1409,7 @@ local function BuildScreens()
     -- The quiz start screen; the bars are only taken once a mode is picked.
     add("quiz start", function() ns.KeybindQuiz:Start() end, function() ns.KeybindQuiz:CancelReady() end)
     add("round HUD", function() ns.GameUI:HudPreview(true) end, function() ns.GameUI:HudPreview(false) end)
+    add("feedback link", function() ns.Feedback:OpenGeneral() end, function() HideNamed("BoundToLearnFeedback") end)
     -- The toast with the longest achievement name (its widest case).
     add("achievement toast", function()
         local longest

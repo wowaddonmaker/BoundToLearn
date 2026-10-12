@@ -795,6 +795,14 @@ local function BuildFrame()
     close:SetPoint("TOPRIGHT", -8, -8)
     optionsFrame.closeBtn = close
 
+    -- Header, left of the close button; the report names the open tab.
+    local feedbackBtn = ns.Feedback.CreateButton(optionsFrame, function()
+        local btn = nav and nav.current and nav.buttons[nav.current]
+        local label = btn and btn.label and btn.label:GetText()
+        return "Options", { "Tab: " .. (label or "?") }
+    end)
+    feedbackBtn:SetPoint("TOPRIGHT", -34, -12)
+
     nav = Theme.CreateSidebar(optionsFrame, {
         width = SIDEBAR_W,
         contentTopInset = CONTENT_TOP,

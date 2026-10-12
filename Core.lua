@@ -356,6 +356,8 @@ local function OnInitialize()
             ns.LayoutCheck:Run(msg:sub(13))
         elseif msg == "mousetest" then
             BoundToLearn:ToggleMouseTest()
+        elseif msg == "feedback" then
+            ns.Feedback:OpenGeneral()
         elseif msg == "first" then
             BoundToLearn:ShowWelcome()
         elseif msg == "songcheck" then
@@ -510,6 +512,7 @@ function BoundToLearn:PrintHelp()
         "  /btl ping        - Open ping trainer",
         "  /btl stats       - Show statistics panel",
         "  /btl options     - Open settings",
+        "  /btl feedback    - Report a problem or idea (link with details filled in)",
         "  /btl enforce      - Toggle click blocking (keybind-only mode)",
         "  /btl enforce all  - Block all ability clicks",
         "  /btl enforce cc   - Block only CC/interrupt clicks",
@@ -669,6 +672,7 @@ function BoundToLearn:ShowMinimapMenu(anchor)
             { separator = true },
             { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
             { getText = function() return "Options" end, func = function() self:OpenOptions() end },
+            { getText = function() return "Give feedback" end, func = function() ns.Feedback:OpenGeneral() end },
         }
 
         local menuBtns = {}

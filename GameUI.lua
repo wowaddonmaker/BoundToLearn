@@ -1138,6 +1138,12 @@ function GameUI:CreateSongSelect()
     end)
     f.statsBtn = statsBtn
 
+    -- Top right, on the title row left of the close button. Hidden on the
+    -- round-over page, which has its own.
+    local feedbackBtn = ns.Feedback.CreateButton(f, function() return GameUI:FeedbackContext() end)
+    feedbackBtn:SetPoint("TOPRIGHT", -34, -16)
+    f.feedbackBtn = feedbackBtn
+
     -- Right column: a 3D-style song wheel. Fixed slots the tracks roll through
     -- with a sliding animation; the selected track is the large centre slot and
     -- neighbours shrink and run off the clipped right edge above/below. The wheel's
@@ -1548,6 +1554,10 @@ function GameUI:CreateResultsPanel(f)
         GameUI:ToggleShareMenu(rp.shareBtn)
     end)
 
+    -- Bottom right: the report carries this round's track, difficulty and numbers.
+    rp.feedbackBtn = ns.Feedback.CreateButton(rp, function() return GameUI:FeedbackContext() end)
+    rp.feedbackBtn:SetPoint("BOTTOMRIGHT", -4, 10)
+
     f.resultsPanel = rp
 end
 
@@ -1613,6 +1623,7 @@ function GameUI:ShowResultsOnSelect(results)
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
     if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Hide() end
 
     local rp = songSelect.resultsPanel
     local totalNotes = results.totalNotes or 0
@@ -1701,6 +1712,50 @@ function GameUI:ShowResultsOnSelect(results)
     end
 end
 
+-- Sorted keys of a set's true entries, or "none".
+local function ListOn(set)
+    local keys = {}
+    for k, v in pairs(set or {}) do
+        if v then keys[#keys + 1] = tostring(k) end
+    end
+    table.sort(keys)
+    return #keys > 0 and table.concat(keys, ", ") or "none"
+end
+
+-- Give feedback details for the track select, its stats page and the round-over
+-- page: the screen name, then its lines.
+function GameUI:FeedbackContext()
+    local db = BoundToLearn.db.game
+    local songs = ns.SongData.songs
+    local song = songSelect and songs[songSelect.selIndex or 1]
+    local screen = "Track select"
+    if songSelect and songSelect.resultsMode then
+        screen = "Round over"
+    elseif songSelect and songSelect.statsMode then
+        screen = "Track stats"
+    end
+    local lines = {}
+    if song then
+        lines[#lines + 1] = sformat("Track: %s (%s), %d tracks listed", song.title, song.key, #songs)
+    end
+    lines[#lines + 1] = sformat("Difficulty: %s, mode: %s", tostring(db.difficulty), tostring(db.mode))
+    lines[#lines + 1] = "Modifiers: " .. ListOn(ns.Modifiers and ns.Modifiers:GetActive())
+    lines[#lines + 1] = "Bars: " .. ListOn(db.bars)
+    local r = self.lastResults
+    if screen == "Round over" and r then
+        local hc = r.hitCounts or {}
+        lines[#lines + 1] = sformat("Round: score %d, accuracy %.1f%%, max combo %d, %s",
+            r.score or 0, ns.Utils.HitAccuracy(hc), r.maxCombo or 0, r.focusFailed and "failed" or "completed")
+        lines[#lines + 1] = sformat("Notes: %d perfect, %d great, %d good, %d miss; %d of %d shown, %ds",
+            hc.perfect or 0, hc.great or 0, hc.good or 0, hc.miss or 0,
+            r.notesShown or 0, r.chartTotal or 0, r.duration or 0)
+    elseif song then
+        local best = db.songScores and db.songScores[song.key] and db.songScores[song.key][db.difficulty]
+        lines[#lines + 1] = "Best on this difficulty: " .. (best and tostring(best) or "none")
+    end
+    return screen, lines
+end
+
 function GameUI:ExitResultsMode()
     if not songSelect then return end
     songSelect.resultsMode = false
@@ -1711,6 +1766,7 @@ function GameUI:ExitResultsMode()
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
     if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -2232,6 +2288,7 @@ function GameUI:HideStatsPage()
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
     if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -3210,6 +3267,15 @@ function GameUI:CreateMainMenu()
     local closeBtn = Theme.CreateCloseButton(f, function() f:Hide() end)
     closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
+
+    local feedbackBtn = ns.Feedback.CreateButton(f, function()
+        local db = BoundToLearn.db.game
+        return "Game menu", {
+            sformat("Difficulty: %s, mode: %s", tostring(db.difficulty), tostring(db.mode)),
+            "Bars: " .. ListOn(db.bars),
+        }
+    end)
+    feedbackBtn:SetPoint("TOPRIGHT", -34, -16)
 
     -- Start enters the song-selection carousel, where the track and difficulty
     -- are chosen and the round begins.
