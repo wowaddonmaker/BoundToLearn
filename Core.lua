@@ -366,6 +366,9 @@ local function OnInitialize()
                 Utils.Print(sformat("Differs from the Forever list: %s",
                     #disagree > 0 and table.concat(disagree, " ") or "none"))
             end
+            local repeats = ns.SongData.ArtRepeats()
+            Utils.Print(sformat("Same picture on 4+ tracks: %s",
+                #repeats > 0 and table.concat(repeats, "; ") or "none"))
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
