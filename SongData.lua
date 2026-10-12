@@ -84,6 +84,48 @@ SongData.songs = {
     { key = "s68", title = [[PvP]], artist = [[Derek Duke]], id = 53686, length = 40 },
 }
 
+-- Forever's own soundtrack (its re-recorded classic themes and the music of
+-- its new zones), the longest take of each. Forever only; "f" keys keep their
+-- scores apart from the shared tracks.
+local FOREVER_SONGS = {
+    { key = "f1", title = [[Bolderok]], artist = [[Blizzard Entertainment]], id = 8158694, length = 64 },
+    { key = "f2", title = [[Cradle of Tranquility]], artist = [[Blizzard Entertainment]], id = 8173703, length = 71 },
+    { key = "f3", title = [[Daegun]], artist = [[Blizzard Entertainment]], id = 8198465, length = 66 },
+    { key = "f4", title = [[Eastwind Shore]], artist = [[Blizzard Entertainment]], id = 8158706, length = 100 },
+    { key = "f5", title = [[Elderwild]], artist = [[Blizzard Entertainment]], id = 8197333, length = 72 },
+    { key = "f6", title = [[Farholde Keep]], artist = [[Blizzard Entertainment]], id = 8158710, length = 82 },
+    { key = "f7", title = [[Felblood Scar]], artist = [[Blizzard Entertainment]], id = 8269358, length = 63 },
+    { key = "f8", title = [[Gustberry Lowlands]], artist = [[Blizzard Entertainment]], id = 8158740, length = 76 },
+    { key = "f9", title = [[Mount Hyjal]], artist = [[Blizzard Entertainment]], id = 8158674, length = 61 },
+    { key = "f10", title = [[Malorne's Retreat]], artist = [[Blizzard Entertainment]], id = 8190628, length = 64 },
+    { key = "f11", title = [[Mourning's Rest]], artist = [[Blizzard Entertainment]], id = 8158680, length = 67 },
+    { key = "f12", title = [[Riverglades]], artist = [[Blizzard Entertainment]], id = 8173717, length = 68 },
+    { key = "f13", title = [[Rogmar Outpost]], artist = [[Blizzard Entertainment]], id = 8158722, length = 66 },
+    { key = "f14", title = [[Shadowgale Forest]], artist = [[Blizzard Entertainment]], id = 8246682, length = 73 },
+    { key = "f15", title = [[Shendar]], artist = [[Blizzard Entertainment]], id = 8158746, length = 72 },
+    { key = "f16", title = [[Shrine of Akir]], artist = [[Blizzard Entertainment]], id = 8246690, length = 64 },
+    { key = "f17", title = [[Shrine of Aviana]], artist = [[Blizzard Entertainment]], id = 8282397, length = 90 },
+    { key = "f18", title = [[Summit of Eternity]], artist = [[Blizzard Entertainment]], id = 8282581, length = 51 },
+    { key = "f19", title = [[Sunnyglade]], artist = [[Blizzard Entertainment]], id = 8173719, length = 79 },
+    { key = "f20", title = [[Tainted Foothills]], artist = [[Blizzard Entertainment]], id = 8269360, length = 76 },
+    { key = "f21", title = [[Thendal Village]], artist = [[Blizzard Entertainment]], id = 8158756, length = 76 },
+    { key = "f22", title = [[Twilight's Shroud]], artist = [[Blizzard Entertainment]], id = 8269366, length = 69 },
+    { key = "f23", title = [[Valanaar]], artist = [[Blizzard Entertainment]], id = 8175596, length = 54 },
+    { key = "f24", title = [[Wheeler's Grange]], artist = [[Blizzard Entertainment]], id = 8158732, length = 80 },
+    { key = "f25", title = [[Darkmoon Faire]], artist = [[Blizzard Entertainment]], id = 8181339, length = 131 },
+    { key = "f26", title = [[Dungeon Boss]], artist = [[Blizzard Entertainment]], id = 8280857, length = 66 },
+    { key = "f27", title = [[Dungeon Horror]], artist = [[Blizzard Entertainment]], id = 8280853, length = 84 },
+    { key = "f28", title = [[Stormwind]], artist = [[Blizzard Entertainment]], id = 8180878, length = 87 },
+    { key = "f29", title = [[Orgrimmar]], artist = [[Blizzard Entertainment]], id = 8181033, length = 69 },
+    { key = "f30", title = [[Ironforge]], artist = [[Blizzard Entertainment]], id = 8180965, length = 118 },
+    { key = "f31", title = [[Thunder Bluff]], artist = [[Blizzard Entertainment]], id = 8181001, length = 120 },
+    { key = "f32", title = [[Undercity]], artist = [[Blizzard Entertainment]], id = 8181005, length = 87 },
+    { key = "f33", title = [[Darnassus]], artist = [[Blizzard Entertainment]], id = 8180752, length = 85 },
+    { key = "f34", title = [[Stranglethorn Vale]], artist = [[Blizzard Entertainment]], id = 8200680, length = 102 },
+    { key = "f35", title = [[Zul'Gurub Voodoo]], artist = [[Blizzard Entertainment]], id = 8181341, length = 85 },
+    { key = "f36", title = [[Naxxramas]], artist = [[Blizzard Entertainment]], id = 8180911, length = 102 },
+}
+
 -- Tracks the Forever client does not ship; dropped from its song list.
 local FOREVER_MISSING = {
     s5 = true, s6 = true, s10 = true, s11 = true, s12 = true, s14 = true,
@@ -96,26 +138,36 @@ local FOREVER_MISSING = {
 local allSongs = SongData.songs
 
 -- Dev probe (/btl songcheck): asks the client which tracks it can play.
--- Returns the unplayable keys, and those where FOREVER_MISSING disagrees.
+-- Returns the unplayable keys, and those where the Forever lists disagree
+-- (a shared track marked missing that plays, or a Forever track that does not).
 function SongData.CheckTracks()
     local unplayable, disagree = {}, {}
-    for i = 1, #allSongs do
-        local song = allSongs[i]
+    local function check(song, expectMissing)
         local willPlay, handle = PlaySoundFile(song.id, "Master")
         if willPlay then
             StopSound(handle)
         else
             unplayable[#unplayable + 1] = song.key
         end
-        if (not willPlay) ~= (FOREVER_MISSING[song.key] or false) then
+        if (not willPlay) ~= expectMissing then
             disagree[#disagree + 1] = song.key
         end
     end
-    return unplayable, disagree, #allSongs
+    for i = 1, #allSongs do
+        check(allSongs[i], FOREVER_MISSING[allSongs[i].key] or false)
+    end
+    local total = #allSongs
+    if Utils.IS_FOREVER then
+        for i = 1, #FOREVER_SONGS do check(FOREVER_SONGS[i], false) end
+        total = total + #FOREVER_SONGS
+    end
+    return unplayable, disagree, total
 end
 
+-- Forever: its own soundtrack first, then the shared tracks it ships.
 if Utils.IS_FOREVER then
     local kept = {}
+    for i = 1, #FOREVER_SONGS do kept[#kept + 1] = FOREVER_SONGS[i] end
     for i = 1, #SongData.songs do
         local song = SongData.songs[i]
         if not FOREVER_MISSING[song.key] then kept[#kept + 1] = song end
@@ -155,6 +207,10 @@ SongData.REAL_BPM = {
     s41=129, s42=123, s43=136, s44=129, s45=123, s46=81, s47=89, s48=118, s49=152, s50=89,
     s51=89, s52=136, s53=129, s54=96, s55=86, s56=81, s57=108, s58=96, s59=152, s60=129,
     s61=144, s62=86, s63=152, s64=157, s65=118, s66=123, s67=152, s68=92,
+    f1=96, f2=86, f3=118, f4=118, f5=81, f6=118, f7=103, f8=129, f9=112, f10=96,
+    f11=86, f12=81, f13=118, f14=123, f15=152, f16=129, f17=86, f18=123, f19=99, f20=86,
+    f21=152, f22=129, f23=99, f24=152, f25=118, f26=129, f27=144, f28=144, f29=140, f30=123,
+    f31=92, f32=152, f33=96, f34=152, f35=123, f36=108,
 }
 function SongData.BPM(song)
     if not song then return 120 end
@@ -454,6 +510,10 @@ local FOREVER_ART = {
     s62 = { 1396460, 1 }, s63 = { 1396460, 1 }, s64 = { 1396460, 1 }, s65 = { 1396460, 1 },
     s67 = { 1396460, 1 }, s68 = { 1396460, 1 },
 }
+-- Forever's own soundtrack takes the classic backdrop.
+for i = 1, #FOREVER_SONGS do
+    FOREVER_ART[FOREVER_SONGS[i].key] = { 1396460, 1 }
+end
 
 local songResolveCache = {}
 resolveSong = function(song)
