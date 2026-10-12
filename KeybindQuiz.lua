@@ -31,7 +31,7 @@ local PlaySound        = PlaySound
 local ICON_SIZE = 80
 local ICON_CROP = 0.07
 local HEAP_ICON_SIZE = 36
-local HEAP_X_OFFSET = 160
+local HEAP_X_OFFSET = 240
 local HEAP_Y_BASE = -20
 local HEAP_SCATTER = 20
 local FLY_DURATION = 0.35
@@ -442,6 +442,7 @@ local function CreateQuizUI()
     quizFrame:SetFrameLevel(15)
     quizFrame:EnableMouse(false)
     quizFrame:Hide()
+    ns.Theme.CheckLayoutOf(quizFrame)
 
     -- Title
     local title = ns.Theme.CreateTitle(quizFrame, "Keybind Quiz", 16)
@@ -461,6 +462,7 @@ local function CreateQuizUI()
     cardFrame = CreateFrame("Frame", nil, quizFrame)
     cardFrame:SetSize(ICON_SIZE, ICON_SIZE)
     cardFrame:SetPoint("CENTER", 0, 10)
+    cardFrame._btlLayoutItem = true
 
     cardIcon = cardFrame:CreateTexture(nil, "ARTWORK")
     cardIcon:SetPoint("TOPLEFT", 4, -4)
@@ -507,24 +509,28 @@ local function CreateQuizUI()
     answerKeybind:SetPoint("TOP", answerLabel, "BOTTOM", 0, -4)
     answerKeybind:Hide()
 
-    -- Heap anchors (invisible frames that heaps pile around)
+    -- Heap anchors (invisible frames that heaps pile around), sized to the
+    -- whole scatter so the layout check sees the space a pile takes.
+    local heapZone = HEAP_ICON_SIZE + 2 * HEAP_SCATTER
     correctHeapAnchor = CreateFrame("Frame", nil, quizFrame)
-    correctHeapAnchor:SetSize(HEAP_ICON_SIZE, HEAP_ICON_SIZE)
+    correctHeapAnchor:SetSize(heapZone, heapZone)
     correctHeapAnchor:SetPoint("CENTER", -HEAP_X_OFFSET, HEAP_Y_BASE)
+    correctHeapAnchor._btlLayoutItem = true
 
     wrongHeapAnchor = CreateFrame("Frame", nil, quizFrame)
-    wrongHeapAnchor:SetSize(HEAP_ICON_SIZE, HEAP_ICON_SIZE)
+    wrongHeapAnchor:SetSize(heapZone, heapZone)
     wrongHeapAnchor:SetPoint("CENTER", HEAP_X_OFFSET, HEAP_Y_BASE)
+    wrongHeapAnchor._btlLayoutItem = true
 
     -- Heap labels
     correctHeapLabel = quizFrame:CreateFontString(nil, "OVERLAY")
     correctHeapLabel:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
-    correctHeapLabel:SetPoint("TOP", correctHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - HEAP_SCATTER - 4)
+    correctHeapLabel:SetPoint("TOP", correctHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - 4)
     correctHeapLabel:SetTextColor(0.3, 0.8, 0.3)
 
     wrongHeapLabel = quizFrame:CreateFontString(nil, "OVERLAY")
     wrongHeapLabel:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
-    wrongHeapLabel:SetPoint("TOP", wrongHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - HEAP_SCATTER - 4)
+    wrongHeapLabel:SetPoint("TOP", wrongHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - 4)
     wrongHeapLabel:SetTextColor(0.8, 0.3, 0.3)
 
     correctCountText = quizFrame:CreateFontString(nil, "OVERLAY")
@@ -543,10 +549,10 @@ local function CreateQuizUI()
     timerText:SetPoint("TOPRIGHT", quizFrame, "TOPRIGHT", -10, 10)
     timerText:SetTextColor(0.6, 0.6, 0.6)
 
-    -- ESC hint
+    -- ESC hint, below the space the answer reveal takes
     local escHint = quizFrame:CreateFontString(nil, "OVERLAY")
     escHint:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
-    escHint:SetPoint("TOP", promptText, "BOTTOM", 0, -50)
+    escHint:SetPoint("TOP", promptText, "BOTTOM", 0, -84)
     escHint:SetTextColor(0.4, 0.4, 0.4)
     escHint:SetText("ESC to exit")
 
@@ -905,6 +911,43 @@ function KeybindQuiz:CancelReady()
     if not quizFrame then return end
     quizFrame.readyFrame:Hide()
     dimmer:Hide()
+end
+
+-- Layout check: the round screen at its fullest (a long name, a wrong answer
+-- revealed, both piles filled) without taking the bars or the keyboard.
+local PREVIEW_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+function KeybindQuiz:LayoutPreview(show)
+    if isRunning then return end
+    if not show then
+        if not quizFrame then return end
+        ClearHeapIcons("correct")
+        ClearHeapIcons("wrong")
+        quizFrame:Hide()
+        dimmer:Hide()
+        return
+    end
+    if not quizFrame then CreateQuizUI() end
+    RevealCard({ texture = PREVIEW_ICON, name = "A Long Ability Name For The Layout Check" })
+    roundText:SetText("Round 1")
+    progressText:SetText("3 / 11")
+    timerText:SetText("0:42")
+    promptText:SetText("|cFFDD4444Not quite|r")
+    answerLabel:SetText("Correct keybind:")
+    answerLabel:Show()
+    answerKeybind:SetText("|cFFFFCC00S-4|r")
+    answerKeybind:Show()
+    correctHeapLabel:SetText("Correct")
+    wrongHeapLabel:SetText("Wrong")
+    correctHeapLabel:Show()
+    wrongHeapLabel:Show()
+    correctCountText:SetText("8")
+    wrongCountText:SetText("8")
+    for _ = 1, 8 do
+        AddHeapIcon(PREVIEW_ICON, "correct", correctHeapAnchor)
+        AddHeapIcon(PREVIEW_ICON, "wrong", wrongHeapAnchor)
+    end
+    dimmer:Show()
+    quizFrame:Show()
 end
 
 function KeybindQuiz:BeginRound()

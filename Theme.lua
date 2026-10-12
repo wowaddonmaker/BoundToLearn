@@ -340,6 +340,13 @@ function Theme.StylePanel(frame, alpha, kind)
     return frame
 end
 
+-- A frame with no panel art (a full-screen overlay) that the layout check
+-- still walks; it has no border to keep clear of.
+function Theme.CheckLayoutOf(frame)
+    frame._btlKind = "bare"
+    Theme.panels[#Theme.panels + 1] = frame
+end
+
 -- Flat rounded fill card (grouped settings, stat cards, insets). Borderless
 -- by default: the rounded border ring aliases badly at small sizes, so cards
 -- read by their fill contrast against the panel. Pass showBorder=true only
@@ -1250,7 +1257,9 @@ local function Collect(frame, items, clip, panelArea)
         end
     end
     for _, child in ipairs({ frame:GetChildren() }) do
-        if CONTROL_TYPES[child:GetObjectType()] and Shown(child) and not child._btlNoLayoutCheck then
+        -- _btlLayoutItem: a plain frame that takes space (an icon, a pile).
+        local isItem = CONTROL_TYPES[child:GetObjectType()] or child._btlLayoutItem
+        if isItem and Shown(child) and not child._btlNoLayoutCheck then
             local l, b, r, t = ScreenRect(child)
             if l then
                 l, b, r, t = Clip(l, b, r, t, clip)
@@ -1273,8 +1282,18 @@ local function Inside(frame, ancestor)
 end
 
 -- A control's own label, or something built inside it, is not an overlap.
+-- Text on the panel a control sits in is not the control's own: compared.
 local function Related(a, b)
-    return Inside(a.owner, b.owner) or Inside(b.owner, a.owner)
+    return (not a.text and Inside(b.owner, a.owner)) or (not b.text and Inside(a.owner, b.owner))
+end
+
+-- Two texts of one frame in the same words or the same spot are a shadow or
+-- a deliberate layer; anything else overlapping is a collision.
+local function Layered(a, b)
+    if not (a.text and b.text and a.owner == b.owner) then return false end
+    if a.obj:GetText() == b.obj:GetText() then return true end
+    return math.abs(a[1] - b[1]) < 2 and math.abs(a[2] - b[2]) < 2
+        and math.abs(a[3] - b[3]) < 2 and math.abs(a[4] - b[4]) < 2
 end
 
 -- Content on the border art of the panel it sits in. Things wholly outside
@@ -1297,6 +1316,7 @@ local function OnBorder(item, isPanel)
     for i = 2, 4 do
         if gaps[i] < gaps[side] then side = i end
     end
+    if host._btlKind == "bare" then return end
     local scale = host:GetEffectiveScale()
     local need = EDGE[host._btlKind] or EDGE.window
     if gaps[side] / scale < need then
@@ -1327,8 +1347,7 @@ function LayoutCheck:Scan()
                     if border then tinsert(found, border) end
                     for j = i + 1, #items do
                         local b = items[j]
-                        -- Text on text inside one frame is a deliberate stack more often than not.
-                        if not (a.text and b.text and a.owner == b.owner) and not Related(a, b) then
+                        if not Layered(a, b) and not Related(a, b) then
                             local w = mmin(a[3], b[3]) - mmax(a[1], b[1])
                             local h = mmin(a[4], b[4]) - mmax(a[2], b[2])
                             if w >= MIN_OVERLAP and h >= MIN_OVERLAP then
@@ -1349,7 +1368,8 @@ function LayoutCheck:Scan()
 end
 
 -- Screens the sweep can open by itself. Rounds in play (the in-round HUD,
--- a quiz round, a ping round) are left out: they take over the action bars.
+-- a ping round) are left out: they take over the action bars. The quiz round
+-- is checked through its preview, which leaves the bars alone.
 local FAKE_RESULTS = {
     score = 1362, maxCombo = 15, totalNotes = 30, chartTotal = 96, notesShown = 30,
     difficulty = "Medium", mode = "practice", duration = 60,
@@ -1371,6 +1391,8 @@ local function BuildScreens()
     add("start confirm", function() BoundToLearn.ShowGameConfirm() end, function() HideNamed("BoundToLearnGameConfirm") end)
     -- The quiz start screen; the bars are only taken once a mode is picked.
     add("quiz start", function() ns.KeybindQuiz:Start() end, function() ns.KeybindQuiz:CancelReady() end)
+    add("quiz round", function() ns.KeybindQuiz:LayoutPreview(true) end,
+        function() ns.KeybindQuiz:LayoutPreview(false) end)
 
     add("game menu", function() GameUI:Initialize(); GameUI:ShowMainMenu() end, function() GameUI:HideMainMenu() end)
     add("track select", function() GameUI:ShowSongSelect() end)
