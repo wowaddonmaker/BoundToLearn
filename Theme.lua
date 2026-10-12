@@ -1409,6 +1409,14 @@ local function BuildScreens()
     -- The quiz start screen; the bars are only taken once a mode is picked.
     add("quiz start", function() ns.KeybindQuiz:Start() end, function() ns.KeybindQuiz:CancelReady() end)
     add("round HUD", function() ns.GameUI:HudPreview(true) end, function() ns.GameUI:HudPreview(false) end)
+    -- The toast with the longest achievement name (its widest case).
+    add("achievement toast", function()
+        local longest
+        for _, a in ipairs(ns.Achievements.ACHIEVEMENT_LIST) do
+            if not longest or #a.name > #longest.name then longest = a end
+        end
+        ns.GameUI:ShowAchievementToast(longest)
+    end, function() HideNamed("BoundToLearnAchToast") end)
     add("quiz round", function() ns.KeybindQuiz:LayoutPreview(true) end,
         function() ns.KeybindQuiz:LayoutPreview(false) end)
 

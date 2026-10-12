@@ -799,6 +799,9 @@ local function SongBestScore(key, diff)
 end
 
 -- Best fraction (0-1) of a track the player has ever reached, across difficulties.
+-- Song bubble insets: the progress ring, and the title when there is no ring.
+local DONUT_LEFT, TITLE_LEFT = 8, 12
+
 local function SongBestProgress(key)
     local sp = BoundToLearn.db.game.songProgress
     return (sp and sp[key]) or 0
@@ -1267,7 +1270,7 @@ function GameUI:CreateSongSelect()
         slot.hl = hl
 
         local donut = MakeDonut(slot, 20)      -- resized per-row to ~55% of bubble height
-        donut:SetPoint("LEFT", 10, 0)
+        donut:SetPoint("LEFT", DONUT_LEFT, 0)
         slot.donut = donut
 
         local st = slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2459,14 +2462,17 @@ function GameUI:PositionWheel()
         -- Lift the title as a bubble grows (the artist is anchored below it and
         -- follows), so both sit above the duration instead of centred over the art.
         local ty = mfloor(near * 8)
+        local dsz = mmax(13, mfloor(h * 0.55))
+        slot.donut:SetSize(dsz, dsz)
+        -- The title starts just past the progress ring, or near the edge when the
+        -- track has no progress yet (the ring is empty and draws nothing).
+        local titleLeft = SongBestProgress(sg.key) > 0 and (DONUT_LEFT + dsz + 6) or TITLE_LEFT
         slot.titleFS:ClearAllPoints()
-        slot.titleFS:SetPoint("LEFT", 40, ty)
+        slot.titleFS:SetPoint("LEFT", titleLeft, ty)
         slot.titleFS:SetPoint("RIGHT", -14, ty)
         local secs = mfloor(ns.SongData.PlayLength(sg) + 0.5)
         slot.durFS:SetText(mfloor(secs / 60) .. ":" .. (secs % 60 < 10 and "0" or "") .. (secs % 60))
         slot.durFS:SetTextColor(Theme.RGB(Theme.C.TEXT_PRIMARY, mmax(0.4, 0.85 - ae * 0.12)))
-        local dsz = mmax(13, mfloor(h * 0.55))
-        slot.donut:SetSize(dsz, dsz)
         -- Reset texcoords before choosing art. SetAtlas does NOT clear a prior
         -- SetTexCoord, so a slot that just showed the cropped instance image keeps
         -- that crop on its atlas: the neighbour-of-selection distortion that appears
@@ -4851,16 +4857,17 @@ function GameUI:ShowAchievementUnlocks(unlockIDs)
 end
 
 local toastFrame
+-- Toast insets: inside the dialog border band (about 14), icon-to-text gap.
+local TOAST_PAD, TOAST_GAP = 18, 8
 
 function GameUI:ShowAchievementToast(def)
     if not toastFrame then
+        -- The window's own dialog frame; content sits inside its border band.
         local f = CreateFrame("Frame", "BoundToLearnAchToast", UIParent)
-        f:SetSize(300, 50)
+        f:SetSize(300, 62)
         f:SetFrameStrata("FULLSCREEN_DIALOG")
         f:SetFrameLevel(200)
-        Theme.StyleCard(f, {0.09, 0.08, 0.04}, 12)
-        Theme.SetBorderColor(f, Theme.RGB(Theme.C.GOLD, 0.9))
-        Theme.SetBorderShown(f, true)
+        Theme.StylePanel(f)
         f:EnableMouse(true)
         f:RegisterForDrag()
         f:Hide()
@@ -4874,19 +4881,16 @@ function GameUI:ShowAchievementToast(def)
 
         local icon = f:CreateTexture(nil, "ARTWORK")
         icon:SetSize(30, 30)
-        icon:SetPoint("LEFT", 10, 0)
+        icon:SetPoint("LEFT", TOAST_PAD, 0)
         f.icon = icon
 
-        local header = f:CreateFontString(nil, "OVERLAY")
-        header:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        header:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -2)
-        header:SetText("|cFFFFCC00Achievement Unlocked|r")
+        local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        header:SetPoint("TOPLEFT", icon, "TOPRIGHT", TOAST_GAP, -1)
+        header:SetText("Achievement Unlocked")
         f.header = header
 
-        local name = f:CreateFontString(nil, "OVERLAY")
-        name:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
-        name:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 8, 2)
-        name:SetTextColor(1, 1, 1)
+        local name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        name:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", TOAST_GAP, 1)
         f.name = name
 
         -- Fade animation
@@ -4922,6 +4926,9 @@ function GameUI:ShowAchievementToast(def)
 
     toastFrame.icon:SetAtlas(def.icon)
     toastFrame.name:SetText(def.name)
+    -- Wide enough for the longer line, clear of the border on both sides.
+    local textW = mmax(toastFrame.header:GetUnboundedStringWidth(), toastFrame.name:GetUnboundedStringWidth())
+    toastFrame:SetWidth(mmax(240, TOAST_PAD * 2 + 30 + TOAST_GAP + textW))
     toastFrame:Show()
     toastFrame:SetAlpha(0)
     toastFrame.fadeAG:Stop()
