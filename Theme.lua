@@ -333,6 +333,7 @@ Theme.panels = {}
 function Theme.StylePanel(frame, alpha, kind)
     if not frame._btlArt then
         kind = kind or (alpha and "menu" or "window")
+        frame._btlKind = kind
         frame._btlArt = (kind == "window" and CreateWindowArt or CreateMenuArt)(frame)
         Theme.panels[#Theme.panels + 1] = frame
     end
@@ -412,6 +413,7 @@ function Theme.CreateCloseButton(parent, onClose)
     local btn = CreateFrame("Button", nil, parent, "UIPanelCloseButtonNoScripts")
     btn:SetSize(22, 22)
     btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn._btlEdgeOK = true   -- sits on the corner by design (layout check)
     btn:SetScript("OnClick", function()
         if Utils.PlayUISound then Utils.PlayUISound(Utils.SOUND_CLOSE) end
         if onClose then onClose() end
@@ -1182,6 +1184,9 @@ local tinsert, ipairs = Utils.tinsert, Utils.ipairs
 
 local MIN_OVERLAP = 3          -- screen pixels on both axes before it counts
 local MIN_GAP = 4              -- controls on one row closer than this are crowded
+-- Border art is drawn inside the frame: content closer than this to an edge
+-- sits on it (UI units; the Dialog metal band, the tooltip edge).
+local EDGE = { window = 14, menu = 5 }
 local CONTROL_TYPES = { Button = true, CheckButton = true, EditBox = true, Slider = true }
 
 local function Label(obj)
@@ -1272,6 +1277,34 @@ local function Related(a, b)
     return Inside(a.owner, b.owner) or Inside(b.owner, a.owner)
 end
 
+-- Content on the border art of the panel it sits in. Things wholly outside
+-- the panel (tabs hung below it) are deliberate and not reported.
+local EDGE_NAMES = { "left", "bottom", "right", "top" }
+local function OnBorder(item, isPanel)
+    local host, f = nil, item.owner
+    while f and not host do
+        if f._btlEdgeOK then return end
+        if isPanel[f] then host = f end
+        f = f:GetParent()
+    end
+    if not host then return end
+    local hl, hb, hr, ht = ScreenRect(host)
+    if not hl then return end
+    local l, b, r, t = item[1], item[2], item[3], item[4]
+    if r <= hl or l >= hr or t <= hb or b >= ht then return end
+    local gaps = { l - hl, b - hb, hr - r, ht - t }
+    local side = 1
+    for i = 2, 4 do
+        if gaps[i] < gaps[side] then side = i end
+    end
+    local scale = host:GetEffectiveScale()
+    local need = EDGE[host._btlKind] or EDGE.window
+    if gaps[side] / scale < need then
+        return sformat("%s sits on the border of %s (%d from the %s edge, needs %d)",
+            Label(item.obj), Label(host), mfloor(gaps[side] / scale), EDGE_NAMES[side], need)
+    end
+end
+
 function LayoutCheck:Scan()
     local found = {}
     local isPanel = {}
@@ -1290,6 +1323,8 @@ function LayoutCheck:Scan()
                 Collect(panel, items, nil, (pr - pl) * (pt - pb))
                 for i = 1, #items do
                     local a = items[i]
+                    local border = OnBorder(a, isPanel)
+                    if border then tinsert(found, border) end
                     for j = i + 1, #items do
                         local b = items[j]
                         -- Text on text inside one frame is a deliberate stack more often than not.
@@ -1314,7 +1349,7 @@ function LayoutCheck:Scan()
 end
 
 -- Screens the sweep can open by itself. Rounds in play (the in-round HUD,
--- the quiz, a ping round) are left out: they take over the action bars.
+-- a quiz round, a ping round) are left out: they take over the action bars.
 local FAKE_RESULTS = {
     score = 1362, maxCombo = 15, totalNotes = 30, chartTotal = 96, notesShown = 30,
     difficulty = "Medium", mode = "practice", duration = 60,
@@ -1334,6 +1369,8 @@ local function BuildScreens()
         function() HideNamed("BoundToLearnMinimapMenu") end)
     add("welcome", function() BoundToLearn:ShowWelcome() end, function() HideNamed("BoundToLearnWelcome") end)
     add("start confirm", function() BoundToLearn.ShowGameConfirm() end, function() HideNamed("BoundToLearnGameConfirm") end)
+    -- The quiz start screen; the bars are only taken once a mode is picked.
+    add("quiz start", function() ns.KeybindQuiz:Start() end, function() ns.KeybindQuiz:CancelReady() end)
 
     add("game menu", function() GameUI:Initialize(); GameUI:ShowMainMenu() end, function() GameUI:HideMainMenu() end)
     add("track select", function() GameUI:ShowSongSelect() end)

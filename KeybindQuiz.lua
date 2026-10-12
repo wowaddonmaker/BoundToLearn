@@ -552,16 +552,13 @@ local function CreateQuizUI()
 
     -- Ready screen (standalone frame above dimmer)
     local readyFrame = CreateFrame("Frame", nil, UIParent)
-    readyFrame:SetSize(300, 188)
+    readyFrame:SetSize(300, 204)
     readyFrame:SetPoint("CENTER", 0, 40)
     readyFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     readyFrame:SetFrameLevel(50)
     ns.Theme.StylePanel(readyFrame)
     readyFrame:Hide()
-    ns.Utils.CloseOnEscape(readyFrame, function()
-        readyFrame:Hide()
-        dimmer:Hide()
-    end)
+    ns.Utils.CloseOnEscape(readyFrame, function() KeybindQuiz:CancelReady() end)
 
     local readyTitle = ns.Theme.CreateTitle(readyFrame, "Keybind Quiz", 18)
     readyTitle:SetPoint("TOP", 0, -20)
@@ -581,10 +578,10 @@ local function CreateQuizUI()
     barNote:SetText("Your action bars are hidden during the quiz.")
 
     local timedBtn = ns.Theme.CreateAccentButton(readyFrame, "Timed Run", 120, 28)
-    timedBtn:SetPoint("BOTTOMRIGHT", readyFrame, "BOTTOM", -6, 36)
+    timedBtn:SetPoint("BOTTOMRIGHT", readyFrame, "BOTTOM", -6, 50)
 
     local practiceBtn = ns.Theme.CreateButton(readyFrame, "Practice", 120, 28)
-    practiceBtn:SetPoint("BOTTOMLEFT", readyFrame, "BOTTOM", 6, 36)
+    practiceBtn:SetPoint("BOTTOMLEFT", readyFrame, "BOTTOM", 6, 50)
 
     local practiceHint = readyFrame:CreateFontString(nil, "OVERLAY")
     practiceHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
@@ -594,7 +591,8 @@ local function CreateQuizUI()
 
     local readyHint = readyFrame:CreateFontString(nil, "OVERLAY")
     readyHint:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-    readyHint:SetPoint("BOTTOM", 0, 6)
+    -- Clear of the dialog border, which is drawn inside the frame.
+    readyHint:SetPoint("BOTTOM", 0, 18)
     readyHint:SetTextColor(0.4, 0.4, 0.4)
     readyHint:SetText("ESC to cancel")
 
@@ -900,6 +898,13 @@ function KeybindQuiz:Start()
 
     dimmer:Show()
     readyFrame:Show()
+end
+
+-- Close the start screen without starting (Esc, the layout check).
+function KeybindQuiz:CancelReady()
+    if not quizFrame then return end
+    quizFrame.readyFrame:Hide()
+    dimmer:Hide()
 end
 
 function KeybindQuiz:BeginRound()
