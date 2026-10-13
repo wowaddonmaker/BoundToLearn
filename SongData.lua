@@ -164,6 +164,31 @@ function SongData.CheckTracks()
     return unplayable, disagree, total
 end
 
+-- Each track's entry in the issue forms' "Which track?" dropdown: its title, with
+-- the client named where two tracks share a title. Both clients' tracks, sorted;
+-- tools/issue_forms.lua writes the dropdown from this list.
+local issueLabel, issueTracks = {}, {}
+do
+    local count = {}
+    local function each(fn)
+        for i = 1, #allSongs do fn(allSongs[i]) end
+        for i = 1, #FOREVER_SONGS do fn(FOREVER_SONGS[i]) end
+    end
+    each(function(song) count[song.title] = (count[song.title] or 0) + 1 end)
+    each(function(song)
+        local label = song.title
+        if count[song.title] > 1 then
+            label = label .. ((song.key:sub(1, 1) == "f" and " (WoW Forever)")
+                or (FOREVER_MISSING[song.key] and " (Retail)") or " (both clients)")
+        end
+        issueLabel[song.key] = label
+        issueTracks[#issueTracks + 1] = label
+    end)
+    table.sort(issueTracks)
+end
+function SongData.IssueLabel(key) return issueLabel[key] end
+function SongData.IssueTracks() return issueTracks end
+
 -- Forever: its own soundtrack first, then the shared tracks it ships.
 if Utils.IS_FOREVER then
     local kept = {}

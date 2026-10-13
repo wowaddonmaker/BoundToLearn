@@ -16,6 +16,33 @@ local ISSUE_URL = "https://github.com/wowaddonmaker/BoundToLearn/issues/new"
 local TEMPLATE = "feedback.yml"
 local MAX_ADDON_LIST = 600   -- characters of other addon names, keeps the link short
 
+-- The forms' "Which part of the addon?" dropdown, in order. tools/issue_forms.lua
+-- writes the dropdown from this list, so the part a link names is always an option.
+Feedback.PARTS = {
+    "Icon Game (track select, rounds, results)",
+    "Keybind Quiz",
+    "Ping Trainer",
+    "Keybind Audit",
+    "Keybind Tracker",
+    "Click Blocking",
+    "Statistics",
+    "Options",
+    "Other or not sure",
+}
+local GAME, OTHER = Feedback.PARTS[1], Feedback.PARTS[#Feedback.PARTS]
+
+-- The part each screen belongs to.
+local SCREEN_PART = {
+    ["Track select"] = GAME,
+    ["Track stats"] = GAME,
+    ["Round over"] = GAME,
+    ["Game menu"] = GAME,
+    ["Statistics"] = "Statistics",
+    ["Keybind Audit"] = "Keybind Audit",
+    ["Options"] = "Options",
+}
+Feedback.SCREEN_PART = SCREEN_PART   -- checked against PARTS by tools/issue_forms.lua
+
 local function Encode(s)
     s = tostring(s):gsub("\r?\n", "\r\n")
     s = s:gsub("([^%w%-%.%_%~ ])", function(c) return sformat("%%%02X", c:byte()) end)
@@ -72,9 +99,14 @@ function Feedback.Details(screen, lines)
     return tconcat(out, "\n")
 end
 
-function Feedback.URL(screen, lines)
-    return sformat("%s?template=%s&title=%s&details=%s", ISSUE_URL, TEMPLATE,
-        Encode(screen .. ": "), Encode(Feedback.Details(screen, lines)))
+-- The link picks the form's part and track dropdowns and fills the details box;
+-- the title is left to the player.
+function Feedback.URL(screen, lines, trackKey, part)
+    local url = sformat("%s?template=%s&feature=%s", ISSUE_URL, TEMPLATE,
+        Encode(part or SCREEN_PART[screen] or OTHER))
+    local track = trackKey and ns.SongData.IssueLabel(trackKey)
+    if track then url = url .. "&track=" .. Encode(track) end
+    return url .. "&details=" .. Encode(Feedback.Details(screen, lines))
 end
 
 -- The copy box. Read-only: typing puts the link back.
@@ -105,6 +137,9 @@ local function CreatePopup()
     box:SetSize(400, 22)
     box:SetPoint("TOP", msg, "BOTTOM", 0, -10)
     box:SetAutoFocus(false)
+    -- No length cap: a capped box would cut the details off the end of the link.
+    box:SetMaxLetters(0)
+    box:SetMaxBytes(0)
     box:SetFontObject("GameFontHighlightSmall")
     box:SetScript("OnEscapePressed", function() f:Hide() end)
     box:SetScript("OnEnterPressed", function(self) self:HighlightText() end)
@@ -136,44 +171,56 @@ local function CreatePopup()
 end
 
 -- screen: a name for where the player is ("Track select"); lines: that
--- screen's own "Label: value" details.
-function Feedback:Open(screen, lines)
+-- screen's own "Label: value" details; trackKey: the track the screen is about,
+-- if any; part: the addon part, when the screen alone does not say.
+function Feedback:Open(screen, lines, trackKey, part)
     popup = popup or CreatePopup()
-    popup.url = Feedback.URL(screen, lines)
+    popup.url = Feedback.URL(screen, lines, trackKey, part)
     popup.status:SetText("")
     popup.box:SetText(popup.url)
+    if popup.box:GetText() ~= popup.url then
+        popup.status:SetText(sformat("|cFFFF6666The box cut the link to %d of %d characters.|r",
+            #popup.box:GetText(), #popup.url))
+    end
     popup:Show()
     popup.box:SetFocus()
     popup.box:SetCursorPosition(0)
     popup.box:HighlightText()
 end
 
--- Our windows, for a report sent from the minimap menu or /btl feedback.
+-- Our windows, for a report sent from the minimap menu or /btl feedback, with
+-- the part of the addon each belongs to.
 local WINDOWS = {
-    { "BoundToLearnSongSelect", "Track select" },
-    { "BoundToLearnIconGameMenu", "Game menu" },
-    { "BoundToLearnPingGame", "Ping Trainer" },
-    { "BoundToLearnQuizFrame", "Keybind Quiz" },
-    { "BoundToLearnAuditFrame", "Keybind Audit" },
-    { "BoundToLearnStatsFrame", "Statistics" },
-    { "BoundToLearnOptionsFrame", "Options" },
-    { "BoundToLearnLeaderboard", "Leaderboard" },
-    { "BoundToLearnTrackerWidget", "Tracker widget" },
+    { "BoundToLearnSongSelect", "Track select", GAME },
+    { "BoundToLearnIconGameMenu", "Game menu", GAME },
+    { "BoundToLearnPingGame", "Ping Trainer", "Ping Trainer" },
+    { "BoundToLearnQuizFrame", "Keybind Quiz", "Keybind Quiz" },
+    { "BoundToLearnAuditFrame", "Keybind Audit", "Keybind Audit" },
+    { "BoundToLearnStatsFrame", "Statistics", "Statistics" },
+    { "BoundToLearnOptionsFrame", "Options", "Options" },
+    { "BoundToLearnLeaderboard", "Leaderboard", GAME },
+    { "BoundToLearnTrackerWidget", "Tracker widget", "Keybind Tracker" },
 }
+Feedback.WINDOWS = WINDOWS
 
--- A report from outside any one window: lists the open ones, and takes the
--- track select's own details when it is open.
+-- A report from outside any one window: lists the open ones (the first names
+-- the part), and takes the track select's own details when it is open.
 function Feedback:OpenGeneral()
-    local open = {}
+    local open, part = {}, nil
     for _, w in ipairs(WINDOWS) do
         local frame = _G[w[1]]
-        if frame and frame:IsVisible() then open[#open + 1] = w[2] end
+        if frame and frame:IsVisible() then
+            open[#open + 1] = w[2]
+            part = part or w[3]
+        end
     end
     local lines = { "Open windows: " .. (#open > 0 and tconcat(open, ", ") or "none") }
+    local trackKey
     local songSelect = _G.BoundToLearnSongSelect
     if songSelect and songSelect:IsVisible() and ns.GameUI then
-        local _, gameLines = ns.GameUI:FeedbackContext()
+        local _, gameLines, key = ns.GameUI:FeedbackContext()
         for _, line in ipairs(gameLines) do lines[#lines + 1] = line end
+        trackKey = key
     end
     local ping = _G.BoundToLearnPingGame
     local pdb = BoundToLearn.db and BoundToLearn.db.pingTrainer
@@ -181,11 +228,12 @@ function Feedback:OpenGeneral()
         lines[#lines + 1] = sformat("Ping Trainer: background %s, targets %s",
             tostring(pdb.background), tostring(pdb.targetStyle))
     end
-    self:Open("General", lines)
+    self:Open("General", lines, trackKey, part or OTHER)
 end
 
--- A "Give feedback" button for a window. context() returns screen, lines at the
--- moment of the click, so the details match what is on screen.
+-- A "Give feedback" button for a window. context() returns screen, lines and
+-- the track key (if any) at the moment of the click, so the details match what
+-- is on screen.
 function Feedback.CreateButton(parent, context)
     local b = ns.Theme.CreateButton(parent, "Give feedback", 100, 22)
     b:SetWidth(b:GetFontString():GetUnboundedStringWidth() + 24)
@@ -193,8 +241,8 @@ function Feedback.CreateButton(parent, context)
         "Report a problem or suggest an idea. You get a link with this screen's details filled in.")
     b:SetScript("OnClick", function()
         Utils.PlayUISound(Utils.SOUND_CLICK)
-        local screen, lines = context()
-        Feedback:Open(screen, lines)
+        local screen, lines, trackKey = context()
+        Feedback:Open(screen, lines, trackKey)
     end)
     return b
 end

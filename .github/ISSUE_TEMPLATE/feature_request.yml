@@ -11,17 +11,133 @@ body:
     attributes:
       label: Which part of the addon?
       options:
-        - Practice Game (track select, rounds, results)
-        - Keybind Quiz
-        - Ping Trainer
-        - Keybind Audit
-        - Keybind Tracker
-        - Click Blocking
-        - Statistics
-        - Options
-        - Something new
+        # BEGIN generated: parts (tools/issue_forms.lua, from Feedback.PARTS)
+        - "Icon Game (track select, rounds, results)"
+        - "Keybind Quiz"
+        - "Ping Trainer"
+        - "Keybind Audit"
+        - "Keybind Tracker"
+        - "Click Blocking"
+        - "Statistics"
+        - "Options"
+        - "Other or not sure"
+        # END generated: parts
     validations:
       required: true
+  - type: dropdown
+    id: track
+    attributes:
+      label: Which track?
+      description: Only if the idea is about one track in the Icon Game.
+      options:
+        # BEGIN generated: tracks (tools/issue_forms.lua, from SongData.IssueTracks)
+        - "Aftermath"
+        - "Anduin"
+        - "Argent Joust"
+        - "Ashvane Company"
+        - "Assault"
+        - "Balloon Ride"
+        - "Battle"
+        - "Battle for Azeroth"
+        - "Black Temple Gates"
+        - "Black Temple Summit"
+        - "Bolder'ok"
+        - "Brazen's Flight"
+        - "Cataclysm"
+        - "Cradle of Tranquility"
+        - "Culling of Stratholme"
+        - "Dae'gun"
+        - "Dalaran"
+        - "Dalaran Intro"
+        - "Darkmoon Faire"
+        - "Darnassus"
+        - "Darnassus Intro"
+        - "Druids of the Flame"
+        - "Dungeon Boss"
+        - "Dungeon Horror"
+        - "Durnholde Keep"
+        - "Eastwind Shore"
+        - "Ebon Hold"
+        - "Elderwild"
+        - "Enchanted Forest"
+        - "Escape from Durnholde"
+        - "Farholde Keep"
+        - "Felblood Scar"
+        - "Fire Festival"
+        - "Gecko"
+        - "Ginsu Valor"
+        - "Grizzly Hills"
+        - "Grizzly Hills Hero"
+        - "Gustberry Lowlands"
+        - "Hillsbrad"
+        - "Hyjal (Call to Arms) I"
+        - "Hyjal (Call to Arms) II"
+        - "Invincible"
+        - "Iron Dwarf Day"
+        - "Iron Dwarf March"
+        - "Ironforge"
+        - "Jaina Homeland Calm"
+        - "Jaina Homeland March"
+        - "Jaina Intro"
+        - "Lament of the Highborne"
+        - "Legion"
+        - "Malorne's Retreat"
+        - "Mists of Pandaria"
+        - "Mount Hyjal"
+        - "Mourning's Rest"
+        - "Naxxramas"
+        - "Night Elves"
+        - "Orgrimmar"
+        - "Positive Chi"
+        - "Power of the Horde"
+        - "PvP"
+        - "Rescue"
+        - "Riverglades"
+        - "Rog'mar Outpost"
+        - "Serpent Riders Race"
+        - "Shado-Pan Walk"
+        - "Shadowgale Forest"
+        - "Shen'dar"
+        - "Shorel'aran"
+        - "Shrine of Akir"
+        - "Shrine of Aviana"
+        - "Silvermoon"
+        - "Spooky"
+        - "Storm Peaks"
+        - "Storm Peaks Twilight"
+        - "Stormlords on the March I"
+        - "Stormlords on the March II"
+        - "Stormlords on the March III"
+        - "Stormwind"
+        - "Stormwind Intro"
+        - "Stormwind Variation"
+        - "Stranglethorn Vale"
+        - "Summit of Eternity"
+        - "Sunnyglade"
+        - "Sunwell Flyby"
+        - "Tainted Foothills"
+        - "The Burning Legion"
+        - "The War Soul Saga"
+        - "The War Within"
+        - "Thendal Village"
+        - "Thrall and Aggra"
+        - "Thrall's Escape"
+        - "Through the Roof of the World"
+        - "Thunder Bluff"
+        - "Title of Liulang"
+        - "Twilight's Shroud"
+        - "Undercity"
+        - "Valanaar"
+        - "Vanilla Main Title"
+        - "Warlords of Draenor"
+        - "Way of the Monk"
+        - "Wheeler's Grange"
+        - "Wrath of the Lich King"
+        - "Zul'Gurub Voodoo (Retail)"
+        - "Zul'Gurub Voodoo (WoW Forever)"
+        # END generated: tracks
+    validations:
+      required: false
   - type: textarea
     id: request
     attributes:

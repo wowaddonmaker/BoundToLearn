@@ -1554,9 +1554,9 @@ function GameUI:CreateResultsPanel(f)
         GameUI:ToggleShareMenu(rp.shareBtn)
     end)
 
-    -- Bottom right: the report carries this round's track, difficulty and numbers.
+    -- Bottom left: the report carries this round's track, difficulty and numbers.
     rp.feedbackBtn = ns.Feedback.CreateButton(rp, function() return GameUI:FeedbackContext() end)
-    rp.feedbackBtn:SetPoint("BOTTOMRIGHT", -4, 10)
+    rp.feedbackBtn:SetPoint("BOTTOMLEFT", 4, 10)
 
     f.resultsPanel = rp
 end
@@ -1723,7 +1723,8 @@ local function ListOn(set)
 end
 
 -- Give feedback details for the track select, its stats page and the round-over
--- page: the screen name, then its lines.
+-- page: the screen name, its lines, and the track key when the screen is about
+-- one track (round over, track stats).
 function GameUI:FeedbackContext()
     local db = BoundToLearn.db.game
     local songs = ns.SongData.songs
@@ -1753,7 +1754,7 @@ function GameUI:FeedbackContext()
         local best = db.songScores and db.songScores[song.key] and db.songScores[song.key][db.difficulty]
         lines[#lines + 1] = "Best on this difficulty: " .. (best and tostring(best) or "none")
     end
-    return screen, lines
+    return screen, lines, (screen ~= "Track select" and song) and song.key or nil
 end
 
 function GameUI:ExitResultsMode()
@@ -3275,7 +3276,8 @@ function GameUI:CreateMainMenu()
             "Bars: " .. ListOn(db.bars),
         }
     end)
-    feedbackBtn:SetPoint("TOPRIGHT", -34, -16)
+    -- Bottom left, level with Start.
+    feedbackBtn:SetPoint("BOTTOMLEFT", 16, 34)
 
     -- Start enters the song-selection carousel, where the track and difficulty
     -- are chosen and the round begins.
