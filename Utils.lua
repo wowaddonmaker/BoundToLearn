@@ -11,7 +11,6 @@ local mmin, mmax, mabs, mceil, mfloor = math.min, math.max, math.abs, math.ceil,
 local pcall, tostring, tonumber = pcall, tostring, tonumber
 local GetTime, CreateFrame = GetTime, CreateFrame
 local PlaySound = PlaySound
-local PlaySoundFile = PlaySoundFile
 local wipe = wipe
 
 Utils.pairs    = pairs

@@ -1185,8 +1185,7 @@ do
 local LayoutCheck = {}
 ns.LayoutCheck = LayoutCheck
 
-local Utils = ns.Utils
-local sformat, mmax, mmin, mfloor = Utils.sformat, Utils.mmax, Utils.mmin, Utils.mfloor
+local sformat, mmin = Utils.sformat, Utils.mmin
 local tinsert, ipairs = Utils.tinsert, Utils.ipairs
 
 local MIN_OVERLAP = 3          -- screen pixels on both axes before it counts

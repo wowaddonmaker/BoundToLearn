@@ -11,9 +11,7 @@ local mmax    = Utils.mmax
 local tinsert = Utils.tinsert
 local pairs   = Utils.pairs
 local ipairs  = Utils.ipairs
-local wipe    = Utils.wipe
 local slower  = Utils.slower
-local sfind   = Utils.sfind
 
 local msqrt  = Utils.msqrt or math.sqrt
 
@@ -502,7 +500,7 @@ function KeybindAudit:Scan(options)
     local includeGrouping = options.includeGrouping
     local keyboardLayout = options.keyboardLayout or "QWERTY"
     local layout = KEYBOARD_LAYOUTS[keyboardLayout] or KEYBOARD_LAYOUTS.QWERTY
-    local groupingScore = 0
+    local groupingScore
     local roleGroups = {}  -- role → { baseKeys = {}, slots = {} }
 
     for _, slotData in ipairs(allSlots) do

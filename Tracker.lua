@@ -11,16 +11,13 @@ local wipe     = Utils.wipe
 local mfloor   = Utils.mfloor
 local sformat  = Utils.sformat
 local sfind    = Utils.sfind
-local pairs    = Utils.pairs
 local ipairs   = Utils.ipairs
 
 local hooksecurefunc = hooksecurefunc
 local GetActionTexture = GetActionTexture
 local GetActionInfo = GetActionInfo
 local HasAction = HasAction
-local InCombatLockdown = InCombatLockdown
 local C_Spell = C_Spell
-local C_MountJournal = C_MountJournal
 local C_ToyBox = C_ToyBox
 local C_Item = C_Item
 local CONSUMABLE_CLASS_ID = Enum.ItemClass.Consumable
@@ -102,15 +99,13 @@ local TELEPORT_SPELLS = {
     [32271] = true, [32272] = true, [33690] = true, [35715] = true, [49358] = true, [49359] = true,
     [53140] = true, [88342] = true, [88344] = true, [132621] = true, [132627] = true,
     [176242] = true, [176248] = true, [224869] = true, [224871] = true, [281403] = true,
-    [281404] = true, [344587] = true, [344597] = true, [395277] = true, [395289] = true,
-    [446540] = true, [446534] = true,
+    [281404] = true, [344587] = true, [395277] = true, [446540] = true,
     -- Mage portals
     [10059] = true, [11416] = true, [11417] = true, [11418] = true, [11419] = true, [11420] = true,
     [32266] = true, [32267] = true, [33691] = true, [35717] = true, [49360] = true, [49361] = true,
     [53142] = true, [88345] = true, [88346] = true, [132620] = true, [132626] = true,
     [176244] = true, [176246] = true, [224870] = true, [224872] = true, [281400] = true,
-    [281402] = true, [344597] = true, [395289] = true,
-    [446534] = true, [446540] = true,
+    [281402] = true, [344597] = true, [395289] = true, [446534] = true,
     -- Monk
     [126892] = true, -- Zen Pilgrimage
     [126895] = true, -- Zen Pilgrimage: Return
@@ -140,17 +135,6 @@ local MAX_STORED_SEGMENTS = 50
 local segments = {}     -- completed segments, most recent first
 local overallData = { clicks = 0, keybinds = 0 }
 local sessionStartTime = 0  -- overall session start (for Stats recording)
-
-local function NewSegment(label)
-    return {
-        label = label or "Current",
-        startTime = GetTime(),
-        endTime = nil,
-        clicks = 0,
-        keybinds = 0,
-        actionLog = {},
-    }
-end
 
 local function FinalizeCurrentSegment()
     local total = sessionData.clicks + sessionData.keybinds
@@ -709,7 +693,7 @@ combatFrame:SetScript("OnEvent", function(self, event, ...)
         if ns.TrackerUI then ns.TrackerUI:OnSegmentChanged() end
 
     elseif event == "ENCOUNTER_END" then
-        local encounterID, encounterName, difficultyID, groupSize, success = ...
+        local _, encounterName, _, _, success = ...
         inEncounter = false
         if success == 0 then
             sessionData.label = (sessionData.label or encounterName) .. " (Wipe)"

@@ -13,7 +13,6 @@ local mabs     = Utils.mabs
 local mfloor   = Utils.mfloor
 local mmin, mmax = Utils.mmin, Utils.mmax
 local ipairs   = Utils.ipairs
-local sformat  = Utils.sformat
 local pairs    = Utils.pairs
 
 local CreateFrame      = Utils.CreateFrame
@@ -25,7 +24,6 @@ local IsShiftKeyDown   = IsShiftKeyDown
 local IsControlKeyDown = IsControlKeyDown
 local IsAltKeyDown     = IsAltKeyDown
 local UIParent         = UIParent
-local C_Spell          = C_Spell
 
 local isRunning = false
 local isPaused = false

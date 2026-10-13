@@ -4211,8 +4211,6 @@ function GameUI:PlayLevelUpEffect(parent)
 
         -- Rotate rays
         local angle = elapsed * 0.4
-        local cos, sin = math.cos(angle), math.sin(angle)
-        local w, h = luf.rays:GetSize()
         luf.rays:SetRotation(angle)
     end)
 

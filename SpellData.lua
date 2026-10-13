@@ -336,7 +336,6 @@ local CLASS_SPELLS = {
         -- Defensive
         [104773] = "defensive",    -- Unending Resolve
         [108416] = "defensive",    -- Dark Pact
-        [386997] = "defensive",    -- Soul Harvest
         -- Offensive
         [1122]   = "offensive_cd", -- Summon Infernal
         [205180] = "offensive_cd", -- Summon Darkglare

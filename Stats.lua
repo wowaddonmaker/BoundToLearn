@@ -7,7 +7,6 @@ local Utils   = ns.Utils
 local tinsert = Utils.tinsert
 local tremove = Utils.tremove
 local mfloor  = Utils.mfloor
-local ipairs  = Utils.ipairs
 local GetTime = Utils.GetTime
 
 local MAX_SESSIONS = 100

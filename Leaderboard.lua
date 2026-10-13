@@ -9,7 +9,6 @@ local tinsert = Utils.tinsert
 local tremove = Utils.tremove
 local pairs   = Utils.pairs
 local ipairs  = Utils.ipairs
-local wipe    = Utils.wipe
 local mfloor  = Utils.mfloor
 local GetTime = Utils.GetTime
 

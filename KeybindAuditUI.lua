@@ -10,7 +10,6 @@ local mmin, mmax = Utils.mmin, Utils.mmax
 local ipairs     = Utils.ipairs
 local pairs      = Utils.pairs
 local tinsert    = Utils.tinsert
-local wipe       = Utils.wipe
 local CreateFrame = Utils.CreateFrame
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK

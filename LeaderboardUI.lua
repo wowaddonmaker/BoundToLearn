@@ -5,13 +5,11 @@ ns.LeaderboardUI = LeaderboardUI
 
 local Utils   = ns.Utils
 local sformat = Utils.sformat
-local mfloor  = Utils.mfloor
 local ipairs  = Utils.ipairs
 local pairs   = Utils.pairs
 local tinsert = Utils.tinsert
 local CreateFrame = Utils.CreateFrame
 local PlayUISound = Utils.PlayUISound
-local SOUND_TAB   = Utils.SOUND_TAB
 local SOUND_CLICK = Utils.SOUND_CLICK
 
 local DIFFICULTIES = { "Easy", "Medium", "Hard", "Extreme" }

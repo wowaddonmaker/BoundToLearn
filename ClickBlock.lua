@@ -32,21 +32,6 @@ local BUTTON_PREFIXES = {
 
 local RED_TINT = { r = 0.8, g = 0.1, b = 0.1, a = 0.35 }
 
-local function GetButtonForSlot(slot)
-    for _, prefix in ipairs(BUTTON_PREFIXES) do
-        for i = 1, 12 do
-            local btn = _G[prefix .. i]
-            if btn then
-                local btnAction = btn.action or (btn.GetAction and btn:GetAction())
-                if btnAction == slot then
-                    return btn
-                end
-            end
-        end
-    end
-    return nil
-end
-
 local function GetButtonSpellID(btn, slot)
     local actionType, id, subType = GetActionInfo(slot)
     if id and id ~= 0 and (actionType == "spell" or subType == "spell") then
@@ -124,7 +109,7 @@ end
 
 local function ApplyOverlays()
     -- Hide all existing overlays first
-    for slot, overlay in pairs(overlays) do
+    for _, overlay in pairs(overlays) do
         overlay:Hide()
     end
 
@@ -199,7 +184,7 @@ function ClickBlock:Disable()
     isActive = false
     BoundToLearn.db.clickBlock.enabled = false
     eventFrame:UnregisterAllEvents()
-    for slot, overlay in pairs(overlays) do
+    for _, overlay in pairs(overlays) do
         overlay:Hide()
     end
     pendingApply = false

@@ -12,7 +12,6 @@ local mfloor   = Utils.mfloor
 local mmin     = Utils.mmin
 local mmax     = Utils.mmax
 local ipairs   = Utils.ipairs
-local sformat  = Utils.sformat
 local CreateFrame = Utils.CreateFrame
 
 local GetBindingKey = GetBindingKey
@@ -114,8 +113,7 @@ function PingGame:GetPingKeybinds()
 end
 
 function PingGame:HasPingKeybinds()
-    for _ in pairs(pingKeybinds) do return true end
-    return false
+    return next(pingKeybinds) ~= nil
 end
 
 -- True only when every target-relevant ping (attack/assist/warning) is bound.

@@ -9,7 +9,6 @@ local sformat   = Utils.sformat
 local mfloor    = Utils.mfloor
 local mceil     = Utils.mceil
 local mmax      = Utils.mmax
-local tinsert   = Utils.tinsert
 local pairs     = Utils.pairs
 local CreateFrame = Utils.CreateFrame
 
@@ -636,7 +635,7 @@ local function BuildTrackerTab()
         end,
         { format = function(v) return sformat("%.0f%%", v * 100) end })
 
-    _, y = AddStepper(tab, y, "Visible Segments", 2, 20,
+    AddStepper(tab, y, "Visible Segments", 2, 20,
         function() return BoundToLearn.db.tracker.maxSegments end,
         function(v) BoundToLearn.db.tracker.maxSegments = v end)
 end

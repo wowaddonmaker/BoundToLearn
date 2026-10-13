@@ -36,24 +36,11 @@ local TARGET_COLORS = {
     [TARGET_HAZARD] = { 1.0, 0.75, 0.1 },
 }
 
-local TARGET_ICONS = {
-    [TARGET_ENEMY]  = "Ping_Chassis_Ping_Attack",
-    [TARGET_ALLY]   = "Ping_Chassis_Ping_Assist",
-    [TARGET_HAZARD] = "Ping_Chassis_Ping_Warning",
-}
-
 -- Fallback if atlases don't exist
 local TARGET_LABELS = {
     [TARGET_ENEMY]  = "ATK",
     [TARGET_ALLY]   = "ALLY",
     [TARGET_HAZARD] = "WARN",
-}
-
--- WoW ping textureKit suffixes per target type (for Ping_*Marker_* atlases)
-local PING_TEXTURE_KITS = {
-    [TARGET_ENEMY]  = "Attack",
-    [TARGET_ALLY]   = "Assist",
-    [TARGET_HAZARD] = "Warning",
 }
 
 -- Ping action name -> textureKit suffix (for ground pins on miss)
@@ -1730,7 +1717,7 @@ function PingGameUI:OnUpdate(elapsed, duration, currentScore, currentCombo, heal
 
     -- Update target timer bars
     local now = GetTime()
-    for targetID, frame in pairs(activeTargetFrames) do
+    for _, frame in pairs(activeTargetFrames) do
         if frame.targetData then
             local t = frame.targetData
             local pct = mmax(0, (t.expireTime - now) / t.lifetime)
@@ -1814,7 +1801,6 @@ function PingGameUI:OnTargetSpawned(target)
     frame.timerBar:SetVertexColor(c[1], c[2], c[3])
 
     -- Set target visuals based on style setting
-    local style = PingGameUI:GetTargetStyle()
     frame.icon:Hide()
     frame.model:Hide()
 
@@ -1858,7 +1844,8 @@ function PingGameUI:OnTargetSpawned(target)
         local enemyNPCs = (playerFaction == "Alliance") and HORDE_NPC_IDS or ALLIANCE_NPC_IDS
         local allyNPCs  = (playerFaction == "Alliance") and ALLIANCE_NPC_IDS or HORDE_NPC_IDS
 
-        local npcIDs, targetType = nil, target.targetType
+        local npcIDs
+        local targetType = target.targetType
         if targetType == TARGET_ENEMY then
             npcIDs = enemyNPCs
         elseif targetType == TARGET_HAZARD then
