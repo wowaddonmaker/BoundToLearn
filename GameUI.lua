@@ -3276,8 +3276,8 @@ function GameUI:CreateMainMenu()
             "Bars: " .. ListOn(db.bars),
         }
     end)
-    -- Bottom left, level with Start.
-    feedbackBtn:SetPoint("BOTTOMLEFT", 16, 34)
+    -- In the bottom-left corner, just inside the border.
+    feedbackBtn:SetPoint("BOTTOMLEFT", 16, 16)
 
     -- Start enters the song-selection carousel, where the track and difficulty
     -- are chosen and the round begins.
