@@ -1,6 +1,5 @@
 name: Feedback from the addon
 description: Sent from the Give feedback button in BoundToLearn. Something broken, an idea, anything.
-labels: ["feedback"]
 body:
   - type: markdown
     attributes:
