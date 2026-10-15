@@ -453,15 +453,20 @@ end
 -- client plays. Printed, and saved in BoundToLearnDB.songReport for reading
 -- from the SavedVariables file.
 function BoundToLearn:SongCheck()
-    local unplayable, disagree, total = ns.SongData.CheckTracks()
     local repeats = ns.SongData.ArtRepeats()
-    local lines = {
-        sformat("%d of %d tracks play here. Unplayable: %s",
-            total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none"),
-    }
-    if Utils.IS_FOREVER then
-        lines[#lines + 1] = sformat("Differs from the Forever list: %s",
-            #disagree > 0 and table.concat(disagree, " ") or "none")
+    local lines = {}
+    -- With game sound off the client answers "will not play" for every file,
+    -- which says nothing about the tracks.
+    if GetCVar("Sound_EnableAllSound") == "0" then
+        lines[1] = "Track check skipped: game sound is off (Settings, Audio, Enable Sound)."
+    else
+        local unplayable, disagree, total = ns.SongData.CheckTracks()
+        lines[1] = sformat("%d of %d tracks play here. Unplayable: %s",
+            total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none")
+        if Utils.IS_FOREVER then
+            lines[2] = sformat("Differs from the Forever list: %s",
+                #disagree > 0 and table.concat(disagree, " ") or "none")
+        end
     end
     lines[#lines + 1] = sformat("Same picture on 4+ tracks: %s",
         #repeats > 0 and table.concat(repeats, "; ") or "none")
