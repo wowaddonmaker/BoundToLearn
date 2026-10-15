@@ -6,9 +6,8 @@ ns.StatsUI = StatsUI
 local Utils      = ns.Utils
 local sformat    = Utils.sformat
 local mfloor     = Utils.mfloor
-local mmin, mmax = Utils.mmin, Utils.mmax
+local mmax = Utils.mmax
 local ipairs     = Utils.ipairs
-local tinsert    = Utils.tinsert
 local CreateFrame = Utils.CreateFrame
 local PlayUISound = Utils.PlayUISound
 local SOUND_TAB   = Utils.SOUND_TAB
@@ -43,7 +42,7 @@ function StatsUI:CreateFrame()
     if statsFrame then return end
 
     statsFrame = CreateFrame("Frame", "BoundToLearnStatsFrame", UIParent)
-    statsFrame:SetSize(450, 400)
+    statsFrame:SetSize(480, 400)   -- room for Give feedback beside the tabs
     statsFrame:SetPoint("CENTER")
     statsFrame:SetFrameStrata("DIALOG")
     ns.Theme.StylePanel(statsFrame)
@@ -62,6 +61,12 @@ function StatsUI:CreateFrame()
 
     -- Tab buttons
     self:CreateTabs()
+
+    -- On the tab row, right of the tabs.
+    local feedbackBtn = ns.Feedback.CreateButton(statsFrame, function()
+        return "Statistics", { "Tab: " .. activeTab }
+    end)
+    feedbackBtn:SetPoint("TOPRIGHT", -15, -36)
 
     -- Content panels
     self:CreateTrackerPanel()
@@ -354,7 +359,8 @@ function StatsUI:RefreshQuizData()
                 timeStr = sformat("%d.%ds", secs, tenths)
             end
             local roundStr = session.rounds == 1 and "perfect" or sformat("%d rounds", session.rounds)
-            row.detailText:SetText(sformat("%s  |cFF888888(%s, %d abilities)|r", timeStr, roundStr, session.totalAbilities))
+            row.detailText:SetText(sformat("%s  |cFF888888(%s, %s)|r", timeStr, roundStr,
+                Utils.Count(session.totalAbilities, "ability", "abilities")))
             row:Show()
         else
             row:Hide()

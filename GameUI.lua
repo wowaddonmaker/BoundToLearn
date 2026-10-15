@@ -29,6 +29,7 @@ local scoreFrame, scoreText, comboText, multiplierText, difficultyText, timerTex
 local modifierRow, modifierBtn, modifierDropdown
 local achievementPanel
 local songSelect
+local mainMenu
 local pauseOverlay, pauseText
 local notePool = {}
 local resultPool = {}
@@ -607,6 +608,7 @@ function GameUI:BuildModifierDropdown()
         Theme.StylePanel(modifierDropdown, 0.97)
         modifierDropdown:SetFrameStrata("FULLSCREEN_DIALOG")
         modifierDropdown:SetFrameLevel(100)
+        modifierDropdown:SetClampedToScreen(true)
         modifierDropdown.rows = {}
         modifierDropdown:HookScript("OnShow", function() PaintModifierBtn(modifierBtn:IsMouseOver()) end)
         modifierDropdown:HookScript("OnHide", function() PaintModifierBtn(modifierBtn:IsMouseOver()) end)
@@ -617,9 +619,18 @@ function GameUI:BuildModifierDropdown()
     local rowH = 26
     local pad = 6
     local rowW = 208
-    modifierDropdown:SetSize(220, #list * rowH + pad * 2)
+    local ddH = #list * rowH + pad * 2
+    modifierDropdown:SetSize(220, ddH)
     modifierDropdown:ClearAllPoints()
-    modifierDropdown:SetPoint("TOPLEFT", opener, "BOTTOMLEFT", 0, -2)
+    -- Drop down from the opener, or flip above it when there is not enough room
+    -- below; SetClampedToScreen keeps the remaining edges on-screen.
+    local opScale = opener:GetEffectiveScale() or 1
+    local ddScale = modifierDropdown:GetEffectiveScale() or 1
+    if (opener:GetBottom() or 0) * opScale < ddH * ddScale + 8 then
+        modifierDropdown:SetPoint("BOTTOMLEFT", opener, "TOPLEFT", 0, 2)
+    else
+        modifierDropdown:SetPoint("TOPLEFT", opener, "BOTTOMLEFT", 0, -2)
+    end
 
     local active = Mods:GetActive()
     local rows = modifierDropdown.rows
@@ -627,7 +638,23 @@ function GameUI:BuildModifierDropdown()
         local row = rows[i]
         if not row then
             row = Theme.CreateToggle(modifierDropdown, "", nil, rowW)
+            -- Locked/required rows are Disabled; enable motion scripts so they
+            -- still fire OnEnter for the unlock tooltip and the hover wash.
+            row:SetMotionScriptsWhileDisabled(true)
             Theme.DelayedTooltip(row, ModifierRowTooltip)
+            -- Subtle accent hover wash behind the row (same treatment as the
+            -- minimap menu), shown for locked and unlocked rows alike.
+            local hl = CreateFrame("Frame", nil, modifierDropdown)
+            hl:SetFrameLevel(modifierDropdown:GetFrameLevel())
+            hl:SetPoint("TOPLEFT", row, "TOPLEFT", -2, 1)
+            hl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 2, -1)
+            Theme.Round(hl)
+            Theme.SetBarHeight(hl, 10)
+            Theme.SetBorderShown(hl, false)
+            Theme.SetFillColor(hl, Theme.C.ACCENT, 0)
+            row.hl = hl
+            row:HookScript("OnEnter", function(self) Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0.15) end)
+            row:HookScript("OnLeave", function(self) Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0) end)
             rows[i] = row
         end
 
@@ -772,6 +799,9 @@ local function SongBestScore(key, diff)
 end
 
 -- Best fraction (0-1) of a track the player has ever reached, across difficulties.
+-- Song bubble insets: the progress ring, and the title when there is no ring.
+local DONUT_LEFT, TITLE_LEFT = 8, 12
+
 local function SongBestProgress(key)
     local sp = BoundToLearn.db.game.songProgress
     return (sp and sp[key]) or 0
@@ -819,54 +849,6 @@ function GameUI:RecordSongProgress(key, frac)
     if songSelect then songSelect.donutDirty = true end
 end
 
--- Keycap widget: a little keyboard-key shape (front lip + top face) whose face
--- fills bottom-up by a fraction. Used for the difficulty meters and the in-game
--- health gauge, tying the visuals to the addon's keybind theme.
--- A physical keyboard keycap: rounded body with a dark rim (depth), a bottom-up
--- coloured fill for the meter, and a soft top sheen. Built from the shared
--- rounded-rect toolkit so it matches the rest of the UI instead of flat squares.
-local function MakeKeycap(parent, w, h)
-    local cap = CreateFrame("Frame", nil, parent)
-    cap:SetSize(w, h)
-    Theme.Round(cap)
-    Theme.SetBarHeight(cap, mmin(10, h))          -- ~5px corner radius, not a pill
-    Theme.SetFill(cap, 0.13, 0.13, 0.15, 1)
-    Theme.SetBorderColor(cap, 0, 0, 0, 0.95)      -- dark rim reads as key depth
-    cap:SetClipsChildren(true)
-
-    local fill = cap:CreateTexture(nil, "ARTWORK")
-    fill:SetPoint("BOTTOMLEFT", 1, 2)             -- 2px front lip at the bottom
-    fill:SetPoint("BOTTOMRIGHT", -1, 2)
-    fill:SetColorTexture(1, 1, 1, 1)
-    fill:Hide()
-    cap.fill = fill
-
-    local gloss = cap:CreateTexture(nil, "OVERLAY")
-    gloss:SetPoint("TOPLEFT", 2, -2)
-    gloss:SetPoint("TOPRIGHT", -2, -2)
-    gloss:SetHeight(mmax(2, (h - 4) * 0.42))
-    gloss:SetColorTexture(1, 1, 1, 1)
-    gloss:SetGradient("VERTICAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, 0.14))
-    cap.gloss = gloss
-
-    cap.faceH = h - 3
-    return cap
-end
-
-local function SetKeycap(cap, r, g, b, frac, dim)
-    frac = frac or 0
-    if frac <= 0 then
-        cap.fill:Hide()
-        Theme.SetFill(cap, 0.12, 0.12, 0.14, dim and 0.5 or 0.95)
-        cap.gloss:SetAlpha(dim and 0.4 or 0.8)
-        return
-    end
-    Theme.SetFill(cap, r * 0.22, g * 0.22, b * 0.22, 1)
-    cap.fill:SetHeight(mmax(1, cap.faceH * mmin(1, frac)))
-    cap.fill:SetColorTexture(r, g, b, dim and 0.6 or 1)
-    cap.fill:Show()
-    cap.gloss:SetAlpha(dim and 0.5 or 1)
-end
 
 -- Fill colour ramps with how full the bar is: green when barely filled (easy) through
 -- yellow and orange to red when nearly full (hard).
@@ -923,6 +905,20 @@ local function SetDiffBar(frame, rating, dim)
     frame:SetAlpha(dim and 0.55 or 1)
 end
 
+-- In-round life gauge: the same rounded cast-bar track as the difficulty meter, but the
+-- fill is the remaining life and the ramp runs the other way (full = green, empty = red).
+local function MakeLifeBar(parent, w, h)
+    local frame = MakeDiffBar(parent, w, h)
+    frame.bar:SetMinMaxValues(0, 1)
+    return frame
+end
+
+local function SetLifeBar(frame, frac)
+    frac = mmax(0, mmin(1, frac))
+    frame.bar:SetValue(frac)
+    frame.bar:SetStatusBarColor(DiffRampColor(1 - frac))
+end
+
 -- A renown-style progress donut: a dim circular track with a coloured arc that
 -- fills clockwise to a fraction. The arc is a paused radial sweep (Cooldown) and
 -- a masked centre hole carves the ring. Used per song bubble to show how far the
@@ -970,40 +966,12 @@ local function SetDonut(d, frac, r, g, b)
     end
 end
 
--- A renown-button textured bubble button, desaturated to the same cool silver as
--- the song wheel bubbles so the whole panel shares one colour scheme. An additive
--- highlight of the same shape gives a clear hover glow.
-local BUBBLE_SILVER = { 0.80, 0.83, 0.88 }
+-- The song select's buttons: the client's own button art.
 local function MakeBubbleButton(parent, text, w, h)
-    local b = CreateFrame("Button", nil, parent)
+    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(w, h)
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetAtlas("UI-Journeys-Renown-Button")
-    bg:SetDesaturated(true)
-    bg:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3])
-    b.bg = bg
-    local pressed = b:CreateTexture(nil, "BACKGROUND")
-    pressed:SetAllPoints()
-    pressed:SetAtlas("UI-Journeys-Renown-Button-pressed")
-    pressed:SetDesaturated(true)
-    pressed:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3])
-    pressed:Hide()
-    local hl = b:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetAllPoints()
-    hl:SetAtlas("UI-Journeys-Renown-Button")
-    hl:SetBlendMode("ADD")
-    hl:SetAlpha(0.28)
-    local label = b:CreateFontString(nil, "OVERLAY")
-    label:SetFont("Fonts\\FRIZQT__.TTF", mmax(12, mfloor(h * 0.5)), "OUTLINE")
-    label:SetPoint("CENTER")
-    label:SetText(text)
-    label:SetTextColor(1, 1, 1)
-    b.label = label
-    b:SetScript("OnMouseDown", function() bg:Hide(); pressed:Show() end)
-    b:SetScript("OnMouseUp", function() pressed:Hide(); bg:Show() end)
-    b:HookScript("OnEnter", function() bg:SetVertexColor(1.0, 1.04, 1.12) end)
-    b:HookScript("OnLeave", function() bg:SetVertexColor(BUBBLE_SILVER[1], BUBBLE_SILVER[2], BUBBLE_SILVER[3]) end)
+    b:SetText(text)
+    b.label = b:GetFontString()
     return b
 end
 
@@ -1076,6 +1044,8 @@ function GameUI:ShowSongContextMenu(slot)
         catcher:RegisterForClicks("AnyUp")
         catcher:Hide()
         catcher:SetScript("OnClick", function(self) self:Hide() end)
+        -- First Esc closes just this menu, not the song-select window under it.
+        Utils.CloseOnEscape(catcher)
 
         menu = CreateFrame("Frame", nil, catcher)
         menu:SetSize(150, 62)
@@ -1106,6 +1076,8 @@ function GameUI:ShowSongContextMenu(slot)
     menu.songKey = key
     local song = ns.SongData and ns.SongData.Get(key)
     menu.title:SetText((song and song.title) or key)
+    -- 150 is a floor: a long song title widens the menu to fit.
+    menu:SetWidth(mmax(150, mfloor(menu.title:GetUnboundedStringWidth()) + 24))
 
     local scale = UIParent:GetEffectiveScale()
     local cx, cy = GetCursorPosition()
@@ -1122,7 +1094,7 @@ function GameUI:CreateSongSelect()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     f:SetFrameStrata("FULLSCREEN")
     f:SetFrameLevel(70)
-    Theme.StylePanel(f, 0.96)
+    Theme.StylePanel(f, 0.96, "window")
     f:EnableMouse(true)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
@@ -1142,20 +1114,35 @@ function GameUI:CreateSongSelect()
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
     title:SetPoint("TOPLEFT", 18, -17)
-    title:SetText("Select Music")
+    title:SetText("Select Track")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     local closeBtn = Theme.CreateCloseButton(f, function() GameUI:HideSongSelect() end)
     closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -8, -8)
 
+    local backBtn = MakeBubbleButton(f, "|TInterface\\Buttons\\UI-SpellbookIcon-PrevPage-Up:14:14|t Menu", 72, 22)
+    backBtn:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    backBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:HideSongSelect()
+        GameUI:ShowMainMenu()
+    end)
+    f.backToMenuBtn = backBtn
+
     local statsBtn = MakeBubbleButton(f, "Stats", 62, 22)
-    statsBtn:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    statsBtn:SetPoint("LEFT", backBtn, "RIGHT", 6, 0)
     statsBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ToggleStatsPanel()
     end)
     f.statsBtn = statsBtn
+
+    -- Top right, on the title row left of the close button. Hidden on the
+    -- round-over page, which has its own.
+    local feedbackBtn = ns.Feedback.CreateButton(f, function() return GameUI:FeedbackContext() end)
+    feedbackBtn:SetPoint("TOPRIGHT", -34, -16)
+    f.feedbackBtn = feedbackBtn
 
     -- Right column: a 3D-style song wheel. Fixed slots the tracks roll through
     -- with a sliding animation; the selected track is the large centre slot and
@@ -1177,16 +1164,18 @@ function GameUI:CreateSongSelect()
     -- Slots live in an inset viewport so they are cut off at the interior
     -- border of the background art, not at the outer window edge.
     local wheelClip = CreateFrame("Frame", nil, f)
-    wheelClip:SetPoint("TOPLEFT", 250, -58)      -- top edge sits at the interior border
+    wheelClip:SetPoint("TOPLEFT", 250, -86)      -- dropped below the header row + search
     wheelClip:SetPoint("BOTTOMRIGHT", -24, 14)   -- right edge sits at the interior border
     wheelClip:SetClipsChildren(true)
+    wheelClip._btlNoLayoutCheck = true   -- wheel bubbles stack by design
     f.wheelClip = wheelClip
 
     -- Search box above the wheel: filters the carousel by title or artist.
     local search = CreateFrame("EditBox", nil, f)
-    -- Vertical center aligned with the title/Stats header row (same top, both ~22px).
-    search:SetPoint("TOPLEFT", 250, -17)
-    search:SetPoint("TOPRIGHT", -24, -17)
+    -- Under the backdrop art's header band (its gold line ends near -55) and
+    -- above the wheel, clear of both.
+    search:SetPoint("TOPLEFT", 250, -60)
+    search:SetPoint("TOPRIGHT", -24, -60)
     search:SetHeight(22)
     search:SetAutoFocus(false)
     search:SetFontObject("GameFontHighlightSmall")
@@ -1198,23 +1187,20 @@ function GameUI:CreateSongSelect()
     ph:SetText("Search tracks...")
     search.placeholder = ph
 
-    -- Clear (x) button: just an x until hovered, then a button shape appears
-    -- behind it. Only shown when there is text.
+    -- Clear (x) button, as the client's own search box draws it: a small x at
+    -- half strength, full on hover, nudged on press. Only shown with text.
     local clearBtn = CreateFrame("Button", nil, search)
-    clearBtn:SetSize(16, 16)
+    clearBtn:SetSize(17, 17)
     clearBtn:SetPoint("RIGHT", -6, 0)
-    local clearShape = clearBtn:CreateTexture(nil, "BACKGROUND")
-    clearShape:SetPoint("CENTER")
-    clearShape:SetSize(22, 20)
-    clearShape:SetAtlas("UI-Journeys-Renown-Button")
-    clearShape:SetDesaturated(true)
-    clearShape:SetVertexColor(0.85, 0.88, 0.95)
-    clearShape:Hide()
-    local clearIcon = clearBtn:CreateTexture(nil, "OVERLAY")
-    clearIcon:SetAllPoints()
+    local clearIcon = clearBtn:CreateTexture(nil, "ARTWORK")
+    clearIcon:SetSize(10, 10)
+    clearIcon:SetPoint("TOPLEFT", 3, -3)
     clearIcon:SetAtlas("common-search-clearbutton")
-    clearBtn:HookScript("OnEnter", function() clearShape:Show() end)
-    clearBtn:HookScript("OnLeave", function() clearShape:Hide() end)
+    clearIcon:SetAlpha(0.5)
+    clearBtn:SetScript("OnEnter", function() clearIcon:SetAlpha(1) end)
+    clearBtn:SetScript("OnLeave", function() clearIcon:SetAlpha(0.5) end)
+    clearBtn:SetScript("OnMouseDown", function() clearIcon:SetPoint("TOPLEFT", 4, -4) end)
+    clearBtn:SetScript("OnMouseUp", function() clearIcon:SetPoint("TOPLEFT", 3, -3) end)
     clearBtn:SetScript("OnClick", function()
         search:SetText("")
         search:ClearFocus()
@@ -1290,11 +1276,11 @@ function GameUI:CreateSongSelect()
         slot.hl = hl
 
         local donut = MakeDonut(slot, 20)      -- resized per-row to ~55% of bubble height
-        donut:SetPoint("LEFT", 10, 0)
+        donut:SetPoint("LEFT", DONUT_LEFT, 0)
         slot.donut = donut
 
         local st = slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        st:SetPoint("LEFT", 40, 0)
+        st:SetPoint("LEFT", 34, 0)
         st:SetPoint("RIGHT", -14, 0)
         st:SetJustifyH("LEFT")
         st:SetWordWrap(false)
@@ -1417,7 +1403,7 @@ function GameUI:CreateSongSelect()
     self:CreateResultsPanel(f)
 
     -- ESC closes the menu (and stops the preview music when it hides).
-    tinsert(UISpecialFrames, "BoundToLearnSongSelect")
+    Utils.CloseOnEscape(f)
     f:HookScript("OnHide", function() GameUI:StopSongPreview() end)
 
     songSelect = f
@@ -1538,10 +1524,11 @@ function GameUI:CreateResultsPanel(f)
     rp.songArtist:SetPoint("TOP", rp.songTitle, "BOTTOM", 0, -1)
     rp.songArtist:SetTextColor(1, 1, 1, 0.7)
 
-    -- Back to Tracks sits top-left like a return button (with a left arrow); Try
-    -- Again and Share are the primary actions, centered as a pair along the bottom.
-    rp.backBtn = MakeBubbleButton(rp, "|TInterface\\Buttons\\UI-SpellbookIcon-PrevPage-Up:14:14|t Back to Tracks", 150, 24)
+    -- A small Back top-left (its tooltip says where to); Try Again and Share
+    -- are the primary actions, centered as a pair along the bottom.
+    rp.backBtn = MakeBubbleButton(rp, "Back", 66, 22)
     rp.backBtn:SetPoint("TOPLEFT", 2, -4)
+    Theme.AttachTooltip(rp.backBtn, "Back to tracks")
     rp.backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:ExitResultsMode()
@@ -1566,6 +1553,10 @@ function GameUI:CreateResultsPanel(f)
         PlayUISound(SOUND_CLICK)
         GameUI:ToggleShareMenu(rp.shareBtn)
     end)
+
+    -- Bottom left: the report carries this round's track, difficulty and numbers.
+    rp.feedbackBtn = ns.Feedback.CreateButton(rp, function() return GameUI:FeedbackContext() end)
+    rp.feedbackBtn:SetPoint("BOTTOMLEFT", 4, 10)
 
     f.resultsPanel = rp
 end
@@ -1631,10 +1622,12 @@ function GameUI:ShowResultsOnSelect(results)
     for _, control in ipairs(songSelect.leftControls) do control:Hide() end
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Hide() end
 
     local rp = songSelect.resultsPanel
     local totalNotes = results.totalNotes or 0
-    local accuracy = totalNotes > 0 and ((totalNotes - (hc.miss or 0)) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(hc)
 
     rp.title:SetText(results.focusFailed and "|cFFFF6666Round Over|r"
         or "|cFF" .. Theme.ACCENT_HEX .. "Round Complete|r")
@@ -1719,6 +1712,51 @@ function GameUI:ShowResultsOnSelect(results)
     end
 end
 
+-- Sorted keys of a set's true entries, or "none".
+local function ListOn(set)
+    local keys = {}
+    for k, v in pairs(set or {}) do
+        if v then keys[#keys + 1] = tostring(k) end
+    end
+    table.sort(keys)
+    return #keys > 0 and table.concat(keys, ", ") or "none"
+end
+
+-- Give feedback details for the track select, its stats page and the round-over
+-- page: the screen name, its lines, and the track key when the screen is about
+-- one track (round over, track stats).
+function GameUI:FeedbackContext()
+    local db = BoundToLearn.db.game
+    local songs = ns.SongData.songs
+    local song = songSelect and songs[songSelect.selIndex or 1]
+    local screen = "Track select"
+    if songSelect and songSelect.resultsMode then
+        screen = "Round over"
+    elseif songSelect and songSelect.statsMode then
+        screen = "Track stats"
+    end
+    local lines = {}
+    if song then
+        lines[#lines + 1] = sformat("Track: %s (%s), %d tracks listed", song.title, song.key, #songs)
+    end
+    lines[#lines + 1] = sformat("Difficulty: %s, mode: %s", tostring(db.difficulty), tostring(db.mode))
+    lines[#lines + 1] = "Modifiers: " .. ListOn(ns.Modifiers and ns.Modifiers:GetActive())
+    lines[#lines + 1] = "Bars: " .. ListOn(db.bars)
+    local r = self.lastResults
+    if screen == "Round over" and r then
+        local hc = r.hitCounts or {}
+        lines[#lines + 1] = sformat("Round: score %d, accuracy %.1f%%, max combo %d, %s",
+            r.score or 0, ns.Utils.HitAccuracy(hc), r.maxCombo or 0, r.focusFailed and "failed" or "completed")
+        lines[#lines + 1] = sformat("Notes: %d perfect, %d great, %d good, %d miss; %d of %d shown, %ds",
+            hc.perfect or 0, hc.great or 0, hc.good or 0, hc.miss or 0,
+            r.notesShown or 0, r.chartTotal or 0, r.duration or 0)
+    elseif song then
+        local best = db.songScores and db.songScores[song.key] and db.songScores[song.key][db.difficulty]
+        lines[#lines + 1] = "Best on this difficulty: " .. (best and tostring(best) or "none")
+    end
+    return screen, lines, (screen ~= "Track select" and song) and song.key or nil
+end
+
 function GameUI:ExitResultsMode()
     if not songSelect then return end
     songSelect.resultsMode = false
@@ -1728,6 +1766,8 @@ function GameUI:ExitResultsMode()
     for _, control in ipairs(songSelect.leftControls) do control:Show() end
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -1738,6 +1778,21 @@ end
 -- Game stats overlay, reached from the Stats button on the select screen. Covers
 -- the carousel with aggregate lifetime numbers; Back returns to track selection.
 local STATS_SONG_DIFFS = { "Easy", "Medium", "Hard", "Extreme" }
+
+-- Shared by the in-game stats page's Reset button and the options panel's reset
+-- button, via a themed confirm dialog that floats above both windows.
+function GameUI:ConfirmResetStats()
+    Theme.ShowConfirm({
+        title = "Reset Stats",
+        body = "Reset all BoundToLearn statistics? This cannot be undone.",
+        acceptText = _G["RESET"] or "Reset",
+        onAccept = function()
+            if ns.Stats then ns.Stats:ResetAll() end
+            if ns.GameUI then ns.GameUI:RefreshStatsPanel() end
+            if BoundToLearn then BoundToLearn:Print("Statistics reset.") end
+        end,
+    })
+end
 
 function GameUI:CreateStatsPanel(f)
     local sp = CreateFrame("Frame", nil, f)
@@ -1751,23 +1806,34 @@ function GameUI:CreateStatsPanel(f)
     -- the carousel.
     local backBtn = MakeBubbleButton(sp, "Back", 66, 22)
     backBtn:SetPoint("TOPLEFT", 2, -4)
+    Theme.AttachTooltip(backBtn, "Back to tracks")
     backBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         GameUI:HideStatsPage()
     end)
 
-    local title = sp:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 20, "OUTLINE")
+    local resetBtn = MakeBubbleButton(sp, "Reset Stats", 92, 22)
+    resetBtn:SetPoint("BOTTOMLEFT", 2, 10)
+    resetBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:ConfirmResetStats()
+    end)
+
+    -- The window's own Give feedback sits where the Summary / By Song toggle
+    -- goes, so this page has one level with Reset Stats.
+    sp.feedbackBtn = ns.Feedback.CreateButton(sp, function() return GameUI:FeedbackContext() end)
+    sp.feedbackBtn:SetPoint("BOTTOMRIGHT", -2, 10)
+
+    local title = sp:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -8)
     title:SetText("Your Stats")
-    title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
     -- Summary / By Song toggle.
     sp.summaryBtn = MakeBubbleButton(sp, "Summary", 78, 20)
-    sp.summaryBtn:SetPoint("TOPRIGHT", -102, -5)
+    sp.summaryBtn:SetPoint("TOPRIGHT", -118, -5)
     sp.summaryBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("summary") end)
     sp.songBtn = MakeBubbleButton(sp, "By Song", 78, 20)
-    sp.songBtn:SetPoint("TOPRIGHT", -20, -5)
+    sp.songBtn:SetPoint("TOPRIGHT", -32, -5)
     sp.songBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:SetStatsView("song") end)
 
     -- ===== Summary view: lifetime / overall stats =====
@@ -1776,22 +1842,17 @@ function GameUI:CreateStatsPanel(f)
     sp.summaryGroup = sum
     sp.values = {}
     local function stat(offsetX, y, key, label, big)
-        local val = sum:CreateFontString(nil, "OVERLAY")
-        val:SetFont("Fonts\\FRIZQT__.TTF", big and 28 or 19, "OUTLINE")
+        local val = sum:CreateFontString(nil, "OVERLAY", big and "GameFontHighlightHuge" or "GameFontHighlightLarge")
         val:SetPoint("TOP", sum, "TOP", offsetX, y)
-        val:SetTextColor(1, 1, 1)
         local lbl = sum:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("TOP", val, "BOTTOM", 0, -2)
         lbl:SetText(label)
-        lbl:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
         sp.values[key] = val
     end
     local function header(y, text)
-        local h = sum:CreateFontString(nil, "OVERLAY")
-        h:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        local h = sum:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h:SetPoint("TOP", 0, y)
         h:SetText(text)
-        h:SetTextColor(1, 0.82, 0)
         local line = sum:CreateTexture(nil, "ARTWORK")
         line:SetPoint("TOP", h, "BOTTOM", 0, -3)
         line:SetSize(360, 1)
@@ -1812,6 +1873,13 @@ function GameUI:CreateStatsPanel(f)
     stat(-66,  -308, "Medium",  "Medium", false)
     stat(66,   -308, "Hard",    "Hard", false)
     stat(198,  -308, "Extreme", "Extreme", false)
+
+    local sumShare = MakeBubbleButton(sum, "Share Stats", 110, 22)
+    sumShare:SetPoint("BOTTOM", sum, "BOTTOM", 0, 10)
+    sumShare:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        GameUI:OpenShareMenu(sumShare, GameUI:BuildSummaryShareText())
+    end)
 
     -- ===== Song view: per-track stats =====
     local sg = CreateFrame("Frame", nil, sp)
@@ -1856,8 +1924,7 @@ function GameUI:BuildStatsSongView(sg, sp)
     nxt:SetPoint("TOPRIGHT", -20, -104)
     nxt:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); GameUI:CycleStatsSong(1) end)
 
-    local nameFS = sg:CreateFontString(nil, "OVERLAY")
-    nameFS:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
+    local nameFS = sg:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     nameFS:SetPoint("LEFT", prev, "RIGHT", 6, 1)
     nameFS:SetPoint("RIGHT", nxt, "LEFT", -6, 1)
     nameFS:SetJustifyH("CENTER")
@@ -1904,6 +1971,14 @@ function GameUI:BuildStatsSongView(sg, sp)
     local prog = sg:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     prog:SetPoint("TOPLEFT", 22, headY - 26 - 4 * 30 - 14)
     sp.songProgFS = prog
+
+    local songShare = MakeBubbleButton(sg, "Share", 90, 22)
+    songShare:SetPoint("BOTTOM", sg, "BOTTOM", 0, 10)
+    songShare:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        local key = (songSelect and songSelect.statsSongKey) or BoundToLearn.db.game.songKey
+        GameUI:OpenShareMenu(songShare, GameUI:BuildSongShareText(key))
+    end)
 end
 
 function GameUI:RefreshStatsPanel()
@@ -1977,6 +2052,207 @@ function GameUI:RefreshStatsSongView()
     sp.songProgFS:SetText(sformat("Best progress: |cFFFFCC00%d%%|r", mfloor(prog * 100 + 0.5)))
 end
 
+--------------------------------------------------------------------------
+-- Share stats to chat: a themed destination dropdown. Public/group channels
+-- gate on group/guild state; Whisper targets the current unit; Custom prompts
+-- for a channel name or number. Selecting a row sends one SendChatMessage.
+--------------------------------------------------------------------------
+local SHARE_CHANNELS = {
+    { chan = "SAY" },
+    { chan = "YELL" },
+    { chan = "PARTY",         enabled = function() return IsInGroup() end },
+    { chan = "INSTANCE_CHAT", enabled = function() return IsInGroup(LE_PARTY_CATEGORY_INSTANCE or 2) end },
+    { chan = "RAID",          enabled = function() return IsInRaid() end },
+    { chan = "GUILD",         enabled = function() return IsInGuild() end },
+}
+local shareMenu
+
+-- Whisper target for the current unit target, realm-qualified when cross-realm.
+local function ShareTargetName()
+    if not UnitExists("target") or not UnitIsPlayer("target") then return nil end
+    local name, realm = UnitName("target")
+    if not name then return nil end
+    if realm and realm ~= "" then return name .. "-" .. realm end
+    return name
+end
+
+-- Fit a chat payload under the 255-char limit by trimming the free-text head
+-- (a song name) rather than the trailing stats.
+local function ClampShare(head, tail)
+    local budget = 255 - #tail
+    if #head > budget then
+        local cut = budget - 3
+        if cut < 0 then cut = 0 end
+        head = head:sub(1, cut) .. "..."
+    end
+    return head .. tail
+end
+
+function GameUI:BuildSummaryShareText()
+    local stats = BoundToLearn.db.stats
+    local g = BoundToLearn.db.game
+    local songs = ns.SongData.songs
+    local total = #songs
+    local completed = 0
+    local prog = g.songProgress or {}
+    for i = 1, total do
+        if (prog[songs[i].key] or 0) >= 0.99 then completed = completed + 1 end
+    end
+    local pb = stats.personalBest or {}
+    local acc = (stats.lifetimeGameNotes or 0) > 0
+        and (stats.lifetimeGameHits / stats.lifetimeGameNotes * 100) or 0
+    return sformat("BoundToLearn | Overall: %d/%d tracks, high score %d, %dx combo, %.1f%% best acc (%.0f%% lifetime)",
+        completed, total, pb.highestScore or 0, pb.longestCombo or 0, pb.bestAccuracy or 0, acc)
+end
+
+function GameUI:BuildSongShareText(key)
+    local g = BoundToLearn.db.game
+    local song = ns.SongData and ns.SongData.Get(key)
+    local name = (song and song.title) or key or "?"
+    local scores = (g.songScores and g.songScores[key]) or {}
+    local sstats = (g.songStats and g.songStats[key]) or {}
+    -- Share the best-scoring difficulty; fall back to the current one if unplayed.
+    local bestDiff, bestScore = nil, -1
+    for _, diff in ipairs(STATS_SONG_DIFFS) do
+        local sc = scores[diff] or 0
+        if sc > bestScore then bestScore, bestDiff = sc, diff end
+    end
+    if bestScore <= 0 then bestDiff = g.difficulty or "Medium" end
+    local st = sstats[bestDiff]
+    local tail = sformat(" [%s]: %d pts, %.1f%% acc, %dx combo",
+        bestDiff, scores[bestDiff] or 0, (st and st.bestAccuracy) or 0, (st and st.bestCombo) or 0)
+    return ClampShare("BoundToLearn | " .. name, tail)
+end
+
+function GameUI:OpenShareMenu(anchor, text)
+    local rows = {}
+    for i = 1, #SHARE_CHANNELS do
+        local c = SHARE_CHANNELS[i]
+        local on = (not c.enabled) or c.enabled()
+        local chan = c.chan
+        rows[#rows + 1] = {
+            text = _G[chan] or chan,
+            disabled = not on,
+            onClick = on and function() SendChatMessage(text, chan) end or nil,
+        }
+    end
+    local tname = ShareTargetName()
+    rows[#rows + 1] = {
+        text = tname and ((_G["WHISPER"] or "Whisper") .. ": " .. tname) or (_G["WHISPER"] or "Whisper"),
+        disabled = not tname,
+        onClick = tname and function() SendChatMessage(text, "WHISPER", nil, tname) end or nil,
+    }
+    rows[#rows + 1] = {
+        text = "Custom Channel...",
+        onClick = function()
+            Theme.ShowPrompt({
+                title = "Custom Channel",
+                body = "Enter a channel name or number:",
+                maxLetters = 48,
+                acceptText = _G["OKAY"] or "OK",
+                onAccept = function(val)
+                    val = val and strtrim(val) or ""
+                    if val == "" then return end
+                    local idx = tonumber(val) or GetChannelName(val)
+                    if idx and idx > 0 then SendChatMessage(text, "CHANNEL", nil, idx) end
+                end,
+            })
+        end,
+    }
+    self:ShowShareDropdown(anchor, rows)
+end
+
+function GameUI:ShowShareDropdown(anchor, rows)
+    local menu = shareMenu
+    if not menu then
+        menu = CreateFrame("Frame", nil, UIParent)
+        Theme.StylePanel(menu, 0.97)
+        menu:SetClampedToScreen(true)
+        menu:SetFrameStrata("FULLSCREEN_DIALOG")
+        menu.rows = {}
+        menu:SetScript("OnShow", function(self)
+            self:SetScript("OnUpdate", function(self)
+                if not self:IsMouseOver()
+                   and not (self._anchor and self._anchor:IsMouseOver())
+                   and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
+                    self:Hide()
+                end
+            end)
+        end)
+        menu:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
+        shareMenu = menu
+    end
+    menu._anchor = anchor
+
+    local ROW_H, PAD, W = 24, 6, 174
+    local n = #rows
+    menu:SetSize(W, n * ROW_H + PAD * 2)
+    menu:SetFrameLevel((anchor:GetFrameLevel() or 1) + 40)
+
+    for i = 1, n do
+        local spec = rows[i]
+        local row = menu.rows[i]
+        if not row then
+            row = CreateFrame("Button", nil, menu)
+            row:SetHeight(ROW_H)
+            local hl = CreateFrame("Frame", nil, menu)
+            hl:SetFrameLevel(menu:GetFrameLevel())
+            hl:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+            hl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+            Theme.Round(hl)
+            Theme.SetBarHeight(hl, 10)
+            Theme.SetBorderShown(hl, false)
+            Theme.SetFillColor(hl, Theme.C.ACCENT, 0)
+            row.hl = hl
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            label:SetPoint("LEFT", row, "LEFT", 10, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+            label:SetJustifyH("LEFT")
+            row.label = label
+            row:HookScript("OnEnter", function(self)
+                if self._enabled then Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0.18) end
+            end)
+            row:HookScript("OnLeave", function(self)
+                Theme.SetFillColor(self.hl, Theme.C.ACCENT, 0)
+            end)
+            menu.rows[i] = row
+        end
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", menu, "TOPLEFT", PAD, -(PAD + (i - 1) * ROW_H))
+        row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -PAD, -(PAD + (i - 1) * ROW_H))
+        row.label:SetText(spec.text)
+        row._enabled = not spec.disabled
+        Theme.SetFillColor(row.hl, Theme.C.ACCENT, 0)
+        if spec.disabled then
+            row.label:SetTextColor(Theme.RGB(Theme.C.TEXT_DISABLED, 1))
+            row:SetScript("OnClick", nil)
+        else
+            row.label:SetTextColor(Theme.RGB(Theme.C.TEXT_BODY, 1))
+            local onClick = spec.onClick
+            row:SetScript("OnClick", function()
+                PlayUISound(SOUND_CLICK)
+                menu:Hide()
+                if onClick then onClick() end
+            end)
+        end
+        row:SetShown(true)
+    end
+    for i = n + 1, #menu.rows do menu.rows[i]:Hide() end
+
+    -- Drop from the button, or flip above it when there is not enough room below.
+    menu:ClearAllPoints()
+    local opScale = anchor:GetEffectiveScale() or 1
+    local mScale = menu:GetEffectiveScale() or 1
+    local menuH = n * ROW_H + PAD * 2
+    if (anchor:GetBottom() or 0) * opScale < menuH * mScale + 8 then
+        menu:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 2)
+    else
+        menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    end
+    menu:Show()
+    menu:Raise()
+end
+
 function GameUI:CycleStatsSong(dir)
     local songs = ns.SongData and ns.SongData.songs
     if not songs or #songs == 0 then return end
@@ -1998,6 +2274,9 @@ function GameUI:ShowStatsPage(songKey)
     for _, control in ipairs(songSelect.leftControls) do control:Hide() end
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
+    -- The Summary / By Song toggle takes the title row; the page has its own.
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Hide() end
     if songSelect.searchBox then
         songSelect.searchBox:SetText("")
         songSelect.searchBox:Hide()
@@ -2016,6 +2295,8 @@ function GameUI:HideStatsPage()
     for _, control in ipairs(songSelect.leftControls) do control:Show() end
     if songSelect.mainTitle then songSelect.mainTitle:Show() end
     if songSelect.statsBtn then songSelect.statsBtn:Show() end
+    if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Show() end
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Show() end
     if songSelect.searchBox then
         songSelect.searchBox:Show()
         if songSelect.searchBox.placeholder then songSelect.searchBox.placeholder:Show() end
@@ -2246,14 +2527,17 @@ function GameUI:PositionWheel()
         -- Lift the title as a bubble grows (the artist is anchored below it and
         -- follows), so both sit above the duration instead of centred over the art.
         local ty = mfloor(near * 8)
+        local dsz = mmax(13, mfloor(h * 0.55))
+        slot.donut:SetSize(dsz, dsz)
+        -- The title starts just past the progress ring, or near the edge when the
+        -- track has no progress yet (the ring is empty and draws nothing).
+        local titleLeft = SongBestProgress(sg.key) > 0 and (DONUT_LEFT + dsz + 6) or TITLE_LEFT
         slot.titleFS:ClearAllPoints()
-        slot.titleFS:SetPoint("LEFT", 40, ty)
+        slot.titleFS:SetPoint("LEFT", titleLeft, ty)
         slot.titleFS:SetPoint("RIGHT", -14, ty)
         local secs = mfloor(ns.SongData.PlayLength(sg) + 0.5)
         slot.durFS:SetText(mfloor(secs / 60) .. ":" .. (secs % 60 < 10 and "0" or "") .. (secs % 60))
         slot.durFS:SetTextColor(Theme.RGB(Theme.C.TEXT_PRIMARY, mmax(0.4, 0.85 - ae * 0.12)))
-        local dsz = mmax(13, mfloor(h * 0.55))
-        slot.donut:SetSize(dsz, dsz)
         -- Reset texcoords before choosing art. SetAtlas does NOT clear a prior
         -- SetTexCoord, so a slot that just showed the cropped instance image keeps
         -- that crop on its atlas: the neighbour-of-selection distortion that appears
@@ -2579,16 +2863,11 @@ function GameUI:CreateHealthBar()
     label:SetText("LIFE")
     label:SetTextColor(Theme.RGB(Theme.C.TEXT_DIM))
 
-    self.healthCaps = {}
-    local N, CW = 10, 15
-    for i = 1, N do
-        local cap = MakeKeycap(hf, CW, 18)
-        cap:SetPoint("LEFT", 44 + (i - 1) * (CW + 2), 0)
-        self.healthCaps[i] = cap
-    end
+    hf.lifeBar = MakeLifeBar(hf, 176, 14)
+    hf.lifeBar:SetPoint("LEFT", 44, 0)
 
     hf.diffFS = hf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hf.diffFS:SetPoint("LEFT", self.healthCaps[N], "RIGHT", 16, 0)
+    hf.diffFS:SetPoint("LEFT", hf.lifeBar, "RIGHT", 16, 0)
 
     local stopBtn = Theme.CreateButton(hf, "Stop", 52, 22)
     stopBtn:SetPoint("RIGHT", -8, 0)
@@ -2623,32 +2902,50 @@ end
 
 -- Sit the health bar just above the note start line, so notes appear to fall out from
 -- under it. screenY is the shared start line in screen pixels (from PrepChart).
-function GameUI:PlaceHealthBarAtLine(screenY)
+-- spanLeft/spanRight (screen pixels) are the included horizontal action bars:
+-- the bar takes their full width, centered on them, and the life gauge takes
+-- up the slack. HUD_FIXED_W is everything on the bar but the gauge.
+local HUD_FIXED_W, HUD_MIN_GAUGE = 472, 60
+function GameUI:PlaceHealthBarAtLine(screenY, spanLeft, spanRight)
     local hf = self.healthFrame
     if not hf or not screenY then return end
+    local scale = hf:GetEffectiveScale()
     hf:ClearAllPoints()
-    hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / hf:GetEffectiveScale())
+    if spanLeft then
+        local width = mmax(HUD_FIXED_W + HUD_MIN_GAUGE, (spanRight - spanLeft) / scale)
+        hf:SetWidth(width)
+        hf.lifeBar:SetWidth(width - HUD_FIXED_W)
+        hf:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", (spanLeft + spanRight) / 2 / scale, (screenY + 6) / scale)
+    else
+        hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / scale)
+    end
 end
 
-function GameUI:UpdateHealthCaps(pct)
-    if not self.healthCaps then return end
-    local r, g, b
-    if pct > 0.6 then
-        r, g, b = 0.35, 0.85, 0.45
-    elseif pct > 0.3 then
-        r, g, b = 0.98, 0.62, 0.18
-    else
-        r, g, b = 0.85, 0.32, 0.32
+-- Layout check: the health bar placed on the player's chosen bars as a round
+-- would place it, with no round running and the action bars left alone.
+function GameUI:HudPreview(show)
+    if ns.Game:IsRunning() then return end
+    if not show then
+        if self.healthFrame then self.healthFrame:Hide() end
+        if gameOverlay then gameOverlay:Hide() end
+        self.noteHighwayTop = nil
+        return
     end
-    local N = #self.healthCaps
-    for i = 1, N do
-        local frac = mmax(0, mmin(1, (pct - (i - 1) / N) * N))
-        SetKeycap(self.healthCaps[i], r, g, b, frac, false)
-    end
+    self:Initialize()
+    self:CreateHealthBar()
+    ns.Game:DiscoverSlots()
+    ns.Game:PlaceNoteLine()
+    gameOverlay:Show()
+    self.healthFrame:Show()
+end
+
+function GameUI:UpdateLifeBar(pct)
+    local hf = self.healthFrame
+    if hf and hf.lifeBar then SetLifeBar(hf.lifeBar, pct or 0) end
 end
 
 function GameUI:UpdateFocusBar(current, max)
-    self:UpdateHealthCaps(max > 0 and (current / max) or 0)
+    self:UpdateLifeBar(max > 0 and (current / max) or 0)
     if not dangerOverlay then return end
     local pct = current / max
 
@@ -2773,14 +3070,408 @@ function GameUI:ResizeScoreFrame()
     scoreFrame:SetHeight(DIFFROW_BOTTOM + 4 + controlBar:GetHeight() + 6)
 end
 
+-- Looping icon-fall demo on the main menu: each of the five lanes has a fixed
+-- ability icon; matching icons stream down and land ON that lane's slot with a
+-- randomised judgement (Perfect / Good / Bad / Miss), previewing real play.
+-- Non-interactive; the OnUpdate runs only while the menu is shown and
+-- self-cancels on error. Icons stay inside the demo rect (spawned at the top,
+-- faded out on the bar) so no clipping is needed.
+local DEMO_LANE_ICONS = {
+    "Interface\\Icons\\Spell_Nature_Lightning",
+    "Interface\\Icons\\Spell_Fire_Fireball02",
+    "Interface\\Icons\\Ability_Warrior_Charge",
+    "Interface\\Icons\\Spell_Holy_FlashHeal",
+    "Interface\\Icons\\Ability_Rogue_Eviscerate",
+}
+local DEMO_COLS, DEMO_SLOT, DEMO_GAP, DEMO_H = 5, 30, 8, 150
+local DEMO_FALL, DEMO_SPAWN = 88, 0.5
+local DEMO_HITY = 2 + DEMO_SLOT / 2   -- slot centre; icons land centred on it
+local drandom = math.random
+
+-- Weighted judgement pool (weights sum to 100). hit=false is a Miss (no flash).
+-- off = how far ABOVE the slot centre a hit lands (0 = dead centre); worse
+-- timing lands higher and flashes dimmer (fa), so the landing spot visibly
+-- matches the label. A Miss (hit = false) has no landing; it falls through.
+local DEMO_JUDGES = {
+    { text = "Perfect", r = 0.35, g = 1.0, b = 0.45, w = 55, hit = true, off = 0,  fa = 0.9 },
+    { text = "Good",    r = 0.45, g = 0.85, b = 1.0, w = 25, hit = true, off = 10, fa = 0.6 },
+    { text = "Bad",     r = 1.0, g = 0.7, b = 0.25, w = 12, hit = true, off = 20, fa = 0.35 },
+    { text = "Miss",    r = 1.0, g = 0.35, b = 0.35, w = 8, hit = false },
+}
+
+local function DemoColX(c)
+    return (c - (DEMO_COLS + 1) / 2) * (DEMO_SLOT + DEMO_GAP)
+end
+
+local function PickJudge()
+    local roll, acc = drandom(100), 0
+    for i = 1, #DEMO_JUDGES do
+        acc = acc + DEMO_JUDGES[i].w
+        if roll <= acc then return DEMO_JUDGES[i] end
+    end
+    return DEMO_JUDGES[1]
+end
+
+local function AcquireDemoIcon(demo)
+    local icon = tremove(demo.pool)
+    if not icon then
+        icon = demo:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(DEMO_SLOT - 2, DEMO_SLOT - 2)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    end
+    icon:SetVertexColor(1, 1, 1)
+    icon:SetAlpha(1)
+    icon:Show()
+    return icon
+end
+
+local function SpawnJudgeText(demo, col, judge, landY)
+    local t = tremove(demo.textPool)
+    if not t then
+        local fs = demo:CreateFontString(nil, "OVERLAY")
+        fs:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        t = { fs = fs }
+    end
+    t.fs:SetText(judge.text)
+    t.fs:SetTextColor(judge.r, judge.g, judge.b)
+    t.x = DemoColX(col)
+    t.y = landY + DEMO_SLOT / 2 + 3
+    t.life = 0.6
+    t.fs:ClearAllPoints()
+    t.fs:SetPoint("CENTER", demo, "BOTTOM", t.x, t.y)
+    t.fs:SetAlpha(1)
+    t.fs:Show()
+    demo.texts[#demo.texts + 1] = t
+end
+
+local function DemoStep(demo, elapsed)
+    demo.spawnT = (demo.spawnT or 0) + elapsed
+    if demo.spawnT >= DEMO_SPAWN then
+        demo.spawnT = demo.spawnT - DEMO_SPAWN
+        -- Skip the previous lane so the same icon doesn't repeat back-to-back.
+        local col = drandom(DEMO_COLS - 1)
+        if col >= (demo.lastCol or 0) then col = col + 1 end
+        demo.lastCol = col
+        local icon = AcquireDemoIcon(demo)
+        icon:SetTexture(DEMO_LANE_ICONS[col])
+        icon.col = col
+        icon.y = DEMO_H - DEMO_SLOT / 2
+        icon.judged = false
+        local judge = PickJudge()
+        icon.judge = judge
+        -- Hits land above the slot the worse the timing (perfect = dead centre);
+        -- a miss has no landing and falls through the bar.
+        icon.stopY = judge.hit and (DEMO_HITY + judge.off) or nil
+        icon:ClearAllPoints()
+        icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(col), icon.y)
+        demo.active[#demo.active + 1] = icon
+    end
+
+    for i = 1, DEMO_COLS do
+        local flash = demo.slots[i].flash
+        local a = flash:GetAlpha()
+        if a > 0 then flash:SetAlpha(mmax(0, a - elapsed * 4)) end
+    end
+
+    local texts = demo.texts
+    for i = #texts, 1, -1 do
+        local t = texts[i]
+        t.life = t.life - elapsed
+        if t.life <= 0 then
+            t.fs:Hide()
+            tremove(texts, i)
+            demo.textPool[#demo.textPool + 1] = t
+        else
+            t.y = t.y + elapsed * 20
+            t.fs:SetAlpha(mmin(1, t.life * 2.2))
+            t.fs:SetPoint("CENTER", demo, "BOTTOM", t.x, t.y)
+        end
+    end
+
+    local active = demo.active
+    for i = #active, 1, -1 do
+        local icon = active[i]
+        if not icon.judged then
+            icon.y = icon.y - DEMO_FALL * elapsed
+            if icon.y <= (icon.stopY or DEMO_HITY) then
+                icon.judged = true
+                SpawnJudgeText(demo, icon.col, icon.judge, icon.stopY or DEMO_HITY)
+                if icon.judge.hit then
+                    icon.y = icon.stopY
+                    local flash = demo.slots[icon.col].flash
+                    flash:SetColorTexture(icon.judge.r, icon.judge.g, icon.judge.b)
+                    flash:SetAlpha(icon.judge.fa)
+                else
+                    icon:SetVertexColor(1, 0.45, 0.45)
+                end
+            end
+            icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+        elseif icon.judge.hit then
+            -- Landed: hold on the slot a moment, then fade.
+            local a = icon:GetAlpha() - elapsed * 3.5
+            if a <= 0 then
+                icon:Hide()
+                tremove(active, i)
+                demo.pool[#demo.pool + 1] = icon
+            else
+                icon:SetAlpha(a)
+            end
+        else
+            -- Miss: keep falling through the bar (clipped) as it fades out.
+            icon.y = icon.y - DEMO_FALL * elapsed
+            icon:SetPoint("CENTER", demo, "BOTTOM", DemoColX(icon.col), icon.y)
+            local a = icon:GetAlpha() - elapsed * 3
+            if a <= 0 or icon.y <= -DEMO_SLOT then
+                icon:Hide()
+                tremove(active, i)
+                demo.pool[#demo.pool + 1] = icon
+            else
+                icon:SetAlpha(a)
+            end
+        end
+    end
+end
+
+-- The Icon Game main menu: a landing screen (built on the same window setup as
+-- the song-select carousel, Midnight backdrop by default) with a looping demo
+-- and a visible-only action-bar picker. Start opens the song-select carousel.
+function GameUI:CreateMainMenu()
+    if mainMenu then return end
+
+    local f = CreateFrame("Frame", "BoundToLearnIconGameMenu", UIParent)
+    f:SetSize(568, 432)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    f:SetFrameStrata("FULLSCREEN")
+    f:SetFrameLevel(70)
+    Theme.StylePanel(f, 0.96, "window")
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetClampedToScreen(true)
+    Utils.CloseOnEscape(f)
+    f:Hide()
+
+    local xbg = f:CreateTexture(nil, "ARTWORK")
+    xbg:SetPoint("TOPLEFT", 7, -7)
+    xbg:SetPoint("BOTTOMRIGHT", -7, 7)
+    xbg:SetAlpha(0.85)
+    xbg:SetAtlas(ns.SongData.DEFAULT_BG)
+    f.xpacBg = xbg
+
+    local title = f:CreateFontString(nil, "OVERLAY")
+    title:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
+    title:SetPoint("TOP", 0, -13)   -- below the window's border band (11)
+    title:SetText("Icon Game")
+    title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
+
+    local subtitle = f:CreateFontString(nil, "OVERLAY")
+    subtitle:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetTextColor(0.82, 0.82, 0.82)
+    subtitle:SetText("Practice hitting your keybinds to falling icons.")
+
+    local closeBtn = Theme.CreateCloseButton(f, function() f:Hide() end)
+    closeBtn:SetSize(18, 18)
+    closeBtn:SetPoint("TOPRIGHT", -8, -8)
+
+    local feedbackBtn = ns.Feedback.CreateButton(f, function()
+        local db = BoundToLearn.db.game
+        return "Game menu", {
+            sformat("Difficulty: %s, mode: %s", tostring(db.difficulty), tostring(db.mode)),
+            "Bars: " .. ListOn(db.bars),
+        }
+    end)
+    -- In the bottom-left corner, just inside the border.
+    feedbackBtn:SetPoint("BOTTOMLEFT", 16, 16)
+
+    -- Start enters the song-selection carousel, where the track and difficulty
+    -- are chosen and the round begins.
+    local startBtn = Theme.CreateAccentButton(f, "Start", 200, 42)
+    startBtn:SetPoint("BOTTOM", 0, 24)
+    startBtn:SetNormalFontObject("GameFontNormalLarge")
+    startBtn:SetHighlightFontObject("GameFontHighlightLarge")
+    startBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        f:Hide()
+        GameUI:ShowSongSelect()
+    end)
+    f.startBtn = startBtn
+
+    self:BuildMainMenuDemo(f)
+    self:BuildMainMenuBars(f)
+
+    mainMenu = f
+end
+
+function GameUI:ShowMainMenu()
+    if not mainMenu then self:CreateMainMenu() end
+    self:HideSongSelect()
+    if scoreFrame then scoreFrame:Hide() end
+    if self.healthFrame then self.healthFrame:Hide() end
+    self:RefreshMainMenuBars()
+    mainMenu:Show()
+end
+
+function GameUI:HideMainMenu()
+    if mainMenu then mainMenu:Hide() end
+end
+
+-- The highest-index visible button on a bar; the hover highlight spans from
+-- button 1's top-left to this button's bottom-right.
+local function LastVisibleBarButton(prefix)
+    for i = 12, 1, -1 do
+        local btn = _G[prefix .. i]
+        if btn and btn:IsVisible() then return btn end
+    end
+end
+
+-- Action-bar picker: which bars the game pulls spells from. Mirrors the Keybind
+-- Audit -- only bars currently visible in the UI can be toggled.
+function GameUI:BuildMainMenuBars(f)
+    local BARS = ns.KeybindAudit and ns.KeybindAudit.BAR_MAPPINGS or {}
+
+    local header = f:CreateFontString(nil, "OVERLAY")
+    header:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    header:SetPoint("TOP", 0, -222)
+    header:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
+    header:SetText("Action bars in play")
+
+    local hint = f:CreateFontString(nil, "OVERLAY")
+    hint:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    hint:SetPoint("TOP", header, "BOTTOM", 0, -2)
+    hint:SetTextColor(0.72, 0.72, 0.72)
+    hint:SetText("Only bars shown in your UI can be picked.")
+
+    -- A highlight drawn over the real action bar that the hovered row refers to.
+    local barHighlight = f.barHighlight
+    if not barHighlight then
+        barHighlight = CreateFrame("Frame", nil, UIParent)
+        barHighlight:SetFrameStrata("FULLSCREEN_DIALOG")
+        barHighlight:Hide()
+        local bh = barHighlight:CreateTexture(nil, "OVERLAY")
+        bh:SetAllPoints()
+        bh:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        bh:SetAlpha(0.25)
+        f.barHighlight = barHighlight
+        f:HookScript("OnHide", function() barHighlight:Hide() end)
+    end
+
+    f.barToggles = {}
+    -- A row is as tall as the toggle (26), or each row overlaps the next.
+    local COLS, CELL_W, CELL_H = 2, 156, 26
+    for i = 1, #BARS do
+        local bar = BARS[i]
+        local col = (i - 1) % COLS
+        local row = mfloor((i - 1) / COLS)
+        local cb = Theme.CreateToggle(f, bar.label, nil, CELL_W - 10)
+        cb:SetPoint("TOP", f, "TOP", (col - 0.5) * CELL_W, -256 - row * CELL_H)
+        cb.barKey = bar.key
+        cb.buttonPrefix = bar.buttonPrefix
+        cb:SetScript("OnClick", function(self)
+            BoundToLearn.db.game.bars[self.barKey] = self:GetChecked()
+        end)
+
+        -- Row hover wash so it is clear which row is focused.
+        local rowHL = cb:CreateTexture(nil, "BACKGROUND")
+        rowHL:SetPoint("TOPLEFT", -4, 1)
+        rowHL:SetPoint("BOTTOMRIGHT", 4, -1)
+        rowHL:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        rowHL:SetAlpha(0)
+
+        cb:SetMotionScriptsWhileDisabled(true)
+        cb:HookScript("OnEnter", function(self)
+            rowHL:SetAlpha(0.12)
+            local btn1 = _G[self.buttonPrefix .. "1"]
+            local lastBtn = LastVisibleBarButton(self.buttonPrefix)
+            if btn1 and lastBtn then
+                barHighlight:ClearAllPoints()
+                barHighlight:SetPoint("TOPLEFT", btn1, "TOPLEFT", -4, 4)
+                barHighlight:SetPoint("BOTTOMRIGHT", lastBtn, "BOTTOMRIGHT", 4, -4)
+                barHighlight:Show()
+            end
+            if not self:IsEnabled() then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(bar.label)
+                GameTooltip:AddLine("Hidden in your UI, so it can't be used.", 1, 0.82, 0, true)
+                GameTooltip:Show()
+            end
+        end)
+        cb:HookScript("OnLeave", function()
+            rowHL:SetAlpha(0)
+            barHighlight:Hide()
+            GameTooltip:Hide()
+        end)
+        f.barToggles[i] = cb
+    end
+end
+
+function GameUI:RefreshMainMenuBars()
+    if not mainMenu or not mainMenu.barToggles then return end
+    local bars = BoundToLearn.db.game.bars
+    for i = 1, #mainMenu.barToggles do
+        local cb = mainMenu.barToggles[i]
+        local visible = ns.KeybindAudit and ns.KeybindAudit.IsBarVisible(cb.buttonPrefix) or false
+        cb:SetEnabled(visible)
+        cb:SetChecked(visible and bars[cb.barKey] and true or false)
+    end
+end
+
+function GameUI:BuildMainMenuDemo(f)
+    -- Extra width so the judgement text on the edge lanes is not clipped.
+    local demoW = DEMO_COLS * DEMO_SLOT + (DEMO_COLS - 1) * DEMO_GAP + 56
+    local demo = CreateFrame("Frame", nil, f)
+    demo:SetSize(demoW, DEMO_H)
+    demo:SetPoint("TOP", 0, -60)
+    demo:SetClipsChildren(true)
+    demo.pool = {}
+    demo.active = {}
+    demo.texts = {}
+    demo.textPool = {}
+    demo.spawnT = 0
+    demo.lastCol = drandom(DEMO_COLS)
+
+    demo.slots = {}
+    for c = 1, DEMO_COLS do
+        local base = demo:CreateTexture(nil, "BACKGROUND")
+        base:SetSize(DEMO_SLOT, DEMO_SLOT)
+        base:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)
+        base:SetColorTexture(0.09, 0.09, 0.12, 0.92)
+        -- The lane's ability icon, dimmed, so the bar reads as real slots.
+        local target = demo:CreateTexture(nil, "BORDER")
+        target:SetSize(DEMO_SLOT - 3, DEMO_SLOT - 3)
+        target:SetPoint("CENTER", base, "CENTER")
+        target:SetTexture(DEMO_LANE_ICONS[c])
+        target:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        target:SetVertexColor(0.45, 0.45, 0.5)
+        -- Hit flash, above the falling icons.
+        local flash = demo:CreateTexture(nil, "OVERLAY")
+        flash:SetSize(DEMO_SLOT, DEMO_SLOT)
+        flash:SetPoint("BOTTOM", demo, "BOTTOM", DemoColX(c), 2)
+        flash:SetColorTexture(Theme.RGB(Theme.C.ACCENT))
+        flash:SetAlpha(0)
+        demo.slots[c] = { flash = flash }
+    end
+
+    demo:SetScript("OnUpdate", function(self, elapsed)
+        if not pcall(DemoStep, self, elapsed) then
+            self:SetScript("OnUpdate", nil)
+        end
+    end)
+
+    f.demo = demo
+end
+
 function GameUI:ShowReadyState()
-    -- The song-select carousel is the ready-state menu. The compact score HUD
-    -- and life gauge only appear once a round starts (OnGameStart).
+    -- The main menu is the ready-state entry; its Start opens the song-select
+    -- carousel. The compact score HUD and life gauge only appear once a round
+    -- starts (OnGameStart).
     if scoreFrame then scoreFrame:Hide() end
     if self.healthFrame then self.healthFrame:Hide() end
     if modifierDropdown then modifierDropdown:Hide() end
     self:UpdateDifficultyButtons()
-    self:ShowSongSelect()
+    self:ShowMainMenu()
 end
 
 function GameUI:OnGameStart(slots)
@@ -2790,7 +3481,7 @@ function GameUI:OnGameStart(slots)
     self:HideSongSelect()
     self:CreateHealthBar()
     if self.healthFrame then self.healthFrame:Show() end
-    self:UpdateHealthCaps(1)
+    self:UpdateLifeBar(1)
     if self.healthFrame and self.healthFrame.diffFS then
         local diff = BoundToLearn.db.game.difficulty
         local c = DIFF_COLORS[diff] or { 0.8, 0.8, 0.8 }
@@ -2808,7 +3499,16 @@ function GameUI:OnGameStart(slots)
     -- the entire in-round HUD.
     if scoreFrame then scoreFrame:Hide() end
     if pauseOverlay then pauseOverlay:Hide() end
-    if self.healthFrame then self.healthFrame.pauseBtn:SetText("Pause") end
+    if self.healthFrame then
+        local hf = self.healthFrame
+        hf.pauseBtn:SetText("Pause")
+        -- Pause is Practice-only; hide it entirely in scored modes (combat ends
+        -- a scored run rather than pausing it) and close the timer gap.
+        local practice = ns.Game ~= nil and ns.Game:GetMode() == "practice"
+        hf.pauseBtn:SetShown(practice)
+        hf.timerFS:ClearAllPoints()
+        hf.timerFS:SetPoint("RIGHT", practice and hf.pauseBtn or hf.stopBtn, "LEFT", -12, 0)
+    end
     if modifierDropdown then modifierDropdown:Hide() end
 
     -- Set initial timer
@@ -3369,7 +4069,7 @@ function GameUI:ShowSummary(results)
     self.lastResults = results
     local sf = self.summaryFrame
     local totalNotes = results.totalNotes
-    local accuracy = totalNotes > 0 and ((totalNotes - results.hitCounts.miss) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(results.hitCounts)
 
     if sf.title then
         if results.focusFailed then
@@ -3519,8 +4219,6 @@ function GameUI:PlayLevelUpEffect(parent)
 
         -- Rotate rays
         local angle = elapsed * 0.4
-        local cos, sin = math.cos(angle), math.sin(angle)
-        local w, h = luf.rays:GetSize()
         luf.rays:SetRotation(angle)
     end)
 
@@ -3609,8 +4307,7 @@ function GameUI:CreateSummaryFrame()
 end
 
 function GameUI:FormatShareMessage(results)
-    local totalNotes = results.totalNotes
-    local accuracy = totalNotes > 0 and ((totalNotes - results.hitCounts.miss) / totalNotes * 100) or 0
+    local accuracy = ns.Utils.HitAccuracy(results.hitCounts)
     local diff = results.difficulty or "?"
     local mode = results.mode or "timed"
     local modeLabel = mode == "practice" and "Practice" or mode == "competitive" and "Competitive" or "Timed"
@@ -3642,6 +4339,8 @@ function GameUI:ToggleShareMenu(parent)
             { label = "Guild",   chat = "GUILD" },
         }
 
+        -- 90 is a floor: rows widen to the longest channel name.
+        local rowWidth, rows = 90, {}
         for i, ch in ipairs(channels) do
             local btn = CreateFrame("Button", nil, menu)
             btn:SetSize(90, 22)
@@ -3649,6 +4348,8 @@ function GameUI:ToggleShareMenu(parent)
             btn:SetNormalFontObject("GameFontHighlightSmall")
             btn:SetHighlightFontObject("GameFontNormalSmall")
             btn:SetText(ch.label)
+            rowWidth = mmax(rowWidth, mfloor(btn:GetFontString():GetStringWidth()) + 20)
+            rows[i] = btn
             btn:SetScript("OnClick", function()
                 PlayUISound(SOUND_CLICK)
                 if self.lastResults then
@@ -3658,6 +4359,8 @@ function GameUI:ToggleShareMenu(parent)
                 menu:Hide()
             end)
         end
+        for i = 1, #rows do rows[i]:SetWidth(rowWidth) end
+        menu:SetWidth(rowWidth + 10)
 
         menu:SetScript("OnShow", function(self)
             self:SetScript("OnUpdate", function(self)
@@ -4228,16 +4931,17 @@ function GameUI:ShowAchievementUnlocks(unlockIDs)
 end
 
 local toastFrame
+-- Toast insets: inside the dialog border band (about 14), icon-to-text gap.
+local TOAST_PAD, TOAST_GAP = 18, 8
 
 function GameUI:ShowAchievementToast(def)
     if not toastFrame then
+        -- The window's own dialog frame; content sits inside its border band.
         local f = CreateFrame("Frame", "BoundToLearnAchToast", UIParent)
-        f:SetSize(300, 50)
+        f:SetSize(300, 62)
         f:SetFrameStrata("FULLSCREEN_DIALOG")
         f:SetFrameLevel(200)
-        Theme.StyleCard(f, {0.09, 0.08, 0.04}, 12)
-        Theme.SetBorderColor(f, Theme.RGB(Theme.C.GOLD, 0.9))
-        Theme.SetBorderShown(f, true)
+        Theme.StylePanel(f)
         f:EnableMouse(true)
         f:RegisterForDrag()
         f:Hide()
@@ -4251,19 +4955,16 @@ function GameUI:ShowAchievementToast(def)
 
         local icon = f:CreateTexture(nil, "ARTWORK")
         icon:SetSize(30, 30)
-        icon:SetPoint("LEFT", 10, 0)
+        icon:SetPoint("LEFT", TOAST_PAD, 0)
         f.icon = icon
 
-        local header = f:CreateFontString(nil, "OVERLAY")
-        header:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        header:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -2)
-        header:SetText("|cFFFFCC00Achievement Unlocked|r")
+        local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        header:SetPoint("TOPLEFT", icon, "TOPRIGHT", TOAST_GAP, -1)
+        header:SetText("Achievement Unlocked")
         f.header = header
 
-        local name = f:CreateFontString(nil, "OVERLAY")
-        name:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
-        name:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 8, 2)
-        name:SetTextColor(1, 1, 1)
+        local name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        name:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", TOAST_GAP, 1)
         f.name = name
 
         -- Fade animation
@@ -4299,6 +5000,9 @@ function GameUI:ShowAchievementToast(def)
 
     toastFrame.icon:SetAtlas(def.icon)
     toastFrame.name:SetText(def.name)
+    -- Wide enough for the longer line, clear of the border on both sides.
+    local textW = mmax(toastFrame.header:GetUnboundedStringWidth(), toastFrame.name:GetUnboundedStringWidth())
+    toastFrame:SetWidth(mmax(240, TOAST_PAD * 2 + 30 + TOAST_GAP + textW))
     toastFrame:Show()
     toastFrame:SetAlpha(0)
     toastFrame.fadeAG:Stop()

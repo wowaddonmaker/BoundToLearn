@@ -84,6 +84,122 @@ SongData.songs = {
     { key = "s68", title = [[PvP]], artist = [[Derek Duke]], id = 53686, length = 40 },
 }
 
+-- Forever's own soundtrack (its re-recorded classic themes and the music of
+-- its new zones), the longest take of each. Forever only; "f" keys keep their
+-- scores apart from the shared tracks.
+local FOREVER_SONGS = {
+    { key = "f1", title = [[Bolder'ok]], artist = [[Blizzard Entertainment]], id = 8158694, length = 64 },
+    { key = "f2", title = [[Cradle of Tranquility]], artist = [[Blizzard Entertainment]], id = 8173703, length = 71 },
+    { key = "f3", title = [[Dae'gun]], artist = [[Blizzard Entertainment]], id = 8198465, length = 66 },
+    { key = "f4", title = [[Eastwind Shore]], artist = [[Blizzard Entertainment]], id = 8158706, length = 100 },
+    { key = "f5", title = [[Elderwild]], artist = [[Blizzard Entertainment]], id = 8197333, length = 72 },
+    { key = "f6", title = [[Farholde Keep]], artist = [[Blizzard Entertainment]], id = 8158710, length = 82 },
+    { key = "f7", title = [[Felblood Scar]], artist = [[Blizzard Entertainment]], id = 8269358, length = 63 },
+    { key = "f8", title = [[Gustberry Lowlands]], artist = [[Blizzard Entertainment]], id = 8158740, length = 76 },
+    { key = "f9", title = [[Mount Hyjal]], artist = [[Blizzard Entertainment]], id = 8158674, length = 61 },
+    { key = "f10", title = [[Malorne's Retreat]], artist = [[Blizzard Entertainment]], id = 8190628, length = 64 },
+    { key = "f11", title = [[Mourning's Rest]], artist = [[Blizzard Entertainment]], id = 8158680, length = 67 },
+    { key = "f12", title = [[Riverglades]], artist = [[Blizzard Entertainment]], id = 8173717, length = 68 },
+    { key = "f13", title = [[Rog'mar Outpost]], artist = [[Blizzard Entertainment]], id = 8158722, length = 66 },
+    { key = "f14", title = [[Shadowgale Forest]], artist = [[Blizzard Entertainment]], id = 8246682, length = 73 },
+    { key = "f15", title = [[Shen'dar]], artist = [[Blizzard Entertainment]], id = 8158746, length = 72 },
+    { key = "f16", title = [[Shrine of Akir]], artist = [[Blizzard Entertainment]], id = 8246690, length = 64 },
+    { key = "f17", title = [[Shrine of Aviana]], artist = [[Blizzard Entertainment]], id = 8282397, length = 90 },
+    { key = "f18", title = [[Summit of Eternity]], artist = [[Blizzard Entertainment]], id = 8282581, length = 51 },
+    { key = "f19", title = [[Sunnyglade]], artist = [[Blizzard Entertainment]], id = 8173719, length = 79 },
+    { key = "f20", title = [[Tainted Foothills]], artist = [[Blizzard Entertainment]], id = 8269360, length = 76 },
+    { key = "f21", title = [[Thendal Village]], artist = [[Blizzard Entertainment]], id = 8158756, length = 76 },
+    { key = "f22", title = [[Twilight's Shroud]], artist = [[Blizzard Entertainment]], id = 8269366, length = 69 },
+    { key = "f23", title = [[Valanaar]], artist = [[Blizzard Entertainment]], id = 8175596, length = 54 },
+    { key = "f24", title = [[Wheeler's Grange]], artist = [[Blizzard Entertainment]], id = 8158732, length = 80 },
+    { key = "f25", title = [[Darkmoon Faire]], artist = [[Blizzard Entertainment]], id = 8181339, length = 131 },
+    { key = "f26", title = [[Dungeon Boss]], artist = [[Blizzard Entertainment]], id = 8280857, length = 66 },
+    { key = "f27", title = [[Dungeon Horror]], artist = [[Blizzard Entertainment]], id = 8280853, length = 84 },
+    { key = "f28", title = [[Stormwind]], artist = [[Blizzard Entertainment]], id = 8180878, length = 87 },
+    { key = "f29", title = [[Orgrimmar]], artist = [[Blizzard Entertainment]], id = 8181033, length = 69 },
+    { key = "f30", title = [[Ironforge]], artist = [[Blizzard Entertainment]], id = 8180965, length = 118 },
+    { key = "f31", title = [[Thunder Bluff]], artist = [[Blizzard Entertainment]], id = 8181001, length = 120 },
+    { key = "f32", title = [[Undercity]], artist = [[Blizzard Entertainment]], id = 8181005, length = 87 },
+    { key = "f33", title = [[Darnassus]], artist = [[Blizzard Entertainment]], id = 8180752, length = 85 },
+    { key = "f34", title = [[Stranglethorn Vale]], artist = [[Blizzard Entertainment]], id = 8200680, length = 102 },
+    { key = "f35", title = [[Zul'Gurub Voodoo]], artist = [[Blizzard Entertainment]], id = 8181341, length = 85 },
+    { key = "f36", title = [[Naxxramas]], artist = [[Blizzard Entertainment]], id = 8180911, length = 102 },
+}
+
+-- Tracks the Forever client does not ship; dropped from its song list.
+local FOREVER_MISSING = {
+    s5 = true, s6 = true, s10 = true, s11 = true, s12 = true, s14 = true,
+    s17 = true, s18 = true, s19 = true, s20 = true, s21 = true, s22 = true,
+    s23 = true, s26 = true, s27 = true, s28 = true, s29 = true, s30 = true,
+    s31 = true, s33 = true, s34 = true, s35 = true, s36 = true, s37 = true,
+    s40 = true, s41 = true, s42 = true, s43 = true, s44 = true, s45 = true,
+    s56 = true, s57 = true, s58 = true, s59 = true, s60 = true, s66 = true,
+}
+local allSongs = SongData.songs
+
+-- Dev probe (/btl songcheck): asks the client which tracks it can play.
+-- Returns the unplayable keys, and those where the Forever lists disagree
+-- (a shared track marked missing that plays, or a Forever track that does not).
+function SongData.CheckTracks()
+    local unplayable, disagree = {}, {}
+    local function check(song, expectMissing)
+        local willPlay, handle = PlaySoundFile(song.id, "Master")
+        if willPlay then
+            StopSound(handle)
+        else
+            unplayable[#unplayable + 1] = song.key
+        end
+        if (not willPlay) ~= expectMissing then
+            disagree[#disagree + 1] = song.key
+        end
+    end
+    for i = 1, #allSongs do
+        check(allSongs[i], FOREVER_MISSING[allSongs[i].key] or false)
+    end
+    local total = #allSongs
+    if Utils.IS_FOREVER then
+        for i = 1, #FOREVER_SONGS do check(FOREVER_SONGS[i], false) end
+        total = total + #FOREVER_SONGS
+    end
+    return unplayable, disagree, total
+end
+
+-- Each track's entry in the issue forms' "Which track?" dropdown: its title, with
+-- the client named where two tracks share a title. Both clients' tracks, sorted;
+-- tools/issue_forms.lua writes the dropdown from this list.
+local issueLabel, issueTracks = {}, {}
+do
+    local count = {}
+    local function each(fn)
+        for i = 1, #allSongs do fn(allSongs[i]) end
+        for i = 1, #FOREVER_SONGS do fn(FOREVER_SONGS[i]) end
+    end
+    each(function(song) count[song.title] = (count[song.title] or 0) + 1 end)
+    each(function(song)
+        local label = song.title
+        if count[song.title] > 1 then
+            label = label .. ((song.key:sub(1, 1) == "f" and " (WoW Forever)")
+                or (FOREVER_MISSING[song.key] and " (Retail)") or " (both clients)")
+        end
+        issueLabel[song.key] = label
+        issueTracks[#issueTracks + 1] = label
+    end)
+    table.sort(issueTracks)
+end
+function SongData.IssueLabel(key) return issueLabel[key] end
+function SongData.IssueTracks() return issueTracks end
+
+-- Forever: its own soundtrack first, then the shared tracks it ships.
+if Utils.IS_FOREVER then
+    local kept = {}
+    for i = 1, #FOREVER_SONGS do kept[#kept + 1] = FOREVER_SONGS[i] end
+    for i = 1, #SongData.songs do
+        local song = SongData.songs[i]
+        if not FOREVER_MISSING[song.key] then kept[#kept + 1] = song end
+    end
+    SongData.songs = kept
+end
+
 SongData.byKey = {}
 for i = 1, #SongData.songs do
     SongData.byKey[SongData.songs[i].key] = SongData.songs[i]
@@ -116,6 +232,10 @@ SongData.REAL_BPM = {
     s41=129, s42=123, s43=136, s44=129, s45=123, s46=81, s47=89, s48=118, s49=152, s50=89,
     s51=89, s52=136, s53=129, s54=96, s55=86, s56=81, s57=108, s58=96, s59=152, s60=129,
     s61=144, s62=86, s63=152, s64=157, s65=118, s66=123, s67=152, s68=92,
+    f1=96, f2=86, f3=118, f4=118, f5=81, f6=118, f7=103, f8=129, f9=112, f10=96,
+    f11=86, f12=81, f13=118, f14=123, f15=152, f16=129, f17=86, f18=123, f19=99, f20=86,
+    f21=152, f22=129, f23=99, f24=152, f25=118, f26=129, f27=144, f28=144, f29=140, f30=123,
+    f31=92, f32=152, f33=96, f34=152, f35=123, f36=108,
 }
 function SongData.BPM(song)
     if not song then return 120 end
@@ -191,12 +311,15 @@ end
 -- matched instance's real expansion instead of guessing from the song's index.
 local resolveSong
 
+-- Forever has no Midnight backdrop; its neutral art is the Classic one.
+SongData.DEFAULT_BG = Utils.IS_FOREVER and "ui-ej-classic" or "ui-ej-midnight"
+
 function SongData.XpacBackground(song)
     local atlas = SongData.XPAC_BG[resolveSong(song).tier]
     if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
         return atlas
     end
-    return "ui-ej-midnight"
+    return SongData.DEFAULT_BG
 end
 
 -- Five-axis "groove" profile (each 0-1) for the radar on the song select, using
@@ -311,8 +434,12 @@ local function buildInstanceImages()
         C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
     end
     if not (EJ_GetInstanceByIndex and EJ_SelectTier and EJ_GetNumTiers) then return end
+    -- Forever has the guide's functions but no tiers (tier 0 is refused).
+    local numTiers = EJ_GetNumTiers()
+    if numTiers < 1 then return end
     local prevTier = EJ_GetCurrentTier and EJ_GetCurrentTier() or 1
-    for tier = 1, EJ_GetNumTiers() do
+    if prevTier < 1 then prevTier = 1 end
+    for tier = 1, numTiers do
         EJ_SelectTier(tier)
         for r = 1, 2 do
             local isRaid = (r == 2)
@@ -396,14 +523,143 @@ local function flagshipImage(tier)
     return img or nil
 end
 
+-- Forever has no Adventure Guide data. Its client still ships the art, so
+-- each song carries what retail resolves: { background file, tier, crop }.
+local FOREVER_ART = {
+    s3 = { 4423751, 9 }, s4 = { 2177522, 8 }, s7 = { 1718200, 7 }, s8 = { 1718200, 7 },
+    s9 = { 1041969, 6 }, s13 = { 652217, 5 }, s15 = { 904980, 5 }, s16 = { 904980, 5 },
+    s24 = { 571738, 4 }, s25 = { 571738, 4 }, s32 = { 1396457, 3 }, s46 = { 1718200, 7 },
+    s52 = { 608159, 2 }, s53 = { 608159, 2 }, s54 = { 608159, 2 }, s55 = { 1396453, 2 },
+    s61 = { 1396453, 2 }, s62 = { 1396460, 1 },
+    -- Forever's own Dalaran painting (not on retail)
+    s38 = { 7963775, 3, { 0.345, 0.895, 0.374, 0.586 } },
+    s39 = { 7963775, 3, { 0.025, 0.475, 0.493, 0.667 } },
+}
+-- Art picked by hand where the guide has nothing that fits (cities, zones,
+-- Forever's new places): { file, tier, crop }. Loading screens carry a crop
+-- cut to the bubble's shape; guide backgrounds use INSTANCE_TEXCOORD. Wins
+-- over the guide match on both clients (the f tracks exist only on Forever).
+local TRACK_ART = {
+    f1 = { 1013075, 1, { 0.075, 0.925, 0.427, 0.673 } }, -- Bolder'ok
+    f2 = { 1476725, 1, { 0.100, 0.900, 0.395, 0.705 } }, -- Cradle of Tranquility
+    f3 = { 1411843, 1 },                            -- Dae'gun
+    f4 = { 7963776, 1, { 0.025, 0.575, 0.344, 0.556 } }, -- Eastwind Shore
+    f5 = { 131847, 1, { 0.025, 0.575, 0.470, 0.630 } }, -- Elderwild
+    f6 = { 522342, 1 },                             -- Farholde Keep
+    f7 = { 522337, 1 },                             -- Felblood Scar
+    f8 = { 7950679, 1, { 0.010, 0.430, 0.539, 0.701 } }, -- Gustberry Lowlands
+    f9 = { 131847, 1, { 0.150, 0.950, 0.304, 0.536 } }, -- Mount Hyjal
+    f10 = { 5409260, 1 },                           -- Malorne's Retreat
+    f11 = { 7963782, 1, { 0.075, 0.925, 0.336, 0.664 } }, -- Mourning's Rest
+    f12 = { 7963776, 1, { 0.320, 0.920, 0.504, 0.736 } }, -- Riverglades
+    f13 = { 7963777, 1, { 0.075, 0.925, 0.386, 0.714 } }, -- Rog'mar Outpost
+    f14 = { 7950679, 1, { 0.000, 0.240, 0.554, 0.646 } }, -- Shadowgale Forest
+    f15 = { 7950679, 1, { 0.410, 0.830, 0.539, 0.701 } }, -- Shen'dar
+    f16 = { 7950679, 1, { 0.340, 0.600, 0.450, 0.550 } }, -- Shrine of Akir
+    f17 = { 5344997, 1, { 0.025, 0.875, 0.336, 0.664 } }, -- Shrine of Aviana
+    f18 = { 571741, 1 },                            -- Summit of Eternity
+    f19 = { 131882, 1, { 0.100, 0.900, 0.484, 0.716 } }, -- Sunnyglade
+    f20 = { 571739, 1 },                            -- Tainted Foothills
+    f21 = { 7950679, 1, { 0.610, 0.990, 0.477, 0.623 } }, -- Thendal Village
+    f22 = { 571740, 1 },                            -- Twilight's Shroud
+    f23 = { 7950679, 1, { 0.075, 0.925, 0.336, 0.664 } }, -- Valanaar
+    f24 = { 7963776, 1, { 0.275, 0.825, 0.194, 0.406 } }, -- Wheeler's Grange
+    f25 = { 534166, 1, { 0.075, 0.925, 0.427, 0.673 } }, -- Darkmoon Faire
+    f26 = { 608157, 1 },                            -- Dungeon Boss
+    f27 = { 608176, 1 },                            -- Dungeon Horror
+    f28 = { 1099378, 1, { 0.075, 0.925, 0.327, 0.573 } }, -- Stormwind
+    f29 = { 236064, 1, { 0.075, 0.925, 0.427, 0.673 } }, -- Orgrimmar
+    f30 = { 7963781, 1, { 0.075, 0.925, 0.336, 0.664 } }, -- Ironforge
+    f31 = { 7963779, 1, { 0.075, 0.925, 0.336, 0.664 } }, -- Thunder Bluff
+    f32 = { 131867, 1, { 0.075, 0.925, 0.427, 0.673 } }, -- Undercity
+    f33 = { 1417745, 1, { 0.200, 0.900, 0.365, 0.635 } }, -- Darnassus
+    f34 = { 131886, 1, { 0.075, 0.925, 0.427, 0.673 } }, -- Stranglethorn Vale
+    f35 = { 522348, 1 },                            -- Zul'Gurub Voodoo
+    f36 = { 1396461, 1 },                           -- Naxxramas
+    s47 = { 131830, 3, { 0.200, 0.700, 0.528, 0.672 } }, -- Thrall's Escape
+    s48 = { 522337, 3 },                            -- Fire Festival
+    s49 = { 131830, 3, { 0.345, 0.895, 0.320, 0.480 } }, -- Brazen's Flight
+    s50 = { 131830, 3, { 0.435, 0.885, 0.455, 0.585 } }, -- Durnholde Keep
+    s51 = { 608180, 3 },                            -- Escape from Durnholde
+    s63 = { 5344997, 1, { 0.470, 0.970, 0.353, 0.547 } }, -- Enchanted Forest
+    s64 = { 131867, 1, { 0.050, 0.750, 0.619, 0.821 } }, -- Spooky
+    s65 = { 1099378, 1, { 0.425, 0.975, 0.340, 0.500 } }, -- Stormwind Intro
+    s67 = { 131820, 1, { 0.025, 0.975, 0.262, 0.538 } }, -- Battle
+    s68 = { 131883, 1, { 0.025, 0.975, 0.362, 0.638 } }, -- PvP
+}
+
+-- Retail tracks the guide finds nothing for fell back to their era's main
+-- raid, five pictures across 34 tracks. Each now shows the place its music
+-- comes from: { file, crop }, the crop cut to the bubble's shape (a nil crop
+-- is a guide background, cut with INSTANCE_TEXCOORD). Retail only: Forever
+-- keeps FOREVER_ART for the ones it plays.
+local RETAIL_ART = {
+    s10 = { 1035009, { 0.080, 0.920, 0.400, 0.721 } }, -- Draenor, the warlords
+    s11 = { 1060205, { 0.050, 0.900, 0.400, 0.643 } }, -- The Everbloom, Gorgrond
+    s12 = { 1032622, { 0.100, 0.950, 0.400, 0.643 } }, -- Blackrock Foundry
+    s14 = { 574578, { 0.075, 0.925, 0.350, 0.593 } },  -- The Wandering Isle
+    s15 = { 633149, { 0.075, 0.925, 0.330, 0.573 } },  -- Jade Forest temple
+    s16 = { 651994, { 0.180, 0.980, 0.280, 0.586 } },  -- Pandaria
+    s20 = { 1375896, { 0.050, 0.950, 0.300, 0.644 } }, -- Peak of Serenity
+    s21 = { 633150, { 0.075, 0.925, 0.400, 0.643 } },  -- Mogu'shan Palace
+    s22 = { 774865, { 0.050, 0.900, 0.300, 0.543 } },  -- Lion's Landing
+    s23 = { 651536, { 0.050, 0.950, 0.380, 0.637 } },  -- Theramore
+    s24 = { 534812, { 0.075, 0.925, 0.260, 0.503 } },  -- Deathwing
+    s25 = { 2529512, { 0.050, 0.950, 0.280, 0.624 } }, -- Darkshore
+    s26 = { 512032, { 0.075, 0.925, 0.420, 0.663 } },  -- The Maelstrom (Lost Isles)
+    s27 = { 1417745, { 0.200, 0.900, 0.365, 0.632 } }, -- Night elf grove
+    s28 = { 1099378, { 0.050, 0.900, 0.420, 0.663 } }, -- Alliance town
+    s29 = { 424078, { 0.075, 0.925, 0.380, 0.623 } },  -- Deepholm
+    s31 = { 514085, { 0.075, 0.925, 0.300, 0.543 } },  -- Firelands
+    s32 = { 343003, { 0.100, 0.900, 0.240, 0.546 } },  -- Northrend, Arthas
+    s33 = { 608167 },                                  -- Halls of Stone
+    s35 = { 608165 },                                  -- Halls of Lightning
+    s38 = { 1496467, { 0.050, 0.950, 0.360, 0.704 } }, -- Dalaran, Violet Hold
+    s39 = { 236058, { 0.050, 0.900, 0.560, 0.803 } },  -- Dalaran prison portals
+    s40 = { 236060, { 0.075, 0.925, 0.290, 0.533 } },  -- Acherus over New Avalon
+    s41 = { 1382383, { 0.050, 0.950, 0.300, 0.644 } }, -- Ebon Hold
+    s42 = { 131836, { 0.075, 0.925, 0.360, 0.603 } },  -- Drak'Tharon Keep
+    s43 = { 236061, { 0.075, 0.925, 0.400, 0.643 } },  -- Gundrak, beside Grizzly Hills
+    s44 = { 311102, { 0.075, 0.925, 0.380, 0.623 } },  -- Argent coliseum
+    s45 = { 318964, { 0.075, 0.925, 0.310, 0.553 } },  -- Icecrown Citadel
+    s55 = { 131874, { 0.050, 0.900, 0.340, 0.583 } },  -- Quel'Danas at sunset
+    s56 = { 131826, { 0.075, 0.925, 0.260, 0.503 } },  -- Black Temple, Illidan
+    s57 = { 343004, { 0.150, 0.950, 0.240, 0.546 } },  -- Outland, Illidan and Kael'thas
+    s59 = { 131873, { 0.075, 0.925, 0.280, 0.523 } },  -- Sunwell, Kil'jaeden
+    s60 = { 7439363, { 0.050, 0.950, 0.400, 0.744 } }, -- Magisters' Terrace library
+    s61 = { 534166, { 0.075, 0.925, 0.300, 0.543 } },  -- Darkmoon Faire
+}
+
 local songResolveCache = {}
 resolveSong = function(song)
     local cached = songResolveCache[song.key]
     if cached then return cached end
+    local picked = TRACK_ART[song.key]
+    if picked then
+        cached = { img = picked[1], tier = picked[2], tc = picked[3] }
+        songResolveCache[song.key] = cached
+        return cached
+    end
+    if Utils.IS_FOREVER then
+        local art = FOREVER_ART[song.key]
+        cached = {
+            img = art and art[1],
+            tier = art and art[2] or tierForIndex(tonumber(song.key:match("%d+")) or 1),
+            tc = art and art[3],
+        }
+        songResolveCache[song.key] = cached
+        return cached
+    end
     buildInstanceImages()
     local img, tier = matchInstance(song.title:lower())
     if not tier then
         tier = tierForIndex(tonumber(song.key:match("%d+")) or 1)
+    end
+    local placed = RETAIL_ART[song.key]
+    if placed then
+        cached = { img = placed[1], tier = tier, tc = placed[2] }
+        songResolveCache[song.key] = cached
+        return cached
     end
     -- No name match: fall back to the era's flagship raid so the bubble still
     -- shows fitting art instead of the neutral silver look.
@@ -420,8 +676,38 @@ end
 -- the neutral silver look rather than showing an unrelated instance).
 function SongData.InstanceImage(song)
     local r = resolveSong(song)
-    if r.img then return r.img, INSTANCE_TEXCOORD end
+    if r.img then return r.img, r.tc or INSTANCE_TEXCOORD end
     return nil
+end
+
+-- Dev check (/btl songcheck): one picture (same file and crop) on more than
+-- ART_REPEAT_MAX tracks, as "file: key key ...". A placeholder handed to a whole
+-- group of tracks shows up here.
+local ART_REPEAT_MAX = 3
+function SongData.ArtRepeats()
+    local groups, order = {}, {}
+    for i = 1, #SongData.songs do
+        local song = SongData.songs[i]
+        local img, tc = SongData.InstanceImage(song)
+        if img then
+            local id = tostring(img) .. "@" .. table.concat(tc, ",")
+            local g = groups[id]
+            if not g then
+                g = { img = img }
+                groups[id] = g
+                order[#order + 1] = id
+            end
+            g[#g + 1] = song.key
+        end
+    end
+    local out = {}
+    for _, id in ipairs(order) do
+        local g = groups[id]
+        if #g > ART_REPEAT_MAX then
+            out[#out + 1] = string.format("%s: %s", tostring(g.img), table.concat(g, " "))
+        end
+    end
+    return out
 end
 
 -- A representative music file for an expansion tier: the first track that

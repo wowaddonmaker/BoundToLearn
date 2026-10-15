@@ -4,8 +4,9 @@ local Utils   = ns.Utils
 local sformat = Utils.sformat
 local pairs   = Utils.pairs
 local type    = Utils.type
-local mmin, mmax = Utils.mmin, Utils.mmax
+local mmax = Utils.mmax
 local mfloor  = Utils.mfloor
+local mceil   = Utils.mceil
 local ipairs  = Utils.ipairs
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK
@@ -73,7 +74,7 @@ local DB_DEFAULTS = {
         randomBG = false,           -- randomize from unlocked backgrounds
         unlockedBGs = { classic = true, tbc = true },
         muteMusic = false,
-        mutePingSounds = true,      -- ping sounds off by default
+        mutePingSounds = false,     -- ping SFX on by default
     },
     stats = {
         sessions = {},
@@ -103,7 +104,6 @@ local DB_DEFAULTS = {
         firstRun = true,
         showGameWarning = true,
         muteChat = false,
-        colorTheme = "Blue",
     },
     leaderboard = {
         Easy = {},
@@ -129,6 +129,8 @@ local DB_DEFAULTS = {
         },
         skipBarSelection = false,
         mmoMouse = false,
+        hasUniqueBinds = false,
+        uniqueBinds = {},   -- [BASEKEY] = "mouse" | "numpad" | "function" | "other"
         includeGrouping = false,
         keyboardLayout = "QWERTY",
     },
@@ -168,10 +170,7 @@ local function OnInitialize()
         BoundToLearnDB.stats.scoreScaleV2 = true
     end
 
-    -- Apply the saved color theme before any UI is built.
-    if ns.Theme and ns.Theme.ApplyTheme then
-        ns.Theme.ApplyTheme(BoundToLearnDB.options.colorTheme)
-    end
+    BoundToLearnDB.options.colorTheme = nil   -- the color themes are gone
 
     -- Crash recovery for the round music fade: if a round set the Music volume
     -- low/zero for a fade and a crash skipped the restore, put it back.
@@ -272,6 +271,37 @@ local function OnInitialize()
         end
     end
 
+    -- Migrate: accuracy now weights hit quality (perfect/great/good) instead of only
+    -- subtracting misses, so old accuracy bests would sit unbeatable. Reset the accuracy
+    -- bests and the lifetime hit tally once so they rebuild on the new formula.
+    if not BoundToLearnDB.accuracyWeighted then
+        BoundToLearnDB.accuracyWeighted = true
+        local st = BoundToLearnDB.stats
+        if type(st) == "table" then
+            st.lifetimeGameHits = 0
+            st.lifetimeGameNotes = 0
+            if type(st.personalBest) == "table" then st.personalBest.bestAccuracy = 0 end
+        end
+        local g = BoundToLearnDB.game
+        if type(g) == "table" and type(g.songStats) == "table" then
+            for _, byDiff in pairs(g.songStats) do
+                if type(byDiff) == "table" then
+                    for _, s in pairs(byDiff) do
+                        if type(s) == "table" then s.bestAccuracy = 0 end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Migrate: ping SFX now defaults on; enable it once for installs from when it was off.
+    if not BoundToLearnDB.pingSfxDefaultOn then
+        BoundToLearnDB.pingSfxDefaultOn = true
+        if type(BoundToLearnDB.pingTrainer) == "table" then
+            BoundToLearnDB.pingTrainer.mutePingSounds = false
+        end
+    end
+
     ns.version = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
 
     SLASH_KBTRACK1 = "/kbtrack"
@@ -322,6 +352,16 @@ local function OnInitialize()
             if ns.PingGameUI then ns.PingGameUI:ToggleDebugHitbox() end
         elseif msg == "wheeldbg" then
             if ns.GameUI then ns.GameUI:DumpWheel() end
+        elseif msg:sub(1, 11) == "layoutcheck" then
+            ns.LayoutCheck:Run(msg:sub(13))
+        elseif msg == "mousetest" then
+            BoundToLearn:ToggleMouseTest()
+        elseif msg == "feedback" then
+            ns.Feedback:OpenGeneral()
+        elseif msg == "first" then
+            BoundToLearn:ShowWelcome()
+        elseif msg == "songcheck" then
+            BoundToLearn:SongCheck()
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
@@ -359,7 +399,9 @@ local function OnPlayerLogin()
         end
     end)
 
+    -- Once per account, for a new install: the flag clears as it is queued.
     if BoundToLearn.db.options.firstRun then
+        BoundToLearn.db.options.firstRun = false
         C_Timer.After(2, function()
             BoundToLearn:ShowWelcome()
         end)
@@ -407,6 +449,70 @@ function BoundToLearn:ToggleTracker()
     end
 end
 
+-- Probe (/btl songcheck, and the end of /btl layoutcheck): which tracks this
+-- client plays. Printed, and saved in BoundToLearnDB.songReport for reading
+-- from the SavedVariables file.
+function BoundToLearn:SongCheck()
+    local repeats = ns.SongData.ArtRepeats()
+    local lines = {}
+    -- With game sound off the client answers "will not play" for every file,
+    -- which says nothing about the tracks.
+    if GetCVar("Sound_EnableAllSound") == "0" then
+        lines[1] = "Track check skipped: game sound is off (Settings, Audio, Enable Sound)."
+    else
+        local unplayable, disagree, total = ns.SongData.CheckTracks()
+        lines[1] = sformat("%d of %d tracks play here. Unplayable: %s",
+            total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none")
+        if Utils.IS_FOREVER then
+            lines[2] = sformat("Differs from the Forever list: %s",
+                #disagree > 0 and table.concat(disagree, " ") or "none")
+        end
+    end
+    lines[#lines + 1] = sformat("Same picture on 4+ tracks: %s",
+        #repeats > 0 and table.concat(repeats, "; ") or "none")
+    -- What the client answered, so "0 tracks play" can be told apart from a
+    -- muted channel: the sound settings and the first track on two channels.
+    local first = ns.SongData.songs[1]
+    local function try(channel)
+        local willPlay, handle = PlaySoundFile(first.id, channel)
+        if handle then StopSound(handle) end
+        return sformat("%s=%s", channel, tostring(willPlay))
+    end
+    lines[#lines + 1] = sformat("Sound: all %s, sfx %s, music %s, master volume %s, music volume %s; %s (%d): %s %s",
+        tostring(GetCVar("Sound_EnableAllSound")), tostring(GetCVar("Sound_EnableSFX")),
+        tostring(GetCVar("Sound_EnableMusic")), tostring(GetCVar("Sound_MasterVolume")),
+        tostring(GetCVar("Sound_MusicVolume")), first.key, first.id, try("Master"), try("Music"))
+    BoundToLearnDB.songReport = lines
+    for _, line in ipairs(lines) do Utils.Print(line) end
+end
+
+-- Probe (/btl mousetest): middle click (every mouse has one) also presses
+-- Action Button 1 and wheel up Action Button 2, until run again. Never saved
+-- to the binding set; the old binds come back.
+local MOUSE_TEST = { { key = "BUTTON3", action = "ACTIONBUTTON1" }, { key = "MOUSEWHEELUP", action = "ACTIONBUTTON2" } }
+local mouseTestPrev
+function BoundToLearn:ToggleMouseTest()
+    if InCombatLockdown() then
+        self:Print("Out of combat only.")
+        return
+    end
+    if mouseTestPrev == nil then
+        mouseTestPrev = {}
+        for i, bind in ipairs(MOUSE_TEST) do
+            mouseTestPrev[i] = GetBindingAction(bind.key) or ""
+            SetBinding(bind.key, bind.action)
+        end
+        self:Print("TEST: middle click now casts action bar 1 slot 1, and wheel up casts slot 2. /btl mousetest again undoes it.")
+    else
+        for i, bind in ipairs(MOUSE_TEST) do
+            local prev = mouseTestPrev[i]
+            SetBinding(bind.key, prev ~= "" and prev or nil)
+        end
+        mouseTestPrev = nil
+        self:Print("TEST over: middle click and wheel up have their own binds back.")
+    end
+end
+
 function BoundToLearn:ShowStats()
     if ns.StatsUI then ns.StatsUI:Toggle() end
 end
@@ -434,6 +540,7 @@ function BoundToLearn:PrintHelp()
         "  /btl ping        - Open ping trainer",
         "  /btl stats       - Show statistics panel",
         "  /btl options     - Open settings",
+        "  /btl feedback    - Report a problem or idea (link with details filled in)",
         "  /btl enforce      - Toggle click blocking (keybind-only mode)",
         "  /btl enforce all  - Block all ability clicks",
         "  /btl enforce cc   - Block only CC/interrupt clicks",
@@ -447,39 +554,31 @@ function BoundToLearn:PrintHelp()
 end
 
 -- Hidden testing command (/btl reset scores): wipe all persistent progress.
--- Not listed in help; confirmed via popup so a user who stumbles on it is
--- warned about exactly what they lose before anything is erased.
+-- Not listed in help; confirmed via a themed dialog so a user who stumbles on
+-- it is warned about exactly what they lose before anything is erased.
 function BoundToLearn:ConfirmResetScores()
-    if not StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] then
-        StaticPopupDialogs["BOUNDTOLEARN_RESET_SCORES"] = {
-            text = "Reset ALL BoundToLearn progress?\n\nThis permanently erases every achievement, trophy, personal best, high score, and leaderboard entry. It cannot be undone.",
-            button1 = "Erase Everything",
-            button2 = "Cancel",
-            showAlert = true,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-            OnAccept = function()
-                local db = BoundToLearn.db
-                wipe(db.achievements.unlocked)
-                for _, board in pairs(db.leaderboard) do wipe(board) end
-                local s = db.stats
-                wipe(s.sessions)
-                local pb = s.personalBest
-                pb.longestCombo, pb.highestScore = 0, 0
-                pb.bestAccuracy, pb.bestKeybindRatio, pb.fastestQuiz = 0, 0, 0
-                for _, d in pairs(s.difficultyBest) do
-                    d.highestScore, d.longestCombo = 0, 0
-                end
-                s.lifetimeClicks, s.lifetimeKeybinds = 0, 0
-                s.lifetimeGameNotes, s.lifetimeGameHits = 0, 0
-                s.lifetimeQuizzes, s.lifetimeQuizAbilities = 0, 0
-                BoundToLearn:Print("All scores, achievements, and trophies reset.")
-            end,
-        }
-    end
-    StaticPopup_Show("BOUNDTOLEARN_RESET_SCORES")
+    ns.Theme.ShowConfirm({
+        title = "Reset Everything",
+        body = "Reset ALL BoundToLearn progress?\n\nThis permanently erases every achievement, trophy, personal best, high score, and leaderboard entry. It cannot be undone.",
+        acceptText = "Erase Everything",
+        onAccept = function()
+            local db = BoundToLearn.db
+            wipe(db.achievements.unlocked)
+            for _, board in pairs(db.leaderboard) do wipe(board) end
+            local s = db.stats
+            wipe(s.sessions)
+            local pb = s.personalBest
+            pb.longestCombo, pb.highestScore = 0, 0
+            pb.bestAccuracy, pb.bestKeybindRatio, pb.fastestQuiz = 0, 0, 0
+            for _, d in pairs(s.difficultyBest) do
+                d.highestScore, d.longestCombo = 0, 0
+            end
+            s.lifetimeClicks, s.lifetimeKeybinds = 0, 0
+            s.lifetimeGameNotes, s.lifetimeGameHits = 0, 0
+            s.lifetimeQuizzes, s.lifetimeQuizAbilities = 0, 0
+            BoundToLearn:Print("All scores, achievements, and trophies reset.")
+        end,
+    })
 end
 
 -- Minimap button
@@ -584,6 +683,8 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:EnableMouse(true)
         ns.Theme.StylePanel(minimapMenu, 0.97)
         minimapMenu:Hide()
+        -- Esc closes the menu instead of falling through to the game menu.
+        Utils.CloseOnEscape(minimapMenu)
 
         local menuEntries = {
             { header = "Games" },
@@ -599,6 +700,7 @@ function BoundToLearn:ShowMinimapMenu(anchor)
             { separator = true },
             { getText = function() return "Statistics" end, func = function() self:ShowStats() end },
             { getText = function() return "Options" end, func = function() self:OpenOptions() end },
+            { getText = function() return "Give feedback" end, func = function() ns.Feedback:OpenGeneral() end },
         }
 
         local menuBtns = {}
@@ -647,9 +749,16 @@ function BoundToLearn:ShowMinimapMenu(anchor)
         minimapMenu:SetSize(140, -yOff + 5)
 
         minimapMenu:SetScript("OnShow", function(self)
+            -- 130 is a floor: rows widen to the longest label.
+            local rowWidth = 130
             for _, entry in ipairs(menuBtns) do
                 entry.btn:SetText(entry.getText())
+                rowWidth = mmax(rowWidth, mfloor(entry.btn:GetFontString():GetStringWidth()) + 20)
             end
+            for _, entry in ipairs(menuBtns) do
+                entry.btn:SetWidth(rowWidth)
+            end
+            self:SetWidth(rowWidth + 10)
             self:SetScript("OnUpdate", function(self)
                 if not self:IsMouseOver() and not (minimapButton and minimapButton:IsMouseOver())
                    and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
@@ -707,44 +816,52 @@ function BoundToLearn:ShowWelcome()
     titleRule:SetPoint("TOPLEFT", 16, -40)
     titleRule:SetPoint("TOPRIGHT", -16, -40)
 
-    local GOLD, ACC, WARN = ns.Theme.GOLD_HEX, ns.Theme.ACCENT_HEX, ns.Theme.OKAY_HEX
-    local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    body:SetPoint("TOPLEFT", 20, -52)
-    body:SetPoint("TOPRIGHT", -20, -52)
-    body:SetJustifyH("LEFT")
-    body:SetSpacing(3)
-    body:SetText(
-        "|cFF" .. GOLD .. "Keybind Tracker|r\n" ..
-        "Automatically tracks whether you use keybinds or click " ..
-        "your abilities. A small floating widget shows your keybind " ..
-        "ratio in real time. The goal: build muscle memory so " ..
-        "keybinds become second nature.\n\n" ..
-        "|cFF" .. GOLD .. "Practice Game|r\n" ..
-        "A rhythm-based minigame where spell icons fall toward " ..
-        "your action bar. Press the correct keybind at the right time " ..
-        "to score points. Build combos for multipliers and bonus rewards.\n\n" ..
-        "|cFF" .. WARN .. "Note:|r Starting the practice game will |cFF" .. WARN .. "temporarily " ..
-        "disable your abilities|r so keypresses are scored instead of " ..
-        "casting spells. Your abilities return to normal the moment the " ..
-        "game ends. The game cannot run during combat.\n\n" ..
-        "|cFF" .. GOLD .. "Getting Started|r\n" ..
-        "Use |cFF" .. ACC .. "/btl|r to see all commands, or right-click the " ..
-        "minimap button for quick access to options."
-    )
+    -- Sections: a centered header over a left-aligned paragraph.
+    local ACC = ns.Theme.ACCENT_HEX
+    local sections = {
+        { "Keybind Tracker",
+          "Automatically tracks whether you use keybinds or click your abilities. " ..
+          "A small floating widget shows your keybind ratio in real time. The goal: " ..
+          "build muscle memory so keybinds become second nature." },
+        { "Practice Game",
+          "A rhythm-based minigame where spell icons fall toward your action bar. " ..
+          "Press the correct keybind at the right time to score points. Build combos " ..
+          "for multipliers and bonus rewards." },
+        { "Getting Started",
+          "Use |cFF" .. ACC .. "/btl|r to see all commands, or right-click the minimap " ..
+          "button for quick access to options." },
+    }
+    local PAD, y = 20, -52
+    local textWidth = f:GetWidth() - PAD * 2
+    for _, section in ipairs(sections) do
+        local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOP", 0, y)
+        header:SetText(section[1])
+        y = y - header:GetStringHeight() - 4
+        local text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("TOPLEFT", PAD, y)
+        text:SetWidth(textWidth)
+        text:SetJustifyH("LEFT")
+        text:SetSpacing(3)
+        text:SetText(section[2])
+        y = y - text:GetStringHeight() - 14
+    end
 
-    local cb = ns.Theme.CreateToggle(f, "Don't show this again", nil, 190)
-    cb:SetPoint("BOTTOMLEFT", 16, 18)
-    cb:SetChecked(false)
+    -- Shown once per account; unticking the box brings it back next login.
+    local cb = ns.Theme.CreateToggle(f, "Don't show again")
+    cb:SetWidth(mceil(cb.Text:GetUnboundedStringWidth()) + 26)
+    cb:SetPoint("BOTTOMRIGHT", -14, 14)
+    cb:SetChecked(true)
 
-    local btn = ns.Theme.CreateAccentButton(f, "Got It", 100, 26)
-    btn:SetPoint("BOTTOMRIGHT", -16, 16)
     local function dismiss()
-        if cb:GetChecked() then
-            BoundToLearn.db.options.firstRun = false
-        end
+        BoundToLearn.db.options.firstRun = not cb:GetChecked()
         f:Hide()
     end
+    local btn = ns.Theme.CreateAccentButton(f, "Got It", 100, 26)
+    btn:SetPoint("BOTTOM", 0, 16)
     btn:SetScript("OnClick", dismiss)
+    -- Tall enough for the text above the button row.
+    f:SetHeight(-y + 50)
 
     local close = ns.Theme.CreateCloseButton(f, dismiss)
     close:SetPoint("TOPRIGHT", -8, -8)
@@ -761,7 +878,9 @@ local function ShowGameConfirm()
         local f = CreateFrame("Frame", "BoundToLearnGameConfirm", UIParent)
         f:SetSize(340, 200)
         f:SetPoint("CENTER", 0, 60)
-        f:SetFrameStrata("DIALOG")
+        -- Above the song select (FULLSCREEN), which Start is pressed from.
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetFrameLevel(200)
         ns.Theme.StylePanel(f)
         f:EnableMouse(true)
 
@@ -777,8 +896,9 @@ local function ShowGameConfirm()
             "Your abilities return to normal when the game ends."
         )
 
+        -- Own row above the buttons, which fill the bottom edge.
         local cb = ns.Theme.CreateToggle(f, "Don't ask again", nil, 160)
-        cb:SetPoint("BOTTOMLEFT", 16, 16)
+        cb:SetPoint("BOTTOM", 0, 52)
         f.dontAsk = cb
 
         local startBtn = ns.Theme.CreateAccentButton(f, "Start", 100, 26)
@@ -797,22 +917,16 @@ local function ShowGameConfirm()
             f:Hide()
         end)
 
-        f:SetScript("OnKeyDown", function(self, key)
-            if key == "ESCAPE" then
-                self:SetPropagateKeyboardInput(false)
-                self:Hide()
-            else
-                self:SetPropagateKeyboardInput(true)
-            end
-        end)
-
         f:Hide()
+        Utils.CloseOnEscape(f)
         gameConfirmFrame = f
     end
 
     gameConfirmFrame.dontAsk:SetChecked(false)
     gameConfirmFrame:Show()
 end
+
+BoundToLearn.ShowGameConfirm = ShowGameConfirm
 
 function BoundToLearn:OpenGame()
     if ns.Game and ns.Game:IsRunning() then

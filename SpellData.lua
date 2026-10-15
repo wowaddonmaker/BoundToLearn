@@ -336,7 +336,6 @@ local CLASS_SPELLS = {
         -- Defensive
         [104773] = "defensive",    -- Unending Resolve
         [108416] = "defensive",    -- Dark Pact
-        [386997] = "defensive",    -- Soul Harvest
         -- Offensive
         [1122]   = "offensive_cd", -- Summon Infernal
         [205180] = "offensive_cd", -- Summon Darkglare
@@ -382,13 +381,141 @@ local CC_CATEGORIES = {
     root = true, silence = true, fear = true, knockback = true,
 }
 
+-- WoW Forever: ranked class spells and rune abilities. Generated from the
+-- client's spell tables (tools/gen_forever_spells.py); do not hand-edit.
+local FOREVER_CLASS_SPELLS = {
+    DRUID = {
+        [1238122] = "interrupt", -- Feral Charge
+        [16979] = "interrupt", -- Feral Charge (Bear)
+        [410176] = "interrupt", -- Skull Bash
+        [5211] = "stun", [6798] = "stun", [8983] = "stun", -- Bash
+        [9005] = "stun", [9823] = "stun", [9827] = "stun", -- Pounce
+        [2637] = "incapacitate", [18657] = "incapacitate", [18658] = "incapacitate", -- Hibernate
+        [339] = "root", [1062] = "root", [5195] = "root", [5196] = "root", [9852] = "root", [9853] = "root", -- Entangling Roots
+        [16689] = "root", [16810] = "root", [16811] = "root", [16812] = "root", [16813] = "root", [17329] = "root", -- Nature's Grasp
+        [22812] = "defensive", -- Barkskin
+        [22842] = "defensive", [22845] = "defensive", -- Frenzied Regeneration
+        [408024] = "defensive", -- Survival Instincts
+        [417141] = "offensive_cd", -- Berserk
+        [17116] = "offensive_cd", -- Nature's Swiftness
+        [5217] = "offensive_cd", [417045] = "offensive_cd", -- Tiger's Fury
+    },
+    HUNTER = {
+        [19577] = "stun", -- Intimidation
+        [1499] = "incapacitate", [14310] = "incapacitate", [14311] = "incapacitate", -- Freezing Trap
+        [19503] = "disorient", -- Scatter Shot
+        [1513] = "fear", [14326] = "fear", [14327] = "fear", -- Scare Beast
+        [19306] = "root", [20909] = "root", [20910] = "root", [1242634] = "root", -- Counterattack
+        [19185] = "root", -- Entrapment
+        [1265887] = "root", [1265888] = "root", [1265890] = "root", [1265891] = "root", [1265892] = "root", -- Web
+        [19263] = "defensive", -- Deterrence
+        [5384] = "defensive", -- Feign Death
+        [19574] = "offensive_cd", -- Bestial Wrath
+        [3045] = "offensive_cd", -- Rapid Fire
+    },
+    MAGE = {
+        [2139] = "interrupt", -- Counterspell
+        [12355] = "stun", -- Impact
+        [118] = "incapacitate", [12824] = "incapacitate", [12825] = "incapacitate", [12826] = "incapacitate", [28271] = "incapacitate", [28272] = "incapacitate", -- Polymorph
+        [28270] = "incapacitate", -- Polymorph: Cow
+        [122] = "root", [865] = "root", [6131] = "root", [10230] = "root", -- Frost Nova
+        [12494] = "root", -- Frostbite
+        [11426] = "defensive", [13031] = "defensive", [13032] = "defensive", [13033] = "defensive", -- Ice Barrier
+        [11958] = "defensive", -- Ice Block
+        [1463] = "defensive", [8494] = "defensive", [8495] = "defensive", [10191] = "defensive", [10192] = "defensive", [10193] = "defensive", -- Mana Shield
+        [12042] = "offensive_cd", -- Arcane Power
+        [11129] = "offensive_cd", -- Combustion
+        [425121] = "offensive_cd", -- Icy Veins
+        [12043] = "offensive_cd", -- Presence of Mind
+    },
+    PALADIN = {
+        [425609] = "interrupt", -- Rebuke
+        [853] = "stun", [5588] = "stun", [5589] = "stun", [10308] = "stun", -- Hammer of Justice
+        [20164] = "stun", -- Seal of Justice
+        [20066] = "incapacitate", -- Repentance
+        [2878] = "fear", [5627] = "fear", [10326] = "fear", -- Turn Undead
+        [1022] = "defensive", [5599] = "defensive", [10278] = "defensive", -- Blessing of Protection
+        [498] = "defensive", [5573] = "defensive", -- Divine Protection
+        [642] = "defensive", [1020] = "defensive", -- Divine Shield
+        [633] = "defensive", [2800] = "defensive", [10310] = "defensive", -- Lay on Hands
+        [407788] = "offensive_cd", -- Avenging Wrath
+        [20216] = "offensive_cd", -- Divine Favor
+    },
+    PRIEST = {
+        [605] = "incapacitate", [10911] = "incapacitate", [10912] = "incapacitate", -- Mind Control
+        [9484] = "incapacitate", [9485] = "incapacitate", [10955] = "incapacitate", -- Shackle Undead
+        [1277455] = "disorient", -- Confounding Flash
+        [8122] = "fear", [8124] = "fear", [10888] = "fear", [10890] = "fear", -- Psychic Scream
+        [15487] = "silence", -- Silence
+        [1277331] = "root", [1277332] = "root", [1277333] = "root", [1277334] = "root", [1277335] = "root", -- Chastise
+        [13908] = "defensive", [19236] = "defensive", [19238] = "defensive", [19240] = "defensive", [19241] = "defensive", [19242] = "defensive", [19243] = "defensive", -- Desperate Prayer
+        [425294] = "defensive", -- Dispersion
+        [586] = "defensive", [9578] = "defensive", [9579] = "defensive", [9592] = "defensive", [10941] = "defensive", [10942] = "defensive", -- Fade
+        [402004] = "defensive", -- Pain Suppression
+        [14751] = "offensive_cd", -- Inner Focus
+        [10060] = "offensive_cd", -- Power Infusion
+    },
+    ROGUE = {
+        [1766] = "interrupt", [1767] = "interrupt", [1768] = "interrupt", [1769] = "interrupt", -- Kick
+        [400009] = "stun", -- Between the Eyes
+        [1833] = "stun", -- Cheap Shot
+        [408] = "stun", [8643] = "stun", -- Kidney Shot
+        [1776] = "incapacitate", [1777] = "incapacitate", [8629] = "incapacitate", [11285] = "incapacitate", [11286] = "incapacitate", -- Gouge
+        [2070] = "incapacitate", [6770] = "incapacitate", [11297] = "incapacitate", -- Sap
+        [2094] = "disorient", -- Blind
+        [5277] = "defensive", -- Evasion
+        [2983] = "defensive", [8696] = "defensive", [11305] = "defensive", -- Sprint
+        [1856] = "defensive", [1857] = "defensive", -- Vanish
+        [13750] = "offensive_cd", -- Adrenaline Rush
+        [13877] = "offensive_cd", -- Blade Flurry
+        [14177] = "offensive_cd", -- Cold Blood
+    },
+    SHAMAN = {
+        [8042] = "interrupt", [8044] = "interrupt", [8045] = "interrupt", [8046] = "interrupt", [10412] = "interrupt", [10413] = "interrupt", [10414] = "interrupt", -- Earth Shock
+        [8177] = "defensive", -- Grounding Totem
+        [16188] = "offensive_cd", -- Nature's Swiftness
+    },
+    WARLOCK = {
+        [19244] = "interrupt", [19647] = "interrupt", -- Spell Lock
+        [412788] = "stun", -- Demon Charge
+        [18093] = "stun", -- Pyroclasm
+        [710] = "incapacitate", [18647] = "incapacitate", -- Banish
+        [6358] = "incapacitate", -- Seduction
+        [1098] = "incapacitate", [11725] = "incapacitate", [11726] = "incapacitate", -- Subjugate Demon
+        [6789] = "fear", [17925] = "fear", [17926] = "fear", -- Death Coil
+        [5782] = "fear", [6213] = "fear", [6215] = "fear", -- Fear
+        [5484] = "fear", [17928] = "fear", -- Howl of Terror
+        [6229] = "defensive", [11739] = "defensive", [11740] = "defensive", [28610] = "defensive", -- Shadow Ward
+        [18288] = "offensive_cd", -- Amplify Curse
+        [425463] = "offensive_cd", -- Demonic Grace
+        [403789] = "offensive_cd", -- Metamorphosis
+    },
+    WARRIOR = {
+        [6552] = "interrupt", [6554] = "interrupt", -- Pummel
+        [72] = "interrupt", [1671] = "interrupt", [1672] = "interrupt", -- Shield Bash
+        [100] = "stun", [6178] = "stun", [11578] = "stun", -- Charge
+        [12809] = "stun", -- Concussion Blow
+        [20252] = "stun", [20616] = "stun", [20617] = "stun", -- Intercept
+        [440488] = "stun", -- Shockwave
+        [5246] = "fear", -- Intimidating Shout
+        [12975] = "defensive", [12976] = "defensive", -- Last Stand
+        [20230] = "defensive", -- Retaliation
+        [2565] = "defensive", -- Shield Block
+        [871] = "defensive", -- Shield Wall
+        [2687] = "offensive_cd", -- Bloodrage
+        [12328] = "offensive_cd", -- Death Wish
+        [1719] = "offensive_cd", -- Recklessness
+        [12292] = "offensive_cd", [12723] = "offensive_cd", -- Sweeping Strikes
+    },
+}
+
 -- Flattened lookup for the current player's class: spellID → category
 local playerSpells = {}
 local FindBaseSpellByID = FindBaseSpellByID
 
 function SpellData:Initialize()
     local _, className = UnitClass("player")
-    local classData = CLASS_SPELLS[className]
+    local classData = (ns.Utils.IS_FOREVER and FOREVER_CLASS_SPELLS or CLASS_SPELLS)[className]
     if classData then
         for spellID, category in pairs(classData) do
             playerSpells[spellID] = category

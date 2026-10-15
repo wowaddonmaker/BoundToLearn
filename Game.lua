@@ -13,7 +13,6 @@ local mabs     = Utils.mabs
 local mfloor   = Utils.mfloor
 local mmin, mmax = Utils.mmin, Utils.mmax
 local ipairs   = Utils.ipairs
-local sformat  = Utils.sformat
 local pairs    = Utils.pairs
 
 local CreateFrame      = Utils.CreateFrame
@@ -25,7 +24,6 @@ local IsShiftKeyDown   = IsShiftKeyDown
 local IsControlKeyDown = IsControlKeyDown
 local IsAltKeyDown     = IsAltKeyDown
 local UIParent         = UIParent
-local C_Spell          = C_Spell
 
 local isRunning = false
 local isPaused = false
@@ -34,6 +32,7 @@ local currentMode = "timed"  -- "timed", "practice", "competitive"
 local activeNotes = {}
 local availableSlots = {}
 local destroyedLanes = {}  -- [slotIndex] = expireTime
+local barExtents = {}      -- [barKey] = { l, r, b, t } screen px of each included bar
 
 -- Reverse lookup: keybind string -> slotInfo
 local keybindToSlot = {}
@@ -60,6 +59,24 @@ local gameModifiers = {}
 local SCORE_CAP = 10000
 local JUDGE_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.45, miss = 0 }
 local COMBO_THRESHOLDS = { 5, 10, 20, 35 }
+
+-- Bomb fuse and fake-note laugh. Forever lacks the two sound kits but ships
+-- their files, so it plays those directly.
+local FUSE_FILES = { 2066602, 2066603 }
+local LAUGH_FILES = { 541902, 541940, 541894, 541985 }
+local function PlayFuseSound()
+    if Utils.IS_FOREVER then
+        return PlaySoundFile(FUSE_FILES[math.random(#FUSE_FILES)], "SFX")
+    end
+    return PlaySound(268433, "SFX", false)
+end
+local function PlayLaughSound()
+    if Utils.IS_FOREVER then
+        PlaySoundFile(LAUGH_FILES[math.random(#LAUGH_FILES)], "SFX")
+    else
+        PlaySound(23330)
+    end
+end
 
 -- Focus (health) system
 local MAX_FOCUS = 100
@@ -117,6 +134,9 @@ local RAPID_GAP = 0.22
 -- Extra screen-pixel lift of the shared note start line above the topmost bar, so
 -- notes (and the health bar sitting on the line) start higher for more reaction time.
 local START_LINE_LIFT = 180
+-- Room kept above the start line for the health bar that sits on it (UI units:
+-- its 6 px lift, 34 px height and a margin), so the bar never leaves the screen.
+local LINE_TOP_ROOM = 56
 
 local function bindMods(keybind)
     local m = ""
@@ -199,25 +219,41 @@ function Game:Initialize()
     ns.eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     ns.eventFrame:HookScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" and isRunning then
-            self:Pause()
-            -- Paused by combat; pause overlay shows
+            if currentMode == "practice" then
+                self:Pause()   -- Practice is lenient: combat just pauses.
+            else
+                -- Scored runs cannot be paused; entering combat ends the run.
+                BoundToLearn:Print("Entered combat. Run ended.")
+                self:Stop()
+            end
         end
     end)
 end
 
+-- A mouse-bound note is pressed through Utils.CatchMouseBinds, not OnKeyDown.
+local function OnMouseBind(key)
+    if not isRunning or isPaused then return end
+    local slotInfo = keybindToSlot[key]
+    if slotInfo then Game:OnKeybindInput(slotInfo.slot) end
+end
+
 function Game:BlockActionBars()
-    -- Bind each action bar key to a nonexistent action so it does nothing
+    -- Keyboard binds go to a nonexistent action so they do nothing; mouse
+    -- binds go to our catch, which scores them.
+    local mouseKeys = {}
     for _, prefix in ipairs(ALL_BAR_PREFIXES) do
         for i = 1, 12 do
             local key1, key2 = GetBindingKey(prefix .. i)
-            if key1 then
-                SetOverrideBinding(inputFrame, true, key1, "BTLNOOP")
-            end
-            if key2 then
-                SetOverrideBinding(inputFrame, true, key2, "BTLNOOP")
+            for _, key in ipairs({ key1, key2 }) do
+                if Utils.IsMouseBind(key) then
+                    mouseKeys[#mouseKeys + 1] = key
+                else
+                    SetOverrideBinding(inputFrame, true, key, "BTLNOOP")
+                end
             end
         end
     end
+    Utils.CatchMouseBinds(mouseKeys, OnMouseBind)
     -- Block ping keybind
     local pingKey1, pingKey2 = GetBindingKey("PING")
     if pingKey1 then SetOverrideBinding(inputFrame, true, pingKey1, "BTLNOOP") end
@@ -226,6 +262,7 @@ end
 
 function Game:UnblockActionBars()
     ClearOverrideBindings(inputFrame)
+    Utils.ReleaseMouseBinds()
 end
 
 function Game:GetSettings()
@@ -297,19 +334,32 @@ function Game:DiscoverSlots()
         { key = "bar8",        bindPrefix = "MULTIACTIONBAR7BUTTON",  btnPrefix = "MultiBar7Button",           startSlot = 169 },
     }
     local seenTextures = {}
+    wipe(barExtents)
     for _, bar in ipairs(barMappings) do
         if bars[bar.key] then
             for i = 1, 12 do
                 local slot = bar.startSlot + (i - 1)
                 local btn = _G[bar.btnPrefix .. i]
                 if btn and btn:IsShown() then
+                    -- The whole bar counts, bound or not: the HUD spans it.
+                    local left = btn:GetLeft()
+                    if left then
+                        local scale = btn:GetEffectiveScale()
+                        local e = barExtents[bar.key]
+                        if not e then
+                            e = { l = math.huge, r = -math.huge, b = math.huge, t = -math.huge }
+                            barExtents[bar.key] = e
+                        end
+                        e.l, e.r = mmin(e.l, left * scale), mmax(e.r, btn:GetRight() * scale)
+                        e.b, e.t = mmin(e.b, btn:GetBottom() * scale), mmax(e.t, btn:GetTop() * scale)
+                    end
                     -- Read the button's CURRENT action, not the raw page slot.
                     -- Druid forms (and stance/bonus bars) remap the main bar,
                     -- so GetActionTexture(slot) returns a hidden other-form
                     -- icon. btn.action is what the player actually sees now.
                     local action = btn.action or slot
                     if HasAction(action) then
-                        local keybind = GetBindingKey(bar.bindPrefix .. i)
+                        local keybind, keybind2 = GetBindingKey(bar.bindPrefix .. i)
                         if keybind then
                             local texture = GetActionTexture(action)
                             -- Skip duplicate textures (same ability on 2 bars)
@@ -324,6 +374,8 @@ function Game:DiscoverSlots()
                                 }
                                 tinsert(availableSlots, slotInfo)
                                 keybindToSlot[keybind] = slotInfo
+                                -- Either bind of the button hits its notes.
+                                if keybind2 then keybindToSlot[keybind2] = slotInfo end
                             end
                         end
                     end
@@ -638,7 +690,7 @@ function Game:Stop()
     end
 
     if ns.GameUI and totalNotes > 0 and currentMode ~= "practice" then
-        local songAcc = totalNotes > 0 and ((totalNotes - hitCounts.miss) / totalNotes * 100) or 0
+        local songAcc = ns.Utils.HitAccuracy(hitCounts)
         ns.GameUI:RecordSongScore(score, songAcc, maxCombo)
         local key = BoundToLearn.db.game.songKey
         local song = ns.SongData and ns.SongData.Get(key)
@@ -715,6 +767,8 @@ function Game:Pause()
     pauseStartTime = GetTime()
     gameFrame:Hide()
     inputFrame:Hide()
+    -- Combat pauses practice: the abilities must work in that fight.
+    self:UnblockActionBars()
     if ns.GameUI then
         ns.GameUI:CancelCountdown()
         ns.GameUI:OnGamePause()
@@ -728,6 +782,7 @@ function Game:Resume()
         return
     end
     isPaused = false
+    self:BlockActionBars()
 
     local function DoResume()
         local now = GetTime()
@@ -964,7 +1019,26 @@ function Game:ComputeNoteLine(settings)
         end
     end
     if not topY then return nil end
-    return topY + settings.fallDistance + START_LINE_LIFT
+    -- A side bar reaches high up the screen; the line stops below the top
+    -- instead, and notes for the highest buttons get a shorter fall.
+    local ceiling = (UIParent:GetTop() - LINE_TOP_ROOM) * UIParent:GetEffectiveScale()
+    return mmin(topY + settings.fallDistance + START_LINE_LIFT, ceiling)
+end
+
+-- Screen-pixel span (left, right) of the included horizontal bars, from the
+-- leftmost to the rightmost button. With only vertical bars, every bar counts.
+function Game:ComputeNoteSpan()
+    local left, right
+    for pass = 1, 2 do
+        for _, e in pairs(barExtents) do
+            if pass == 2 or (e.r - e.l) >= (e.t - e.b) then
+                left = left and mmin(left, e.l) or e.l
+                right = right and mmax(right, e.r) or e.r
+            end
+        end
+        if left then break end
+    end
+    return left, right
 end
 
 -- Place the start line + health bar up front (at game start) so neither jumps into
@@ -973,7 +1047,7 @@ function Game:PlaceNoteLine()
     local lineY = self:ComputeNoteLine(self:GetSettings())
     if lineY and ns.GameUI then
         ns.GameUI.noteHighwayTop = lineY
-        ns.GameUI:PlaceHealthBarAtLine(lineY)
+        ns.GameUI:PlaceHealthBarAtLine(lineY, self:ComputeNoteSpan())
     end
 end
 
@@ -984,7 +1058,7 @@ function Game:PrepChart(settings)
         if not lineY then return false end
         if ns.GameUI then
             ns.GameUI.noteHighwayTop = lineY
-            ns.GameUI:PlaceHealthBarAtLine(lineY)
+            ns.GameUI:PlaceHealthBarAtLine(lineY, self:ComputeNoteSpan())
         end
     end
     local fallSpeed = settings.fallSpeed
@@ -1175,7 +1249,7 @@ function Game:SpawnNote(now, settings, forcedSlot, forcedTargetTime, forcedFallT
     if ns.GameUI then ns.GameUI:AcquireNote(note) end
 
     if isBomb and BoundToLearn.db.game.soundEnabled then
-        local willPlay, handle = PlaySound(268433, "SFX", false)
+        local willPlay, handle = PlayFuseSound()
         if willPlay then note.bombSoundHandle = handle end
     end
 end
@@ -1375,7 +1449,7 @@ function Game:EvaluateRedHerring(note)
     end
 
     if BoundToLearn.db.game.soundEnabled then
-        PlaySound(23330)  -- goblin male laugh
+        PlayLaughSound()
     end
 
     UpdateFocus(-FOCUS_DRAIN.redHerring * GetFocusDrainScale())

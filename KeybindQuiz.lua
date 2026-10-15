@@ -31,7 +31,7 @@ local PlaySound        = PlaySound
 local ICON_SIZE = 80
 local ICON_CROP = 0.07
 local HEAP_ICON_SIZE = 36
-local HEAP_X_OFFSET = 160
+local HEAP_X_OFFSET = 240
 local HEAP_Y_BASE = -20
 local HEAP_SCATTER = 20
 local FLY_DURATION = 0.35
@@ -127,7 +127,7 @@ local function DiscoverCards()
             end
 
             if HasAction(slot) then
-                local keybind = GetBindingKey(bar.bindPrefix .. i)
+                local keybind, keybind2 = GetBindingKey(bar.bindPrefix .. i)
                 if keybind and not seen[keybind] then
                     local skip = shouldIgnore and shouldIgnore(slot)
                     if not skip then
@@ -135,6 +135,7 @@ local function DiscoverCards()
                         tinsert(allCards, {
                             slot = slot,
                             keybind = keybind,
+                            keybind2 = keybind2,
                             texture = GetActionTexture(slot) or "Interface\\Icons\\INV_Misc_QuestionMark",
                             name = GetAbilityName(slot) or sformat("Slot %d", slot),
                         })
@@ -441,6 +442,7 @@ local function CreateQuizUI()
     quizFrame:SetFrameLevel(15)
     quizFrame:EnableMouse(false)
     quizFrame:Hide()
+    ns.Theme.CheckLayoutOf(quizFrame)
 
     -- Title
     local title = ns.Theme.CreateTitle(quizFrame, "Keybind Quiz", 16)
@@ -460,6 +462,7 @@ local function CreateQuizUI()
     cardFrame = CreateFrame("Frame", nil, quizFrame)
     cardFrame:SetSize(ICON_SIZE, ICON_SIZE)
     cardFrame:SetPoint("CENTER", 0, 10)
+    cardFrame._btlLayoutItem = true
 
     cardIcon = cardFrame:CreateTexture(nil, "ARTWORK")
     cardIcon:SetPoint("TOPLEFT", 4, -4)
@@ -506,24 +509,28 @@ local function CreateQuizUI()
     answerKeybind:SetPoint("TOP", answerLabel, "BOTTOM", 0, -4)
     answerKeybind:Hide()
 
-    -- Heap anchors (invisible frames that heaps pile around)
+    -- Heap anchors (invisible frames that heaps pile around), sized to the
+    -- whole scatter so the layout check sees the space a pile takes.
+    local heapZone = HEAP_ICON_SIZE + 2 * HEAP_SCATTER
     correctHeapAnchor = CreateFrame("Frame", nil, quizFrame)
-    correctHeapAnchor:SetSize(HEAP_ICON_SIZE, HEAP_ICON_SIZE)
+    correctHeapAnchor:SetSize(heapZone, heapZone)
     correctHeapAnchor:SetPoint("CENTER", -HEAP_X_OFFSET, HEAP_Y_BASE)
+    correctHeapAnchor._btlLayoutItem = true
 
     wrongHeapAnchor = CreateFrame("Frame", nil, quizFrame)
-    wrongHeapAnchor:SetSize(HEAP_ICON_SIZE, HEAP_ICON_SIZE)
+    wrongHeapAnchor:SetSize(heapZone, heapZone)
     wrongHeapAnchor:SetPoint("CENTER", HEAP_X_OFFSET, HEAP_Y_BASE)
+    wrongHeapAnchor._btlLayoutItem = true
 
     -- Heap labels
     correctHeapLabel = quizFrame:CreateFontString(nil, "OVERLAY")
     correctHeapLabel:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
-    correctHeapLabel:SetPoint("TOP", correctHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - HEAP_SCATTER - 4)
+    correctHeapLabel:SetPoint("TOP", correctHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - 4)
     correctHeapLabel:SetTextColor(0.3, 0.8, 0.3)
 
     wrongHeapLabel = quizFrame:CreateFontString(nil, "OVERLAY")
     wrongHeapLabel:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
-    wrongHeapLabel:SetPoint("TOP", wrongHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - HEAP_SCATTER - 4)
+    wrongHeapLabel:SetPoint("TOP", wrongHeapAnchor, "BOTTOM", 0, -HEAP_ICON_SIZE - 4)
     wrongHeapLabel:SetTextColor(0.8, 0.3, 0.3)
 
     correctCountText = quizFrame:CreateFontString(nil, "OVERLAY")
@@ -542,32 +549,22 @@ local function CreateQuizUI()
     timerText:SetPoint("TOPRIGHT", quizFrame, "TOPRIGHT", -10, 10)
     timerText:SetTextColor(0.6, 0.6, 0.6)
 
-    -- ESC hint
+    -- ESC hint, below the space the answer reveal takes
     local escHint = quizFrame:CreateFontString(nil, "OVERLAY")
     escHint:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
-    escHint:SetPoint("TOP", promptText, "BOTTOM", 0, -50)
+    escHint:SetPoint("TOP", promptText, "BOTTOM", 0, -84)
     escHint:SetTextColor(0.4, 0.4, 0.4)
     escHint:SetText("ESC to exit")
 
     -- Ready screen (standalone frame above dimmer)
     local readyFrame = CreateFrame("Frame", nil, UIParent)
-    readyFrame:SetSize(300, 160)
+    readyFrame:SetSize(300, 204)
     readyFrame:SetPoint("CENTER", 0, 40)
     readyFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     readyFrame:SetFrameLevel(50)
     ns.Theme.StylePanel(readyFrame)
-    readyFrame:EnableKeyboard(true)
-    readyFrame:SetPropagateKeyboardInput(true)
-    readyFrame:SetScript("OnKeyDown", function(_, key)
-        if key == "ESCAPE" then
-            readyFrame:SetPropagateKeyboardInput(false)
-            readyFrame:Hide()
-            dimmer:Hide()
-        else
-            readyFrame:SetPropagateKeyboardInput(true)
-        end
-    end)
     readyFrame:Hide()
+    ns.Utils.CloseOnEscape(readyFrame, function() KeybindQuiz:CancelReady() end)
 
     local readyTitle = ns.Theme.CreateTitle(readyFrame, "Keybind Quiz", 18)
     readyTitle:SetPoint("TOP", 0, -20)
@@ -579,11 +576,18 @@ local function CreateQuizUI()
     readyDesc:SetTextColor(0.7, 0.7, 0.7)
     readyFrame.desc = readyDesc
 
+    local barNote = readyFrame:CreateFontString(nil, "OVERLAY")
+    barNote:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    barNote:SetPoint("TOP", readyDesc, "BOTTOM", 0, -8)
+    barNote:SetWidth(260)
+    barNote:SetTextColor(0.95, 0.80, 0.35)
+    barNote:SetText("Your action bars are hidden during the quiz.")
+
     local timedBtn = ns.Theme.CreateAccentButton(readyFrame, "Timed Run", 120, 28)
-    timedBtn:SetPoint("BOTTOMRIGHT", readyFrame, "BOTTOM", -6, 36)
+    timedBtn:SetPoint("BOTTOMRIGHT", readyFrame, "BOTTOM", -6, 50)
 
     local practiceBtn = ns.Theme.CreateButton(readyFrame, "Practice", 120, 28)
-    practiceBtn:SetPoint("BOTTOMLEFT", readyFrame, "BOTTOM", 6, 36)
+    practiceBtn:SetPoint("BOTTOMLEFT", readyFrame, "BOTTOM", 6, 50)
 
     local practiceHint = readyFrame:CreateFontString(nil, "OVERLAY")
     practiceHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
@@ -593,7 +597,8 @@ local function CreateQuizUI()
 
     local readyHint = readyFrame:CreateFontString(nil, "OVERLAY")
     readyHint:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-    readyHint:SetPoint("BOTTOM", 0, 6)
+    -- Clear of the dialog border, which is drawn inside the frame.
+    readyHint:SetPoint("BOTTOM", 0, 18)
     readyHint:SetTextColor(0.4, 0.4, 0.4)
     readyHint:SetText("ESC to cancel")
 
@@ -622,33 +627,37 @@ local function CreateQuizUI()
             return
         end
 
-        if quizFinished then
-            C_Timer.After(0, function() KeybindQuiz:Stop() end)
-            return
-        end
-
-        if waitingForNext then
-            CancelAdvanceTimer()
-            CancelWrongFlyTimer()
-            CompletePendingFly()
-            if pendingWrongIcon then
-                AddHeapIcon(pendingWrongIcon.texture, "wrong", pendingWrongIcon.anchorFrame)
-                pendingWrongIcon = nil
-                UpdateCounts()
-            end
-            waitingForNext = false
-            KeybindQuiz:NextCard()
-            return
-        end
-
         local fullKey = ""
         if IsAltKeyDown() then fullKey = fullKey .. "ALT-" end
         if IsControlKeyDown() then fullKey = fullKey .. "CTRL-" end
         if IsShiftKeyDown() then fullKey = fullKey .. "SHIFT-" end
-        fullKey = fullKey .. key
-
-        KeybindQuiz:CheckAnswer(fullKey)
+        KeybindQuiz:PressKey(fullKey .. key)
     end)
+end
+
+-- One answer press, from the key reader or the mouse catch (mouse binds).
+function KeybindQuiz:PressKey(fullKey)
+    if not isRunning then return end
+    if quizFinished then
+        C_Timer.After(0, function() KeybindQuiz:Stop() end)
+        return
+    end
+
+    if waitingForNext then
+        CancelAdvanceTimer()
+        CancelWrongFlyTimer()
+        CompletePendingFly()
+        if pendingWrongIcon then
+            AddHeapIcon(pendingWrongIcon.texture, "wrong", pendingWrongIcon.anchorFrame)
+            pendingWrongIcon = nil
+            UpdateCounts()
+        end
+        waitingForNext = false
+        KeybindQuiz:NextCard()
+        return
+    end
+
+    KeybindQuiz:CheckAnswer(fullKey)
 end
 
 -- Logic
@@ -709,7 +718,7 @@ function KeybindQuiz:CheckAnswer(pressedKey)
     if currentIndex < 1 or currentIndex > #deck then return end
     local card = deck[currentIndex]
 
-    if pressedKey == card.keybind then
+    if pressedKey == card.keybind or pressedKey == card.keybind2 then
         tinsert(correctPile, card)
         FlashGlow()
         promptText:SetText("|cFF44DD44Correct!|r")
@@ -798,7 +807,8 @@ function KeybindQuiz:FinishRound()
         if roundNumber == 1 then
             promptText:SetText(sformat("Perfect: all %d correct on the first try (%s)", total, timeStr))
         else
-            promptText:SetText(sformat("All %d abilities learned in %d rounds (%s)", total, roundNumber, timeStr))
+            promptText:SetText(sformat("All %s learned in %d rounds (%s)",
+                Utils.Count(total, "ability", "abilities"), roundNumber, timeStr))
         end
         promptText:SetTextColor(0.7, 0.7, 0.7)
         answerLabel:Hide()
@@ -879,7 +889,7 @@ function KeybindQuiz:Start()
     if not quizFrame then CreateQuizUI() end
 
     local readyFrame = quizFrame.readyFrame
-    readyFrame.desc:SetText(sformat("Quizzing %d abilities from your action bars.", #allCards))
+    readyFrame.desc:SetText(sformat("Quizzing %s from your action bars.", Utils.Count(#allCards, "ability", "abilities")))
 
     local function StartQuiz(practice)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -895,6 +905,50 @@ function KeybindQuiz:Start()
 
     dimmer:Show()
     readyFrame:Show()
+end
+
+-- Close the start screen without starting (Esc, the layout check).
+function KeybindQuiz:CancelReady()
+    if not quizFrame then return end
+    quizFrame.readyFrame:Hide()
+    dimmer:Hide()
+end
+
+-- Layout check: the round screen at its fullest (a long name, a wrong answer
+-- revealed, both piles filled) without taking the bars or the keyboard.
+local PREVIEW_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+function KeybindQuiz:LayoutPreview(show)
+    if isRunning then return end
+    if not show then
+        if not quizFrame then return end
+        ClearHeapIcons("correct")
+        ClearHeapIcons("wrong")
+        quizFrame:Hide()
+        dimmer:Hide()
+        return
+    end
+    if not quizFrame then CreateQuizUI() end
+    RevealCard({ texture = PREVIEW_ICON, name = "A Long Ability Name For The Layout Check" })
+    roundText:SetText("Round 1")
+    progressText:SetText("3 / 11")
+    timerText:SetText("0:42")
+    promptText:SetText("|cFFDD4444Not quite|r")
+    answerLabel:SetText("Correct keybind:")
+    answerLabel:Show()
+    answerKeybind:SetText("|cFFFFCC00S-4|r")
+    answerKeybind:Show()
+    correctHeapLabel:SetText("Correct")
+    wrongHeapLabel:SetText("Wrong")
+    correctHeapLabel:Show()
+    wrongHeapLabel:Show()
+    correctCountText:SetText("8")
+    wrongCountText:SetText("8")
+    for _ = 1, 8 do
+        AddHeapIcon(PREVIEW_ICON, "correct", correctHeapAnchor)
+        AddHeapIcon(PREVIEW_ICON, "wrong", wrongHeapAnchor)
+    end
+    dimmer:Show()
+    quizFrame:Show()
 end
 
 function KeybindQuiz:BeginRound()
@@ -948,6 +1002,16 @@ function KeybindQuiz:BeginRound()
 
     HideActionBars()
     inputFrame:Show()
+    -- Mouse-bound answers come through the catch; their spells do not fire.
+    local mouseKeys = {}
+    for _, bar in ipairs(BAR_MAPPINGS) do
+        for i = 1, 12 do
+            for _, key in ipairs({ GetBindingKey(bar.bindPrefix .. i) }) do
+                if ns.Utils.IsMouseBind(key) then mouseKeys[#mouseKeys + 1] = key end
+            end
+        end
+    end
+    ns.Utils.CatchMouseBinds(mouseKeys, function(key) KeybindQuiz:PressKey(key) end)
 
     self:NextCard()
 end
@@ -961,6 +1025,7 @@ function KeybindQuiz:Stop()
         CancelAdvanceTimer()
         CancelWrongFlyTimer()
         RestoreActionBars()
+        ns.Utils.ReleaseMouseBinds()
     end
     pendingFly = nil
     pendingWrongIcon = nil

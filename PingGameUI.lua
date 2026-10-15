@@ -36,24 +36,11 @@ local TARGET_COLORS = {
     [TARGET_HAZARD] = { 1.0, 0.75, 0.1 },
 }
 
-local TARGET_ICONS = {
-    [TARGET_ENEMY]  = "Ping_Chassis_Ping_Attack",
-    [TARGET_ALLY]   = "Ping_Chassis_Ping_Assist",
-    [TARGET_HAZARD] = "Ping_Chassis_Ping_Warning",
-}
-
 -- Fallback if atlases don't exist
 local TARGET_LABELS = {
     [TARGET_ENEMY]  = "ATK",
     [TARGET_ALLY]   = "ALLY",
     [TARGET_HAZARD] = "WARN",
-}
-
--- WoW ping textureKit suffixes per target type (for Ping_*Marker_* atlases)
-local PING_TEXTURE_KITS = {
-    [TARGET_ENEMY]  = "Attack",
-    [TARGET_ALLY]   = "Assist",
-    [TARGET_HAZARD] = "Warning",
 }
 
 -- Ping action name -> textureKit suffix (for ground pins on miss)
@@ -103,16 +90,18 @@ local playerFaction
 local BACKGROUNDS = {
     { id = "classic",      tier = 1,  nameKey = "EXPANSION_NAME0" },
     { id = "tbc",          tier = 2,  nameKey = "EXPANSION_NAME1" },
-    { id = "wrath",        tier = 3,  nameKey = "EXPANSION_NAME2", unlock = { type = "score", value = 500,  label = "Score 500+" } },
-    { id = "cataclysm",    tier = 4,  nameKey = "EXPANSION_NAME3", unlock = { type = "combo", value = 10,   label = "10+ combo" } },
-    { id = "pandaria",     tier = 5,  nameKey = "EXPANSION_NAME4", unlock = { type = "score", value = 1000, label = "Score 1000+" } },
-    { id = "draenor",      tier = 6,  nameKey = "EXPANSION_NAME5", unlock = { type = "combo", value = 15,   label = "15+ combo" } },
-    { id = "legion",       tier = 7,  nameKey = "EXPANSION_NAME6", unlock = { type = "score", value = 2000, label = "Score 2000+" } },
-    { id = "bfa",          tier = 8,  nameKey = "EXPANSION_NAME7", unlock = { type = "combo", value = 20,   label = "20+ combo" } },
-    { id = "shadowlands",  tier = 9,  nameKey = "EXPANSION_NAME8", unlock = { type = "score", value = 3500, label = "Score 3500+" } },
-    { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 5000, label = "Score 5000+" } },
-    { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 25, label = "25+ combo" } },
+    { id = "wrath",        tier = 3,  nameKey = "EXPANSION_NAME2", unlock = { type = "score", value = 1500,  label = "Score 1500+" } },
+    { id = "cataclysm",    tier = 4,  nameKey = "EXPANSION_NAME3", unlock = { type = "combo", value = 12,    label = "12+ combo" } },
+    { id = "pandaria",     tier = 5,  nameKey = "EXPANSION_NAME4", unlock = { type = "score", value = 3000,  label = "Score 3000+" } },
+    { id = "draenor",      tier = 6,  nameKey = "EXPANSION_NAME5", unlock = { type = "combo", value = 20,    label = "20+ combo" } },
+    { id = "legion",       tier = 7,  nameKey = "EXPANSION_NAME6", unlock = { type = "score", value = 5000,  label = "Score 5000+" } },
+    { id = "bfa",          tier = 8,  nameKey = "EXPANSION_NAME7", unlock = { type = "combo", value = 30,    label = "30+ combo" } },
+    { id = "shadowlands",  tier = 9,  nameKey = "EXPANSION_NAME8", unlock = { type = "score", value = 8000,  label = "Score 8000+" } },
+    { id = "dragonflight", tier = 10, nameKey = "EXPANSION_NAME9", unlock = { type = "score", value = 12000, label = "Score 12000+" } },
+    { id = "midnight",     tier = 11, nameKey = "EXPANSION_NAME11", nameFallback = "Midnight", unlock = { type = "combo", value = 45, label = "45+ combo" } },
 }
+-- Forever has no Midnight backdrop art.
+if Utils.IS_FOREVER then BACKGROUNDS[#BACKGROUNDS] = nil end
 for i = 1, #BACKGROUNDS do
     local bg = BACKGROUNDS[i]
     bg.name = _G[bg.nameKey] or bg.nameFallback or bg.nameKey
@@ -592,14 +581,17 @@ function PingGameUI:CreateUI()
     mainFrame:SetScript("OnDragStop", mainFrame.StopMovingOrSizing)
     mainFrame:Hide()
     mainFrame:SetScript("OnHide", function()
+        -- Closing the window ends a round still in play (or paused).
+        local PG = ns.PingGame
+        if PG and PG:IsRunning() then PG:Stop() end
         StopBackgroundMusic()
     end)
 
-    tinsert(UISpecialFrames, "BoundToLearnPingGame")
+    Utils.CloseOnEscape(mainFrame)
 
     -- Title
     local title = ns.Theme.CreateTitle(mainFrame, "Ping Trainer", 20)
-    title:SetPoint("TOP", 0, -6)
+    title:SetPoint("TOP", 0, -11)   -- below the window's border band (11)
 
     -- Drag hint at upper right
     local dragHint = mainFrame:CreateFontString(nil, "OVERLAY")
@@ -638,7 +630,7 @@ function PingGameUI:CreateUI()
     comboText:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT))
 
     -- Sound toggle helpers for HUD
-    local function CreateSoundToggle(parent, label, getState, setState, xOff)
+    local function CreateSoundToggle(parent, label, getState, setState, xOff, tooltip)
         local btn = CreateFrame("Button", nil, parent)
         btn:SetSize(36, 14)
         btn:SetPoint("RIGHT", xOff, 0)
@@ -657,13 +649,31 @@ function PingGameUI:CreateUI()
             setState(not getState())
             Refresh()
         end)
+        if tooltip then
+            btn:SetScript("OnEnter", function(self)
+                self.hovering = true
+                C_Timer.After(0.4, function()
+                    if not self.hovering then return end
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    GameTooltip:AddLine(label)
+                    GameTooltip:AddLine(tooltip, 0.8, 0.8, 0.8, true)
+                    GameTooltip:Show()
+                end)
+            end)
+            btn:SetScript("OnLeave", function(self)
+                self.hovering = false
+                GameTooltip:Hide()
+            end)
+        end
         btn.Refresh = Refresh
         Refresh()
         return btn
     end
 
-    local hudMusicBtn = CreateSoundToggle(hudFrame, "Music", IsMusicMuted, ToggleMuteMusic, -130)
-    local hudPingBtn = CreateSoundToggle(hudFrame, "SFX", IsPingSoundMuted, ToggleMutePingSounds, -90)
+    local hudMusicBtn = CreateSoundToggle(hudFrame, "Music", IsMusicMuted, ToggleMuteMusic, -130,
+        "Background music while you play.")
+    local hudPingBtn = CreateSoundToggle(hudFrame, "SFX", IsPingSoundMuted, ToggleMutePingSounds, -90,
+        "Sound effects: the ping and alert sounds during play. Music is a separate toggle.")
     hudFrame.musicBtn = hudMusicBtn
     hudFrame.pingBtn = hudPingBtn
 
@@ -688,6 +698,7 @@ function PingGameUI:CreateUI()
 
     -- Game area with background
     gameArea = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    gameArea._btlNoLayoutCheck = true   -- targets spawn anywhere, over each other
     gameArea:SetSize(GAME_WIDTH, GAME_HEIGHT)
     gameArea:SetPoint("TOP", 0, -54)
     gameArea:SetBackdrop({
@@ -910,17 +921,10 @@ function PingGameUI:CreateStartScreen()
 
     -- Left side: brief description in bordered box
     local panelY = midY - 30
-    local descBox = CreateFrame("Frame", nil, startFrame, "BackdropTemplate")
+    local descBox = CreateFrame("Frame", nil, startFrame)
     descBox:SetSize(155, 86)
     descBox:SetPoint("TOPLEFT", 10, panelY)
-    descBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    descBox:SetBackdropColor(0.05, 0.05, 0.05, 0.6)
-    descBox:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.7)
+    ns.Theme.StyleCard(descBox)
 
     local descTitle = descBox:CreateFontString(nil, "OVERLAY")
     descTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -942,22 +946,16 @@ function PingGameUI:CreateStartScreen()
     startFrame.diffBtns = {}
     local diffs = ns.PingGame and ns.PingGame.DIFFICULTIES or { "Easy", "Normal", "Hard", "Extreme" }
     local diffCount = #diffs
-    local diffBtnW = 65
-    local diffTotalW = diffCount * diffBtnW
+    local diffBtnW = 60
+    local diffGap = 7
+    local diffTotalW = diffCount * diffBtnW + (diffCount - 1) * diffGap
     local diffStartX = (GAME_WIDTH - diffTotalW) / 2
 
     for i, name in ipairs(diffs) do
-        local btn = CreateFrame("Button", nil, startFrame, "BackdropTemplate")
+        local btn = CreateFrame("Button", nil, startFrame)
         btn:SetSize(diffBtnW, 22)
-        btn:SetPoint("TOPLEFT", diffStartX + (i - 1) * diffBtnW, midY)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-        btn:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+        btn:SetPoint("TOPLEFT", diffStartX + (i - 1) * (diffBtnW + diffGap), midY)
+        ns.Theme.StyleCard(btn)
         btn:SetNormalFontObject("GameFontNormalSmall")
         btn:SetHighlightFontObject("GameFontHighlightSmall")
         btn:SetText(name)
@@ -971,17 +969,10 @@ function PingGameUI:CreateStartScreen()
     end
 
     -- Right side: Settings in bordered box (stacked sections)
-    local settingsBox = CreateFrame("Frame", nil, startFrame, "BackdropTemplate")
+    local settingsBox = CreateFrame("Frame", nil, startFrame)
     settingsBox:SetSize(175, 130)
     settingsBox:SetPoint("TOPRIGHT", -10, panelY)
-    settingsBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    settingsBox:SetBackdropColor(0.05, 0.05, 0.05, 0.6)
-    settingsBox:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.7)
+    ns.Theme.StyleCard(settingsBox)
 
     local settingsTitle = settingsBox:CreateFontString(nil, "OVERLAY")
     settingsTitle:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1074,13 +1065,14 @@ function PingGameUI:CreateStartScreen()
         function() return IsMusicMuted() end,
         function() if not IsMusicMuted() then ToggleMuteMusic(true) end end)
 
-    -- Section 3: Sound (centered header, On/Off below)
+    -- Section 3: Ping SFX (centered header, On/Off below). Named "Ping SFX"
+    -- rather than "Sound" so it is not confused with the Music toggle above.
     local secY3 = secY2 - 36
     local soundHeader = settingsBox:CreateFontString(nil, "OVERLAY")
     soundHeader:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     soundHeader:SetPoint("TOP", 0, secY3)
     soundHeader:SetTextColor(1, 0.82, 0)
-    soundHeader:SetText("Sound")
+    soundHeader:SetText("Ping SFX")
     CreateSectionDivider(secY3 - 13)
 
     local sfxOnBtn = CreateToggleOption(settingsBox, toggleStartX, secY3 - 14, "On",
@@ -1095,11 +1087,29 @@ function PingGameUI:CreateStartScreen()
     -- ===== Start button (centered, above bottom section) =====
     local startBtn = ns.Theme.CreateAccentButton(startFrame, "Start", 180, 42)
     startBtn:SetPoint("BOTTOM", 0, 110)
-    startBtn._label:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
+    startBtn:SetNormalFontObject("GameFontNormalLarge")
+    startBtn:SetHighlightFontObject("GameFontHighlightLarge")
     startBtn:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         if ns.PingGame then ns.PingGame:Start() end
     end)
+    startFrame.startBtn = startBtn
+    -- Disabled until all three pings are bound; the tooltip names what's missing.
+    startBtn:SetMotionScriptsWhileDisabled(true)
+    startBtn:HookScript("OnEnter", function(self)
+        if self:IsEnabled() then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Bind your pings first")
+        local missing = ns.PingGame and ns.PingGame:GetUnboundPingNames()
+        if missing and #missing > 0 then
+            local list = missing[1]
+            for i = 2, #missing do list = list .. ", " .. missing[i] end
+            GameTooltip:AddLine("Not bound: " .. list, 1, 0.82, 0, true)
+        end
+        GameTooltip:AddLine("Set your Attack, Assist, and Warning pings in Key Bindings.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    startBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- ===== Map dropdown below start button =====
     local mapLabel = startFrame:CreateFontString(nil, "OVERLAY")
@@ -1107,16 +1117,10 @@ function PingGameUI:CreateStartScreen()
     mapLabel:SetPoint("BOTTOM", startBtn, "BOTTOM", -100, -24)
     mapLabel:SetText("|cFFFFD700Expansion|r")
 
-    local mapBtn = CreateFrame("Button", nil, startFrame, "BackdropTemplate")
+    local mapBtn = CreateFrame("Button", nil, startFrame)
     mapBtn:SetSize(165, 20)
     mapBtn:SetPoint("LEFT", mapLabel, "RIGHT", 6, 0)
-    mapBtn:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    mapBtn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+    ns.Theme.StyleCard(mapBtn)
 
     local mapBtnText = mapBtn:CreateFontString(nil, "OVERLAY")
     mapBtnText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1131,19 +1135,13 @@ function PingGameUI:CreateStartScreen()
     mapArrow:SetText("v")
 
     -- Dropdown opens upward (above the button) to avoid clipping bottom
-    local mapDropdown = CreateFrame("Frame", nil, mapBtn, "BackdropTemplate")
+    local mapDropdown = CreateFrame("Frame", nil, mapBtn)
     mapDropdown:SetPoint("BOTTOMLEFT", mapBtn, "TOPLEFT", 0, 2)
     mapDropdown:SetWidth(205)
     local dropdownRowH = 18
     local dropdownRows = #BACKGROUNDS + 1
     mapDropdown:SetHeight(dropdownRows * dropdownRowH + 6)
-    mapDropdown:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 8,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    mapDropdown:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+    ns.Theme.StyleCard(mapDropdown, ns.Theme.C.PANEL_DARK)
     mapDropdown:SetFrameLevel(mapBtn:GetFrameLevel() + 10)
     mapDropdown:Hide()
 
@@ -1227,10 +1225,10 @@ function PingGameUI:CreateStartScreen()
         end
     end)
     mapBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+        ns.Theme.SetFillColor(self, ns.Theme.C.BTN_HOVER)
     end)
     mapBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+        ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
     end)
 
     startFrame.mapBtn = mapBtn
@@ -1269,16 +1267,10 @@ function PingGameUI:CreateStartScreen()
         label:SetTextColor(def.color[1], def.color[2], def.color[3])
         label:SetText(def.label)
 
-        local bindBtn = CreateFrame("Button", nil, bindBar, "BackdropTemplate")
+        local bindBtn = CreateFrame("Button", nil, bindBar)
         bindBtn:SetSize(80, 18)
         bindBtn:SetPoint("LEFT", label, "RIGHT", 4, 0)
-        bindBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        bindBtn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+        ns.Theme.StyleCard(bindBtn)
 
         local keyText = bindBtn:CreateFontString(nil, "OVERLAY")
         keyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
@@ -1292,11 +1284,11 @@ function PingGameUI:CreateStartScreen()
             if bindingInProgress and bindingInProgress ~= self then
                 bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "unbound")
                 bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-                bindingInProgress:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(bindingInProgress, ns.Theme.C.SECTION_FILL)
             end
             bindingInProgress = self
             self.keyText:SetText("|cFFFFD700Press a key...|r")
-            self:SetBackdropBorderColor(1, 0.84, 0, 1)
+            ns.Theme.SetFill(self, 0.4, 0.32, 0.1, 0.9)
             self:EnableKeyboard(true)
         end)
 
@@ -1310,7 +1302,7 @@ function PingGameUI:CreateStartScreen()
                 self:EnableKeyboard(false)
                 self.keyText:SetText(GetBindingKey(self.bindingName) or "|cFF666666unbound|r")
                 self.keyText:SetTextColor(0.85, 0.85, 0.85)
-                self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
                 bindingInProgress = nil
                 return
             end
@@ -1329,7 +1321,7 @@ function PingGameUI:CreateStartScreen()
             self:EnableKeyboard(false)
             self.keyText:SetText(fullKey)
             self.keyText:SetTextColor(0.85, 0.85, 0.85)
-            self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
             if ns.PingGame and ns.PingGame.HasPingKeybinds then
                 ns.PingGame:Initialize()
@@ -1338,29 +1330,34 @@ function PingGameUI:CreateStartScreen()
 
         bindBtn:SetScript("OnEnter", function(self)
             if bindingInProgress ~= self then
-                self:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+                ns.Theme.SetFillColor(self, ns.Theme.C.BTN_HOVER)
             end
         end)
         bindBtn:SetScript("OnLeave", function(self)
             if bindingInProgress ~= self then
-                self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+                ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
             end
         end)
 
         startFrame.keybindBtns[i] = bindBtn
     end
 
-    startFrame:SetScript("OnHide", function()
+    local function CancelBinding()
         if bindingInProgress then
             bindingInProgress:EnableKeyboard(false)
             bindingInProgress.keyText:SetText(GetBindingKey(bindingInProgress.bindingName) or "|cFF666666unbound|r")
             bindingInProgress.keyText:SetTextColor(0.85, 0.85, 0.85)
-            bindingInProgress:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+            ns.Theme.SetFillColor(bindingInProgress, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
         end
+    end
+    startFrame:SetScript("OnHide", function()
+        CancelBinding()
         if mapDropdown then mapDropdown:Hide() end
-
     end)
+    -- A key capture cannot be released in a fight; drop it at the pull.
+    startFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    startFrame:SetScript("OnEvent", CancelBinding)
 
     startFrame:Hide()
 end
@@ -1500,12 +1497,14 @@ function PingGameUI:UpdateDiffButtons()
         local c = DIFF_COLORS[btn.diffName]
         if btn.diffName == current then
             btn:SetNormalFontObject("GameFontNormalSmall")
-            if c then btn:GetFontString():SetTextColor(c[1], c[2], c[3]) end
-            if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(c[1], c[2], c[3], 1) end
+            if c then
+                btn:GetFontString():SetTextColor(c[1], c[2], c[3])
+                ns.Theme.SetFill(btn, c[1] * 0.55, c[2] * 0.55, c[3] * 0.55, 0.9)
+            end
         else
             btn:SetNormalFontObject("GameFontDisableSmall")
             btn:GetFontString():SetTextColor(0.5, 0.5, 0.5)
-            if btn.SetBackdropBorderColor then btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8) end
+            ns.Theme.SetFill(btn, 0.14, 0.13, 0.12, 0.85)
         end
     end
 end
@@ -1586,6 +1585,13 @@ function PingGameUI:RefreshShowcase()
     end
 end
 
+-- Gray the Start button until every ping is bound (checked each time the start
+-- screen shows, so binding a ping and reopening re-enables it).
+function PingGameUI:UpdateStartButton()
+    if not startFrame or not startFrame.startBtn then return end
+    startFrame.startBtn:SetEnabled(ns.PingGame ~= nil and ns.PingGame:AreAllPingsKeybound())
+end
+
 function PingGameUI:ShowStartScreen()
     if not mainFrame then self:CreateUI() end
     if gameArea then gameArea:Hide() end
@@ -1596,6 +1602,7 @@ function PingGameUI:ShowStartScreen()
     self:UpdateKeybindDisplay()
     self:UpdateBackgroundButtons()
     self:UpdateSoundButtons()
+    self:UpdateStartButton()
     startFrame:Show()
     mainFrame:Show()
 end
@@ -1624,6 +1631,11 @@ function PingGameUI:OnGameStart()
     scoreText:SetText("0")
     timerText:SetText("")
     comboText:SetText("")
+    -- Release any frames left over from the previous round so old pings do not
+    -- linger on the map before the new round spawns anything.
+    for _, frame in pairs(activeTargetFrames) do
+        ReleaseTarget(frame)
+    end
     wipe(activeTargetFrames)
 end
 
@@ -1705,7 +1717,7 @@ function PingGameUI:OnUpdate(elapsed, duration, currentScore, currentCombo, heal
 
     -- Update target timer bars
     local now = GetTime()
-    for targetID, frame in pairs(activeTargetFrames) do
+    for _, frame in pairs(activeTargetFrames) do
         if frame.targetData then
             local t = frame.targetData
             local pct = mmax(0, (t.expireTime - now) / t.lifetime)
@@ -1722,15 +1734,19 @@ end
 
 function PingGameUI:OnTargetSpawned(target)
     local frame = AcquireTarget()
+    local sizeScale = target.sizeScale or 1
+    frame.sizeScale = sizeScale
+    frame.icon:SetSize((TARGET_SIZE - 8) * sizeScale, (TARGET_SIZE - 8) * sizeScale)
+    frame.model:SetSize(TARGET_SIZE * 2.25 * sizeScale, TARGET_SIZE * 3.4 * sizeScale)
 
     -- Compute spawn bounds based on target style
     -- Model extends from button center: ~50px left/right, ~32px below, ~118px above
     local style = self:GetTargetStyle()
     local marginL, marginR, marginB, marginT
     if style == "3d" then
-        local halfModelW = (TARGET_SIZE * 2.25) / 2
-        local modelH = TARGET_SIZE * 3.4
-        local halfBtn = TARGET_SIZE / 2
+        local halfModelW = (TARGET_SIZE * 2.25 * sizeScale) / 2
+        local modelH = TARGET_SIZE * 3.4 * sizeScale
+        local halfBtn = TARGET_SIZE * sizeScale / 2
         marginL = halfModelW
         marginR = halfModelW
         marginB = halfBtn + 10
@@ -1785,7 +1801,6 @@ function PingGameUI:OnTargetSpawned(target)
     frame.timerBar:SetVertexColor(c[1], c[2], c[3])
 
     -- Set target visuals based on style setting
-    local style = PingGameUI:GetTargetStyle()
     frame.icon:Hide()
     frame.model:Hide()
 
@@ -1829,7 +1844,8 @@ function PingGameUI:OnTargetSpawned(target)
         local enemyNPCs = (playerFaction == "Alliance") and HORDE_NPC_IDS or ALLIANCE_NPC_IDS
         local allyNPCs  = (playerFaction == "Alliance") and ALLIANCE_NPC_IDS or HORDE_NPC_IDS
 
-        local npcIDs, targetType = nil, target.targetType
+        local npcIDs
+        local targetType = target.targetType
         if targetType == TARGET_ENEMY then
             npcIDs = enemyNPCs
         elseif targetType == TARGET_HAZARD then
@@ -1840,6 +1856,9 @@ function PingGameUI:OnTargetSpawned(target)
 
         local npcID = npcIDs[math.random(#npcIDs)]
         local facing = (math.random() - 0.5) * 1.05  -- -30 to +30 degrees
+        -- Show before feeding the creature: SetCreature on a hidden model (fresh from
+        -- the pool) can render blank on first appearance, matching the showcase re-feed.
+        frame.model:Show()
         frame.model:ClearModel()
         frame.model:SetPortraitZoom(0)
         frame.model:SetCamDistanceScale(1.4)
@@ -1862,7 +1881,6 @@ function PingGameUI:OnTargetSpawned(target)
             end
             self:SetScript("OnModelLoaded", nil)
         end)
-        frame.model:Show()
         frame.modelHit:Show()
     else
         -- Portraits (default): race icon atlas for enemy/ally, hazard icon for hazards
@@ -1893,16 +1911,17 @@ function PingGameUI:OnTargetSpawned(target)
     local spawnElapsed = 0
     frame:SetScript("OnUpdate", function(self, dt)
         spawnElapsed = spawnElapsed + dt
+        local sc = self.sizeScale or 1
         if spawnElapsed < 0.15 then
             local p = spawnElapsed / 0.15
             self:SetAlpha(p)
-            local scale = 0.5 + 0.5 * p
+            local scale = (0.5 + 0.5 * p) * sc
             self:SetSize(TARGET_SIZE * scale, TARGET_SIZE * scale)
             self.ring:SetSize((TARGET_SIZE + 8) * scale, (TARGET_SIZE + 8) * scale)
         else
             self:SetAlpha(1)
-            self:SetSize(TARGET_SIZE, TARGET_SIZE)
-            self.ring:SetSize(TARGET_SIZE + 8, TARGET_SIZE + 8)
+            self:SetSize(TARGET_SIZE * sc, TARGET_SIZE * sc)
+            self.ring:SetSize((TARGET_SIZE + 8) * sc, (TARGET_SIZE + 8) * sc)
             self:SetScript("OnUpdate", nil)
         end
     end)
@@ -1999,10 +2018,14 @@ function PingGameUI:ReleaseTarget(target)
     activeTargetFrames[target.id] = nil
 end
 
+-- The key catcher goes with the pause: combat pauses the round, and a
+-- catcher left up in a fight can swallow every key.
 function PingGameUI:ShowPause()
     if pauseOverlay then pauseOverlay:Show() end
+    if gameArea then gameArea.inputFrame:Hide() end
 end
 
 function PingGameUI:HidePause()
     if pauseOverlay then pauseOverlay:Hide() end
+    if gameArea then gameArea.inputFrame:Show() end
 end

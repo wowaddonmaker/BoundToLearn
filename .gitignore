@@ -1,5 +1,4 @@
 .claude/
-README.md
 tools/
 
 # Dev recordings and local logs, never commit
@@ -11,3 +10,6 @@ target/
 
 # Local demo/media, never shipped
 docs/
+
+# Dev/build scripts, run releases locally, never committed
+release.sh

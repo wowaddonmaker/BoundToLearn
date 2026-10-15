@@ -10,7 +10,6 @@ local mmin, mmax = Utils.mmin, Utils.mmax
 local ipairs     = Utils.ipairs
 local pairs      = Utils.pairs
 local tinsert    = Utils.tinsert
-local wipe       = Utils.wipe
 local CreateFrame = Utils.CreateFrame
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK
@@ -36,7 +35,7 @@ local SEVERITY_COLORS = {
 }
 
 local auditFrame, dimmer
-local setupPage, resultsPage, methodologyPage, categoryDetailPage
+local setupPage, resultsPage, methodologyPage, categoryDetailPage, uniqueBindsPanel
 local barOverlays = {}
 local barToggles = {}
 local lastResults
@@ -62,8 +61,7 @@ local function LoadBarToggles()
     local db = GetDb()
     -- Always sync with actual bar visibility
     for _, barDef in ipairs(BAR_FRAME_MAP) do
-        local btn1 = _G[barDef.prefix .. "1"]
-        local visible = btn1 and btn1:IsVisible() or false
+        local visible = ns.KeybindAudit.IsBarVisible(barDef.prefix)
         db.bars[barDef.key] = visible
         barToggles[barDef.key] = visible
     end
@@ -248,9 +246,10 @@ local function CreateIssueRow(parent, index)
     text:SetTextColor(0.9, 0.9, 0.9)
     row.text = text
 
+    -- Under the text, so a recommendation that wraps pushes it down.
     local detail = row:CreateFontString(nil, "OVERLAY")
     detail:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    detail:SetPoint("TOPLEFT", 34, -17)
+    detail:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -3)
     detail:SetWidth(210)
     detail:SetJustifyH("LEFT")
     detail:SetTextColor(0.6, 0.6, 0.6)
@@ -307,7 +306,7 @@ function KeybindAuditUI:CreateFrame()
     auditFrame:SetScript("OnHide", function()
         self:HideBarOverlays()
     end)
-    tinsert(UISpecialFrames, "BoundToLearnAuditFrame")
+    Utils.CloseOnEscape(auditFrame)
 
     local close = ns.Theme.CreateCloseButton(auditFrame, function() auditFrame:Hide() end)
     close:SetPoint("TOPRIGHT", -8, -8)
@@ -315,6 +314,27 @@ function KeybindAuditUI:CreateFrame()
     -- Title
     local title = ns.Theme.CreateTitle(auditFrame, "Keybind Audit", 16)
     title:SetPoint("TOP", 0, -12)
+
+    -- Header, left of the close button.
+    local feedbackBtn = ns.Feedback.CreateButton(auditFrame, function()
+        local page = (resultsPage and resultsPage:IsShown() and "results")
+            or (methodologyPage and methodologyPage:IsShown() and "methodology")
+            or (categoryDetailPage and categoryDetailPage:IsShown() and "category detail")
+            or "setup"
+        local db = GetDb()
+        local bars = {}
+        for key, on in pairs(db.bars or {}) do
+            if on then bars[#bars + 1] = key end
+        end
+        table.sort(bars)
+        return "Keybind Audit", {
+            "Page: " .. page,
+            sformat("Keyboard: %s, MMO mouse: %s, grouping: %s", tostring(db.keyboardLayout),
+                tostring(db.mmoMouse), tostring(db.includeGrouping)),
+            "Bars: " .. (#bars > 0 and table.concat(bars, ", ") or "none"),
+        }
+    end)
+    ns.Feedback.PlaceBesideClose(feedbackBtn, close)
 
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
     accent:SetSize(550, 2)
@@ -369,7 +389,7 @@ function KeybindAuditUI:CreateSetupPage()
     desc:SetText("Select which bars to include by clicking them on screen, or use the checkboxes below.")
 
     -- Bar checkboxes (two columns of 4)
-    local barCheckY = -82
+    local barCheckY = -104
     local barCheckboxes = {}
     local BARS_PER_COL = 4
     for i, barDef in ipairs(BAR_FRAME_MAP) do
@@ -382,6 +402,7 @@ function KeybindAuditUI:CreateSetupPage()
             if overlay and overlay:IsShown() then
                 UpdateBarOverlay(overlay, checked)
             end
+            KeybindAuditUI:UpdateStartButtonState()
         end)
         if col == 1 then
             cb:ClearAllPoints()
@@ -390,6 +411,19 @@ function KeybindAuditUI:CreateSetupPage()
         barCheckboxes[barDef.key] = cb
     end
     setupPage.barCheckboxes = barCheckboxes
+
+    -- Toggle-all button above the bar list.
+    local toggleAllBtn = ns.Theme.CreateButton(setupPage, "Toggle All", 90, 20)
+    toggleAllBtn:SetPoint("TOPLEFT", 20, -76)
+    toggleAllBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        local allOn = true
+        for _, barDef in ipairs(BAR_FRAME_MAP) do
+            if not barToggles[barDef.key] then allOn = false; break end
+        end
+        KeybindAuditUI:SetAllBars(not allOn)
+    end)
+    setupPage.toggleAllBtn = toggleAllBtn
 
     -- Right column options
     local optX = 330
@@ -410,8 +444,28 @@ function KeybindAuditUI:CreateSetupPage()
     mmoHint:SetTextColor(0.55, 0.55, 0.55)
     mmoHint:SetText("Number keys won't be penalized as distant since they're on your thumb.")
 
+    -- FN / other unique binds: declare keys the player physically has on their mouse.
+    local fnBindsCb = ns.Theme.CreateToggle(setupPage, "I have FN or other unique binds", nil, 230)
+    fnBindsCb:SetPoint("TOPLEFT", optX, -132)
+    fnBindsCb:SetScript("OnClick", function(self)
+        PlayUISound(SOUND_CLICK)
+        local on = self:GetChecked()
+        GetDb().hasUniqueBinds = on
+        if setupPage.setKeysBtn then setupPage.setKeysBtn:SetShown(on) end
+    end)
+    setupPage.fnBindsCb = fnBindsCb
+
+    local setKeysBtn = ns.Theme.CreateButton(setupPage, "Set unique keys", 130, 20)
+    setKeysBtn:SetPoint("TOPLEFT", optX + 20, -158)
+    setKeysBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        KeybindAuditUI:ShowUniqueBindsPanel()
+    end)
+    setKeysBtn:Hide()
+    setupPage.setKeysBtn = setKeysBtn
+
     local skipBarsCb = ns.Theme.CreateToggle(setupPage, "Skip this setup next time", nil, 230)
-    skipBarsCb:SetPoint("TOPLEFT", optX, -138)
+    skipBarsCb:SetPoint("TOPLEFT", optX, -186)
     skipBarsCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().skipBarSelection = self:GetChecked()
@@ -420,15 +474,16 @@ function KeybindAuditUI:CreateSetupPage()
 
     local skipBarsHint = setupPage:CreateFontString(nil, "OVERLAY")
     skipBarsHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -164)
+    skipBarsHint:SetPoint("TOPLEFT", optX + 30, -212)
     skipBarsHint:SetWidth(200)
     skipBarsHint:SetJustifyH("LEFT")
     skipBarsHint:SetTextColor(0.55, 0.55, 0.55)
     skipBarsHint:SetText("Next time you open the audit, click Settings (bottom-left) to change these options.")
 
     -- Grouping checkbox (experimental)
-    local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 240)
-    groupingCb:SetPoint("TOPLEFT", optX, -198)
+    -- 236 wide ends 14 inside the right border (11).
+    local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 236)
+    groupingCb:SetPoint("TOPLEFT", optX, -242)
     groupingCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
         GetDb().includeGrouping = self:GetChecked()
@@ -437,7 +492,7 @@ function KeybindAuditUI:CreateSetupPage()
 
     local groupingHint = setupPage:CreateFontString(nil, "OVERLAY")
     groupingHint:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    groupingHint:SetPoint("TOPLEFT", optX + 30, -224)
+    groupingHint:SetPoint("TOPLEFT", optX + 30, -268)
     groupingHint:SetWidth(200)
     groupingHint:SetJustifyH("LEFT")
     groupingHint:SetTextColor(0.55, 0.55, 0.55)
@@ -446,7 +501,7 @@ function KeybindAuditUI:CreateSetupPage()
     -- Keyboard layout selector (under bar checkboxes)
     local layoutLabel = setupPage:CreateFontString(nil, "OVERLAY")
     layoutLabel:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    layoutLabel:SetPoint("TOPLEFT", 20, -210)
+    layoutLabel:SetPoint("TOPLEFT", 20, -234)
     layoutLabel:SetTextColor(0.8, 0.8, 0.8)
     layoutLabel:SetText("Keyboard layout:")
 
@@ -485,10 +540,180 @@ function KeybindAuditUI:CreateSetupPage()
     local runBtn = ns.Theme.CreateAccentButton(setupPage, "Start Audit", 140, 30)
     runBtn:SetPoint("BOTTOM", 0, 20)
     runBtn:SetScript("OnClick", function()
+        if not KeybindAuditUI:AnyBarEnabled() then return end
         PlayUISound(SOUND_CLICK)
         SaveBarToggles()
         KeybindAuditUI:ShowResults()
     end)
+    setupPage.runBtn = runBtn
+    KeybindAuditUI:UpdateStartButtonState()
+end
+
+function KeybindAuditUI:AnyBarEnabled()
+    for _, barDef in ipairs(BAR_FRAME_MAP) do
+        if barToggles[barDef.key] then return true end
+    end
+    return false
+end
+
+function KeybindAuditUI:UpdateStartButtonState()
+    local runBtn = setupPage and setupPage.runBtn
+    if not runBtn then return end
+    local any = self:AnyBarEnabled()
+    runBtn:SetEnabled(any)
+    runBtn:SetAlpha(any and 1 or 0.4)
+end
+
+function KeybindAuditUI:SetAllBars(on)
+    for _, barDef in ipairs(BAR_FRAME_MAP) do
+        barToggles[barDef.key] = on
+        local cb = setupPage and setupPage.barCheckboxes and setupPage.barCheckboxes[barDef.key]
+        if cb then cb:SetChecked(on) end
+        local overlay = barOverlays[barDef.key]
+        if overlay and overlay:IsShown() then
+            UpdateBarOverlay(overlay, on)
+        end
+    end
+    SaveBarToggles()
+    self:UpdateStartButtonState()
+end
+
+-- Unique-bind entry: declare keys in unusual spots and where they live, so a key the
+-- player keeps on their mouse scores as reachable instead of a far function-row stretch.
+local UNIQUE_LOCATIONS = { "mouse", "numpad", "function", "other" }
+local UNIQUE_LOC_LABEL = { mouse = "Mouse", numpad = "Numpad", ["function"] = "Fn row", other = "Other" }
+
+local function NextLocation(loc)
+    for i = 1, #UNIQUE_LOCATIONS do
+        if UNIQUE_LOCATIONS[i] == loc then
+            return UNIQUE_LOCATIONS[(i % #UNIQUE_LOCATIONS) + 1]
+        end
+    end
+    return UNIQUE_LOCATIONS[1]
+end
+
+local function NormalizeUniqueKey(text)
+    local key = (text or ""):upper():gsub("%s", "")
+    if key == "" then return nil end
+    if key:match("^[A-Z0-9]$") then return nil end   -- reject plain single letters/numbers
+    return key
+end
+
+function KeybindAuditUI:RefreshUniqueBinds()
+    local p = uniqueBindsPanel
+    if not p then return end
+    local binds = GetDb().uniqueBinds or {}
+    local keys = {}
+    for k in pairs(binds) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for i = 1, #p.rows do
+        local row = p.rows[i]
+        local key = keys[i]
+        if key then
+            row.keyFS:SetText(key)
+            row.locBtn:SetText(UNIQUE_LOC_LABEL[binds[key]] or binds[key])
+            row.locBtn.key = key
+            row.rm.key = key
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+    p.overflow:SetShown(#keys > #p.rows)
+end
+
+function KeybindAuditUI:ShowUniqueBindsPanel()
+    GetDb().uniqueBinds = GetDb().uniqueBinds or {}
+    if not uniqueBindsPanel then
+        local p = CreateFrame("Frame", nil, auditFrame)
+        p:SetPoint("TOPLEFT", 20, -46)
+        p:SetPoint("BOTTOMRIGHT", -20, 18)
+        p:SetFrameStrata("FULLSCREEN_DIALOG")
+        p:SetFrameLevel(auditFrame:GetFrameLevel() + 20)
+        ns.Theme.StylePanel(p, 0.98)
+        p:EnableMouse(true)
+
+        local title = p:CreateFontString(nil, "OVERLAY")
+        title:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
+        title:SetPoint("TOP", 0, -10)
+        title:SetText("Unique keys and where they are")
+        title:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT_BRIGHT))
+
+        local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
+        hint:SetWidth(500)
+        hint:SetJustifyH("CENTER")
+        hint:SetText("Type a key such as F11 or NUMPAD4 (plain letters and numbers are not allowed), pick where it lives, then Add. Mouse counts as fully reachable; the rest count as a far reach.")
+
+        local edit = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
+        edit:SetSize(120, 20)
+        edit:SetPoint("TOPLEFT", 40, -70)
+        edit:SetAutoFocus(false)
+
+        p.newLoc = "mouse"
+        local locBtn = ns.Theme.CreateButton(p, "Mouse", 80, 20)
+        locBtn:SetPoint("LEFT", edit, "RIGHT", 14, 0)
+        locBtn:SetScript("OnClick", function()
+            p.newLoc = NextLocation(p.newLoc)
+            locBtn:SetText(UNIQUE_LOC_LABEL[p.newLoc])
+        end)
+
+        local addBtn = ns.Theme.CreateAccentButton(p, "Add", 60, 22)
+        addBtn:SetPoint("LEFT", locBtn, "RIGHT", 14, 0)
+        local function doAdd()
+            local key = NormalizeUniqueKey(edit:GetText())
+            if not key then return end
+            GetDb().uniqueBinds[key] = p.newLoc
+            edit:SetText("")
+            KeybindAuditUI:RefreshUniqueBinds()
+        end
+        addBtn:SetScript("OnClick", doAdd)
+        edit:SetScript("OnEnterPressed", function() doAdd(); edit:ClearFocus() end)
+        edit:SetScript("OnEscapePressed", function() edit:ClearFocus() end)
+
+        p.rows = {}
+        for i = 1, 8 do
+            local row = CreateFrame("Frame", nil, p)
+            row:SetSize(320, 20)
+            row:SetPoint("TOPLEFT", 40, -100 - (i - 1) * 24)
+            local keyFS = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            keyFS:SetPoint("LEFT", 0, 0)
+            keyFS:SetWidth(90)
+            keyFS:SetJustifyH("LEFT")
+            row.keyFS = keyFS
+            local rowLoc = ns.Theme.CreateButton(row, "Mouse", 80, 18)
+            rowLoc:SetPoint("LEFT", 96, 0)
+            rowLoc:SetScript("OnClick", function(self)
+                local newLoc = NextLocation(GetDb().uniqueBinds[self.key])
+                GetDb().uniqueBinds[self.key] = newLoc
+                self:SetText(UNIQUE_LOC_LABEL[newLoc])
+            end)
+            row.locBtn = rowLoc
+            local rm = ns.Theme.CreateButton(row, "Remove", 70, 18)
+            rm:SetPoint("LEFT", rowLoc, "RIGHT", 12, 0)
+            rm:SetScript("OnClick", function(self)
+                GetDb().uniqueBinds[self.key] = nil
+                KeybindAuditUI:RefreshUniqueBinds()
+            end)
+            row.rm = rm
+            row:Hide()
+            p.rows[i] = row
+        end
+
+        local overflow = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        overflow:SetPoint("TOPLEFT", 40, -100 - 8 * 24)
+        overflow:SetText("Showing the first 8 keys.")
+        overflow:Hide()
+        p.overflow = overflow
+
+        local doneBtn = ns.Theme.CreateButton(p, "Done", 90, 24)
+        doneBtn:SetPoint("BOTTOM", 0, 14)
+        doneBtn:SetScript("OnClick", function() PlayUISound(SOUND_CLICK); p:Hide() end)
+
+        uniqueBindsPanel = p
+    end
+    self:RefreshUniqueBinds()
+    uniqueBindsPanel:Show()
 end
 
 function KeybindAuditUI:CreateResultsPage()
@@ -613,10 +838,12 @@ function KeybindAuditUI:CreateMethodologyPage()
     methodologyPage = CreateFrame("Frame", nil, auditFrame)
     methodologyPage:SetAllPoints()
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, methodologyPage, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 15, -42)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -30, 44)
-    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
+    local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditMethScroll", methodologyPage, "UIPanelScrollFrameTemplate")
+    -- Starts under the Methodology tab (it ends 52 down); the scroll bar hangs
+    -- right of the frame and must clear the right border (11).
+    scrollFrame:SetPoint("TOPLEFT", 15, -56)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 44)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditMethScrollScrollBar"])
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(520)
@@ -628,7 +855,7 @@ function KeybindAuditUI:CreateMethodologyPage()
     text:SetWidth(520)
     text:SetJustifyH("LEFT")
     text:SetTextColor(0.75, 0.75, 0.75)
-    text:SetText(
+    local methBody =
         "|cFFFF8A33Overview|r\n"
         .. "The audit scans your action bars and scores your keybind setup on a 0-100 scale "
         .. "across four categories.\n\n"
@@ -666,7 +893,7 @@ function KeybindAuditUI:CreateMethodologyPage()
         .. "|cFFFF8A33MMO Mouse|r\n"
         .. "When enabled, number row keys (6-0, -, =) are treated as prime keys "
         .. "since they map to your thumb grid."
-    )
+    text:SetText((methBody:gsub("FF8A33", ns.Theme.ACCENT_HEX)))
     content:SetHeight(text:GetStringHeight() + 10)
 
     local backBtn = ns.Theme.CreateButton(methodologyPage, "Back", 80, 24)
@@ -852,8 +1079,8 @@ local function BuildGroupingDetail(results)
             local info = roleScores[role]
             local label = roleLabels[role] or role
             local color = info.score >= 75 and "66DD66" or info.score >= 50 and "DDDD44" or "DD8844"
-            tinsert(lines, sformat("\n|cFF%s%s|r  |cFFAAAAAA%d abilities, avg distance %.1f, score %d|r",
-                color, label, info.count, info.avgDist, info.score))
+            tinsert(lines, sformat("\n|cFF%s%s|r  |cFFAAAAAA%s, avg distance %.1f, score %d|r",
+                color, label, Utils.Count(info.count, "ability", "abilities"), info.avgDist, info.score))
             local group = roleGroups[role]
             if group then
                 for _, slotData in ipairs(group.slots) do
@@ -901,10 +1128,10 @@ function KeybindAuditUI:CreateCategoryDetailPage()
     titleText:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
     categoryDetailPage.titleText = titleText
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, categoryDetailPage, "UIPanelScrollFrameTemplate")
+    local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditCatScroll", categoryDetailPage, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 20, -72)
     scrollFrame:SetPoint("BOTTOMRIGHT", -35, 44)
-    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar)
+    ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditCatScrollScrollBar"])
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(510)
@@ -959,8 +1186,7 @@ function KeybindAuditUI:ShowBarOverlays()
     for _, barDef in ipairs(BAR_FRAME_MAP) do
         local overlay = barOverlays[barDef.key]
         if overlay then
-            local btn1 = _G[barDef.prefix .. "1"]
-            if btn1 and btn1:IsVisible() then
+            if ns.KeybindAudit.IsBarVisible(barDef.prefix) then
                 PositionOverlay(overlay, barDef)
                 overlay.barLabel = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
                 UpdateBarOverlay(overlay, barToggles[barDef.key])
@@ -987,8 +1213,7 @@ function KeybindAuditUI:ShowSetup()
         local cb = setupPage.barCheckboxes[barDef.key]
         if cb then
             local label = ns.KeybindAudit.ResolveBarLabel(barDef.prefix, barDef.label)
-            local btn1 = _G[barDef.prefix .. "1"]
-            local barEnabled = btn1 and btn1:IsVisible()
+            local barEnabled = ns.KeybindAudit.IsBarVisible(barDef.prefix)
             if barEnabled then
                 cb:EnableMouse(true)
                 cb.label:SetText(label)
@@ -1005,7 +1230,10 @@ function KeybindAuditUI:ShowSetup()
         end
     end
     SaveBarToggles()
+    self:UpdateStartButtonState()
     setupPage.mmoMouseCb:SetChecked(db.mmoMouse)
+    setupPage.fnBindsCb:SetChecked(db.hasUniqueBinds)
+    setupPage.setKeysBtn:SetShown(db.hasUniqueBinds)
     setupPage.skipBarsCb:SetChecked(db.skipBarSelection)
     setupPage.groupingCb:SetChecked(db.includeGrouping)
     local currentLayout = db.keyboardLayout or "QWERTY"
@@ -1018,9 +1246,10 @@ function KeybindAuditUI:ShowSetup()
     methodologyPage:Hide()
     categoryDetailPage:Hide()
     resultsPage:Hide()
+    if uniqueBindsPanel then uniqueBindsPanel:Hide() end
     setupPage:Show()
     self:ShowBarOverlays()
-    auditFrame:SetSize(580, 330)
+    auditFrame:SetSize(580, 380)
 end
 
 function KeybindAuditUI:ShowResults()
@@ -1041,6 +1270,7 @@ function KeybindAuditUI:RefreshResults()
     local results = audit:Scan({
         barFilter = db.bars,
         mmoMouse = db.mmoMouse,
+        uniqueBinds = db.hasUniqueBinds and db.uniqueBinds or nil,
         includeGrouping = db.includeGrouping,
         keyboardLayout = db.keyboardLayout,
     })
@@ -1132,6 +1362,9 @@ function KeybindAuditUI:RefreshResults()
     local rowW = (auditFrame:GetWidth() - 305) - (hasScroll and 20 or 2)
     issueScrollChild:SetWidth(rowW)
 
+    -- Each row is as tall as its wrapped text and detail, never under the
+    -- standard height; rows stack by their real heights.
+    local rowY, visibleH = 0, 0
     for i = 1, 20 do
         local row = issueRows[i]
         local issue = issues[i]
@@ -1144,33 +1377,37 @@ function KeybindAuditUI:RefreshResults()
                 row.icon:SetTexture(issue.icon)
                 row.icon:Show()
                 row.text:SetPoint("TOPLEFT", 34, -3)
-                row.detail:SetPoint("TOPLEFT", 34, -17)
                 row.text:SetWidth(rowW - 40)
                 row.detail:SetWidth(rowW - 40)
             else
                 row.icon:Hide()
                 row.text:SetPoint("TOPLEFT", 12, -3)
-                row.detail:SetPoint("TOPLEFT", 12, -17)
                 row.text:SetWidth(rowW - 18)
                 row.detail:SetWidth(rowW - 18)
             end
 
             row.text:SetText(issue.text)
             row.detail:SetText(issue.detail or "")
+            local h = mmax(ISSUE_ROW_HEIGHT,
+                mfloor(3 + row.text:GetStringHeight() + 3 + row.detail:GetStringHeight() + 7 + 0.5))
+            row:SetHeight(h)
+            row.strip:SetHeight(h - 4)
+            row:SetPoint("TOPLEFT", 0, -rowY)
+            rowY = rowY + h
+            if i <= 8 then visibleH = visibleH + h end
             row:Show()
         else
             row:Hide()
         end
     end
 
-    issueScrollChild:SetHeight(mmax(1, #issues * ISSUE_ROW_HEIGHT))
+    issueScrollChild:SetHeight(mmax(1, rowY))
 
     -- Fit the card height to whichever column runs longer, so short results don't
     -- leave a baggy empty band. Bottom-anchored elements (buttons, skipped note,
     -- issue list) ride the frame's bottom edge and stay put as the frame shrinks.
     local leftBottom = 252 + groupingShift + mmax(0, barIdx - 1) * 16 + 14
-    local visibleIssues = mmin(#issues, 8)
-    local rightBottom = #issues == 0 and 150 or (64 + visibleIssues * ISSUE_ROW_HEIGHT + 6)
+    local rightBottom = #issues == 0 and 150 or (64 + visibleH + 6)
     auditFrame:SetHeight(mmax(360, mmin(480, mmax(leftBottom, rightBottom) + 54)))
 end
 

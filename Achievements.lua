@@ -8,7 +8,6 @@ local pairs    = Utils.pairs
 local ipairs   = Utils.ipairs
 local sformat  = Utils.sformat
 local tinsert  = Utils.tinsert
-local mfloor   = Utils.mfloor
 
 -- Rank thresholds (per-difficulty, based on best score)
 local RANKS = {

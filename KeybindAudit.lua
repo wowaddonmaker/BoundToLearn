@@ -11,9 +11,7 @@ local mmax    = Utils.mmax
 local tinsert = Utils.tinsert
 local pairs   = Utils.pairs
 local ipairs  = Utils.ipairs
-local wipe    = Utils.wipe
 local slower  = Utils.slower
-local sfind   = Utils.sfind
 
 local msqrt  = Utils.msqrt or math.sqrt
 
@@ -84,6 +82,28 @@ function KeybindAudit.ResolveBarLabel(buttonPrefix, fallback)
         end
     end
     return fallback
+end
+
+-- Which GetActionBarToggles() return slot each button prefix maps to. The API
+-- reports the seven optional bars (Action Bars 2-8) in this order; the main bar
+-- (Action Bar 1) is always shown and has no toggle.
+local BAR_TOGGLE_INDEX = {
+    MultiBarBottomLeftButton  = 1,
+    MultiBarBottomRightButton = 2,
+    MultiBarRightButton       = 3,
+    MultiBarLeftButton        = 4,
+    MultiBar5Button           = 5,
+    MultiBar6Button           = 6,
+    MultiBar7Button           = 7,
+}
+
+-- Whether a bar is enabled, straight from the game's own action-bar toggle API
+-- rather than poking at frames or buttons (which proved unreliable).
+function KeybindAudit.IsBarVisible(buttonPrefix)
+    if buttonPrefix == "ActionButton" then return true end
+    local idx = BAR_TOGGLE_INDEX[buttonPrefix]
+    if not idx then return false end
+    return select(idx, GetActionBarToggles()) and true or false
 end
 
 -- Keyboard layout coordinate maps: key → {x, y}
@@ -224,10 +244,17 @@ local function StripModifiers(bind)
     return base, hasModifier
 end
 
-local function ClassifyKey(bind, mmoMouse)
+local function ClassifyKey(bind, mmoMouse, uniqueBinds)
     local base, hasModifier = StripModifiers(bind)
+    -- A key the player has declared on their mouse is fully reachable; any other
+    -- declared location (numpad, function row, other) is a far reach.
+    local declared = uniqueBinds and uniqueBinds[base]
     local tier
-    if PRIME_KEYS[base] then
+    if declared == "mouse" then
+        tier = "prime"
+    elseif declared then
+        tier = "poor"
+    elseif PRIME_KEYS[base] then
         tier = "prime"
     elseif mmoMouse and MMO_MOUSE_PRIME[base] then
         tier = "prime"
@@ -284,6 +311,7 @@ function KeybindAudit:Scan(options)
     options = options or {}
     local barFilter = options.barFilter
     local mmoMouse = options.mmoMouse
+    local uniqueBinds = options.uniqueBinds
     local ShouldIgnoreAction = ns.Tracker and ns.Tracker.ShouldIgnoreAction
 
     local bars = {}
@@ -333,7 +361,7 @@ function KeybindAudit:Scan(options)
 
                         local tier, hasModifier, base
                         if keybind then
-                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse)
+                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse, uniqueBinds)
                         end
 
                         -- Resolve spell role for grouping
@@ -460,7 +488,9 @@ function KeybindAudit:Scan(options)
             tinsert(issues, {
                 severity = "medium",
                 icon = nil,
-                text = sformat("%s has %d abilities but none are keybound", barData.label, barData.filledCount),
+                text = barData.filledCount == 1
+                    and sformat("%s has 1 ability but it is not keybound", barData.label)
+                    or sformat("%s has %d abilities but none are keybound", barData.label, barData.filledCount),
                 detail = "Every ability on your bar should have a keybind.",
             })
         end
@@ -472,7 +502,7 @@ function KeybindAudit:Scan(options)
     local includeGrouping = options.includeGrouping
     local keyboardLayout = options.keyboardLayout or "QWERTY"
     local layout = KEYBOARD_LAYOUTS[keyboardLayout] or KEYBOARD_LAYOUTS.QWERTY
-    local groupingScore = 0
+    local groupingScore
     local roleGroups = {}  -- role → { baseKeys = {}, slots = {} }
 
     for _, slotData in ipairs(allSlots) do

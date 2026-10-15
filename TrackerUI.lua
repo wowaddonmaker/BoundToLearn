@@ -9,7 +9,6 @@ local mmin, mmax = Utils.mmin, Utils.mmax
 local mfloor     = Utils.mfloor
 local ssub       = Utils.ssub
 local CreateFrame = Utils.CreateFrame
-local GetTime    = Utils.GetTime
 local ipairs     = Utils.ipairs
 local PlayUISound = Utils.PlayUISound
 local SOUND_CLICK = Utils.SOUND_CLICK

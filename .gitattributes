@@ -1,0 +1,6 @@
+# Dev/repo files kept out of the release zip (git archive). release.sh is also
+# gitignored so it is never tracked in the first place.
+release.sh export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+.github export-ignore

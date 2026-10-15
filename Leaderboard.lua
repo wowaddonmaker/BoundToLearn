@@ -9,7 +9,6 @@ local tinsert = Utils.tinsert
 local tremove = Utils.tremove
 local pairs   = Utils.pairs
 local ipairs  = Utils.ipairs
-local wipe    = Utils.wipe
 local mfloor  = Utils.mfloor
 local GetTime = Utils.GetTime
 
@@ -18,6 +17,7 @@ local MAX_ENTRIES = 50
 local CHALLENGE_TIMEOUT = 15
 
 local playerName, playerRealm, playerClass
+local ownNames = {}
 local pendingChallenge = nil  -- { target=name, sent=time } or { from=name, sent=time }
 local activeChallenge = nil   -- { opponent=name, difficulty=str, startTime=num }
 local partyScores = {}        -- { ["Name-Realm"] = { score, difficulty, combo, accuracy, time } }
@@ -25,10 +25,14 @@ local partyScores = {}        -- { ["Name-Realm"] = { score, difficulty, combo, 
 function Leaderboard:Initialize()
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
 
-    local name = UnitName("player")
-    local realm = GetRealmName()
-    playerName = name
-    playerRealm = realm
+    -- Sender strings carry the realm without spaces. Forever names come as
+    -- (first, surname), so every form of our own name is kept for matching.
+    playerRealm = GetNormalizedRealmName() or (GetRealmName():gsub("[%s%-']", ""))
+    playerName = GetUnitName("player", false) or UnitName("player")
+    for _, name in ipairs({ playerName, (UnitName("player")), GetUnitName("player", true) }) do
+        ownNames[name] = true
+        ownNames[name .. "-" .. playerRealm] = true
+    end
     playerClass = select(2, UnitClass("player"))
 
     local f = CreateFrame("Frame")
@@ -85,7 +89,7 @@ function Leaderboard:BroadcastScore(results)
 
     local totalNotes = results.totalNotes or 0
     if totalNotes == 0 then return end
-    local accuracy = mfloor(((totalNotes - results.hitCounts.miss) / totalNotes) * 100)
+    local accuracy = mfloor(ns.Utils.HitAccuracy(results.hitCounts))
 
     local msg = Pack("SC",
         results.difficulty or "Medium",
@@ -133,7 +137,8 @@ function Leaderboard:OnAddonMessage(prefix, msg, channel, sender)
     local fullName = GetFullName(sName, sRealm)
 
     -- Ignore own messages
-    if sName == playerName and sRealm == playerRealm then return end
+    if ownNames[sender] or (ownNames[sName] and sRealm == playerRealm) then return end
+    Utils.DebugPrint("addon message sender:", sender)
 
     if cmd == "SC" then
         self:HandleScoreBroadcast(parts, fullName, sName, sRealm)
@@ -246,12 +251,10 @@ function Leaderboard:CleanPartyScores()
         local num = GetNumGroupMembers()
         for i = 1, num do
             local unit = IsInRaid() and ("raid" .. i) or ("party" .. i)
-            local name = UnitName(unit)
-            if name then
-                groupMembers[name] = true
-                local realm = GetRealmName()
-                groupMembers[GetFullName(name, realm)] = true
-            end
+            -- Both the short and the full form, as either may key a score.
+            local short, full = GetUnitName(unit, false), GetUnitName(unit, true)
+            if short then groupMembers[short] = true end
+            if full then groupMembers[full] = true end
         end
     end
 
@@ -422,7 +425,7 @@ function Leaderboard:AddOwnScore(results)
 
     local totalNotes = results.totalNotes or 0
     if totalNotes == 0 then return end
-    local accuracy = mfloor(((totalNotes - results.hitCounts.miss) / totalNotes) * 100)
+    local accuracy = mfloor(ns.Utils.HitAccuracy(results.hitCounts))
 
     local entry = {
         name = playerName,

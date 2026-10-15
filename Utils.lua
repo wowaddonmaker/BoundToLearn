@@ -11,7 +11,6 @@ local mmin, mmax, mabs, mceil, mfloor = math.min, math.max, math.abs, math.ceil,
 local pcall, tostring, tonumber = pcall, tostring, tonumber
 local GetTime, CreateFrame = GetTime, CreateFrame
 local PlaySound = PlaySound
-local PlaySoundFile = PlaySoundFile
 local wipe = wipe
 
 Utils.pairs    = pairs
@@ -47,6 +46,11 @@ Utils.CreateFrame = CreateFrame
 Utils.PlaySound   = PlaySound
 Utils.wipe        = wipe
 
+-- "1 ability", "3 abilities".
+function Utils.Count(n, one, many)
+    return sformat("%d %s", n, n == 1 and one or many)
+end
+
 -- UI click sounds (SOUNDKIT IDs - PlaySound works reliably)
 Utils.SOUND_CLICK = 856   -- igMainMenuOptionCheckboxOn
 Utils.SOUND_TAB   = 841   -- igCharacterInfoTab
@@ -55,6 +59,142 @@ Utils.SOUND_CLOSE = 851   -- igMainMenuClose
 function Utils.PlayUISound(soundKitID)
     PlaySound(soundKitID)
 end
+
+-- WoW Forever (Interface 16001): mainline UI on the classic world.
+local tocVersion = select(4, GetBuildInfo())
+Utils.IS_FOREVER = tocVersion >= 16000 and tocVersion < 20000
+
+-- Esc closes our newest open window. Never UISpecialFrames: a frame of
+-- ours in that list taints the client's Esc walk. Escape is bound to our
+-- button while a window is up and handed back for combat.
+local InCombatLockdown = InCombatLockdown
+local escStack = {}
+local escClose = {}
+local escArmed = false
+local escPressed = false
+local escHeader = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+
+local function EscArm()
+    if InCombatLockdown() then return end
+    local want = #escStack > 0
+    if want == escArmed then return end
+    escArmed = want
+    if want then
+        escHeader:Execute([[ self:SetBindingClick(true, "ESCAPE", "BoundToLearnEscButton") ]])
+    else
+        escHeader:Execute([[ self:ClearBindings() ]])
+    end
+end
+
+local function EscRemove(frame)
+    for i = #escStack, 1, -1 do
+        if escStack[i] == frame then tremove(escStack, i) end
+    end
+end
+
+-- A bound button must be sized and placed or the key goes to the client.
+local escButton = CreateFrame("Button", "BoundToLearnEscButton", UIParent)
+escButton:SetSize(1, 1)
+escButton:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+escButton:EnableMouse(false)
+escButton:RegisterForClicks("AnyDown", "AnyUp")
+escButton:SetScript("OnClick", function(_, _, down)
+    -- A press can click on the way down and up; act on the first only.
+    if not down and escPressed then
+        escPressed = false
+        return
+    end
+    escPressed = down
+    local top = escStack[#escStack]
+    if not top then return end
+    local close = escClose[top]
+    if close then close() else top:Hide() end
+end)
+
+escHeader:RegisterEvent("PLAYER_REGEN_DISABLED")
+escHeader:RegisterEvent("PLAYER_REGEN_ENABLED")
+escHeader:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        EscArm()
+    elseif escArmed then
+        escArmed = false
+        escHeader:Execute([[ self:ClearBindings() ]])
+    end
+end)
+
+-- close (optional) runs in place of hiding the frame.
+function Utils.CloseOnEscape(frame, close)
+    escClose[frame] = close
+    -- Own child: the window's OnShow/OnHide scripts stay the caller's.
+    local watch = CreateFrame("Frame", nil, frame)
+    watch:SetScript("OnShow", function()
+        EscRemove(frame)
+        escStack[#escStack + 1] = frame
+        EscArm()
+    end)
+    watch:SetScript("OnHide", function()
+        EscRemove(frame)
+        EscArm()
+    end)
+    if frame:IsVisible() then
+        escStack[#escStack + 1] = frame
+        EscArm()
+    end
+end
+
+-- Mouse-button and wheel binds never reach a keyboard reader (OnKeyDown).
+-- While a game runs they are bound to our own button, which hands the bind's
+-- key string to the game; the spell does not fire. Left and right click stay
+-- the player's. Bound securely (EscArm's route); released for combat.
+local mouseHeader = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+local mouseHandler
+local mousePressed = {}
+
+local mouseCatch = CreateFrame("Button", "BoundToLearnMouseCatch", UIParent)
+mouseCatch:SetSize(1, 1)
+mouseCatch:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+mouseCatch:EnableMouse(false)
+mouseCatch:RegisterForClicks("AnyDown", "AnyUp")
+mouseCatch:SetScript("OnClick", function(_, key, down)
+    -- A bind can click on the way down and up; act on the first only.
+    if not down and mousePressed[key] then
+        mousePressed[key] = nil
+        return
+    end
+    mousePressed[key] = down or nil
+    if mouseHandler then mouseHandler(key) end
+end)
+
+function Utils.IsMouseBind(key)
+    local base = key and key:match("[^%-]+$")
+    if not base then return false end
+    if base:match("^MOUSEWHEEL") then return true end
+    return base:match("^BUTTON%d+$") ~= nil and base ~= "BUTTON1" and base ~= "BUTTON2"
+end
+
+-- keys: bind strings ("SHIFT-BUTTON4"); handler(key) runs on each press.
+function Utils.CatchMouseBinds(keys, handler)
+    if InCombatLockdown() then return end
+    mouseHandler = handler
+    wipe(mousePressed)
+    for i = 1, #keys do
+        mouseHeader:SetAttribute("btlkey", keys[i])
+        mouseHeader:Execute([[
+            local key = self:GetAttribute("btlkey")
+            self:SetBindingClick(true, key, "BoundToLearnMouseCatch", key)
+        ]])
+    end
+end
+
+function Utils.ReleaseMouseBinds()
+    mouseHandler = nil
+    if InCombatLockdown() then return end
+    mouseHeader:Execute([[ self:ClearBindings() ]])
+end
+
+-- Combat start: the binds go back to the player before lockdown begins.
+mouseHeader:RegisterEvent("PLAYER_REGEN_DISABLED")
+mouseHeader:SetScript("OnEvent", Utils.ReleaseMouseBinds)
 
 -- Brand orange (matches Theme.ACCENT_HEX); kept literal so chat output
 -- never depends on Theme load order.
@@ -69,4 +209,22 @@ function Utils.DebugPrint(...)
     if BoundToLearn and BoundToLearn.db and BoundToLearn.db.devMode then
         print("|cff33ff99[BTL Debug]|r", ...)
     end
+end
+
+-- Hit quality weights for accuracy: perfect counts full, great and good count partially,
+-- miss zero. So an all-"good" run no longer reads 100% -- only an all-perfect run does.
+local ACC_WEIGHT = { perfect = 1.0, great = 0.75, good = 0.5 }
+
+function Utils.WeightedHits(hc)
+    if not hc then return 0 end
+    return (hc.perfect or 0) * ACC_WEIGHT.perfect
+         + (hc.great or 0) * ACC_WEIGHT.great
+         + (hc.good or 0) * ACC_WEIGHT.good
+end
+
+function Utils.HitAccuracy(hc)
+    if not hc then return 0 end
+    local total = (hc.perfect or 0) + (hc.great or 0) + (hc.good or 0) + (hc.miss or 0)
+    if total <= 0 then return 0 end
+    return Utils.WeightedHits(hc) / total * 100
 end

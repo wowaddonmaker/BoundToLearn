@@ -12,7 +12,6 @@ local mfloor   = Utils.mfloor
 local mmin     = Utils.mmin
 local mmax     = Utils.mmax
 local ipairs   = Utils.ipairs
-local sformat  = Utils.sformat
 local CreateFrame = Utils.CreateFrame
 
 local GetBindingKey = GetBindingKey
@@ -64,11 +63,18 @@ local CORRECT_PING = {
 
 PingGame.CORRECT_PING = CORRECT_PING
 
+-- Friendly names for the target-relevant pings, used by the "bind all pings"
+-- prompt. onmyway is intentionally excluded: it is not a target ping.
+local PING_LABEL = { attack = "Attack", assist = "Assist", warning = "Warning" }
+
+-- Difficulty scales through time pressure (shorter lifetime + faster spawn cadence) and
+-- precision (smaller targets), keeping the on-screen count low and steady, rather than
+-- piling on more targets at once. Mirrors how aim trainers scale.
 local DIFFICULTY_SETTINGS = {
-    Easy    = { spawnInterval = 3.0, targetLifetime = 5.0, maxActive = 2, duration = 30 },
-    Normal  = { spawnInterval = 2.2, targetLifetime = 4.0, maxActive = 3, duration = 45 },
-    Hard    = { spawnInterval = 1.5, targetLifetime = 3.0, maxActive = 5, duration = 60 },
-    Extreme = { spawnInterval = 1.0, targetLifetime = 2.0, maxActive = 7, duration = 60 },
+    Easy    = { spawnInterval = 1.8, targetLifetime = 4.0, maxActive = 3, duration = 30, sizeScale = 1.15 },
+    Normal  = { spawnInterval = 1.4, targetLifetime = 3.0, maxActive = 3, duration = 45, sizeScale = 1.0 },
+    Hard    = { spawnInterval = 1.0, targetLifetime = 2.2, maxActive = 4, duration = 60, sizeScale = 0.88 },
+    Extreme = { spawnInterval = 0.7, targetLifetime = 1.6, maxActive = 4, duration = 60, sizeScale = 0.78 },
 }
 
 PingGame.DIFFICULTIES = { "Easy", "Normal", "Hard", "Extreme" }
@@ -107,8 +113,29 @@ function PingGame:GetPingKeybinds()
 end
 
 function PingGame:HasPingKeybinds()
-    for _ in pairs(pingKeybinds) do return true end
-    return false
+    return next(pingKeybinds) ~= nil
+end
+
+-- True only when every target-relevant ping (attack/assist/warning) is bound.
+function PingGame:AreAllPingsKeybound()
+    for i = 1, #TARGET_TYPES do
+        if not GetBindingKey(PING_BINDINGS[CORRECT_PING[TARGET_TYPES[i]]]) then
+            return false
+        end
+    end
+    return true
+end
+
+-- Display names of any target-relevant pings that are not yet bound.
+function PingGame:GetUnboundPingNames()
+    local names = {}
+    for i = 1, #TARGET_TYPES do
+        local action = CORRECT_PING[TARGET_TYPES[i]]
+        if not GetBindingKey(PING_BINDINGS[action]) then
+            names[#names + 1] = PING_LABEL[action]
+        end
+    end
+    return names
 end
 
 function PingGame:Initialize()
@@ -233,6 +260,10 @@ end
 
 function PingGame:Resume()
     if not isPaused then return end
+    if InCombatLockdown() then
+        BoundToLearn:Print("Resume once you are out of combat.")
+        return
+    end
     isPaused = false
     local pauseDuration = GetTime() - pauseStartTime
     gameStartTime = gameStartTime + pauseDuration
@@ -298,6 +329,7 @@ function PingGame:SpawnTarget(settings)
         spawnTime = GetTime(),
         expireTime = GetTime() + settings.targetLifetime,
         lifetime = settings.targetLifetime,
+        sizeScale = settings.sizeScale or 1,
     }
 
     tinsert(activeTargets, target)
@@ -317,7 +349,8 @@ function PingGame:OnPingAction(targetID, pingAction)
             local reactionTime = now - target.spawnTime
 
             local correctAction = CORRECT_PING[target.targetType]
-            if pingAction == correctAction then
+            local wasHit = pingAction == correctAction
+            if wasHit then
                 -- Correct ping type
                 hits = hits + 1
                 local speedBonus = mfloor(SCORE_SPEED_BONUS * mmax(0, 1 - reactionTime / target.lifetime))
@@ -345,6 +378,12 @@ function PingGame:OnPingAction(targetID, pingAction)
                 ns.PingGameUI:ReleaseTarget(target)
             end
             tremove(activeTargets, i)
+            -- Instant respawn on a correct ping keeps a steady number of targets on
+            -- screen (aim-trainer style) instead of waiting for the spawn timer.
+            local respawnSettings = GetSettings()
+            if wasHit and respawnSettings and #activeTargets < respawnSettings.maxActive then
+                self:SpawnTarget(respawnSettings)
+            end
             return
         end
     end
