@@ -361,16 +361,7 @@ local function OnInitialize()
         elseif msg == "first" then
             BoundToLearn:ShowWelcome()
         elseif msg == "songcheck" then
-            local unplayable, disagree, total = ns.SongData.CheckTracks()
-            Utils.Print(sformat("%d of %d tracks play here. Unplayable: %s",
-                total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none"))
-            if Utils.IS_FOREVER then
-                Utils.Print(sformat("Differs from the Forever list: %s",
-                    #disagree > 0 and table.concat(disagree, " ") or "none"))
-            end
-            local repeats = ns.SongData.ArtRepeats()
-            Utils.Print(sformat("Same picture on 4+ tracks: %s",
-                #repeats > 0 and table.concat(repeats, "; ") or "none"))
+            BoundToLearn:SongCheck()
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then
@@ -456,6 +447,26 @@ function BoundToLearn:ToggleTracker()
             ns.TrackerUI:OnSessionStart()
         end
     end
+end
+
+-- Probe (/btl songcheck, and the end of /btl layoutcheck): which tracks this
+-- client plays. Printed, and saved in BoundToLearnDB.songReport for reading
+-- from the SavedVariables file.
+function BoundToLearn:SongCheck()
+    local unplayable, disagree, total = ns.SongData.CheckTracks()
+    local repeats = ns.SongData.ArtRepeats()
+    local lines = {
+        sformat("%d of %d tracks play here. Unplayable: %s",
+            total - #unplayable, total, #unplayable > 0 and table.concat(unplayable, " ") or "none"),
+    }
+    if Utils.IS_FOREVER then
+        lines[#lines + 1] = sformat("Differs from the Forever list: %s",
+            #disagree > 0 and table.concat(disagree, " ") or "none")
+    end
+    lines[#lines + 1] = sformat("Same picture on 4+ tracks: %s",
+        #repeats > 0 and table.concat(repeats, "; ") or "none")
+    BoundToLearnDB.songReport = lines
+    for _, line in ipairs(lines) do Utils.Print(line) end
 end
 
 -- Probe (/btl mousetest): middle click (every mouse has one) also presses

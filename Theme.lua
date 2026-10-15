@@ -1188,8 +1188,8 @@ ns.LayoutCheck = LayoutCheck
 local sformat, mmin = Utils.sformat, Utils.mmin
 local tinsert, ipairs = Utils.tinsert, Utils.ipairs
 
-local MIN_OVERLAP = 3          -- screen pixels on both axes before it counts
-local MIN_GAP = 4              -- controls on one row closer than this are crowded
+local MIN_OVERLAP = 3          -- UI units on both axes before it counts
+local MIN_GAP = 4              -- UI units: controls on one row closer than this are crowded
 -- Border art is drawn inside the frame: content closer than this to an edge
 -- sits on it (UI units; the Dialog metal band, the tooltip edge).
 local EDGE = { window = 11, menu = 5 }
@@ -1202,9 +1202,16 @@ local function Label(obj)
         local fs = obj:GetFontString()
         text = fs and fs:GetText()
     end
+    -- Theme.CreateToggle keeps its label in .Text.
+    if (not text or text == "") and type(obj.Text) == "table" and obj.Text.GetText then
+        text = obj.Text:GetText()
+    end
     text = text and text:gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", "")
     if text and text ~= "" then return '"' .. text:sub(1, 28) .. '"' end
-    return obj:GetDebugName():match("[^%.]+$") or obj:GetObjectType()
+    local name = obj:GetDebugName():match("[^%.]+$")
+    -- An unnamed frame's debug name is its address: give its kind and size instead.
+    if name and not name:match("^%x+$") then return name end
+    return sformat("%s %dx%d", obj:GetObjectType(), mfloor(obj:GetWidth() + 0.5), mfloor(obj:GetHeight() + 0.5))
 end
 
 -- Retail gives a text or texture region no GetEffectiveAlpha (only frames
@@ -1256,10 +1263,26 @@ local function Shown(obj)
     return obj:IsVisible() and EffectiveAlpha(obj) > 0.05
 end
 
+-- A button drawn only as words (no art of its own, like Month/Week/Today or
+-- On/Off) takes the room its text takes, not its whole click box.
+local function DrawnText(button)
+    if button:GetObjectType() ~= "Button" then return nil end
+    local words
+    for _, region in ipairs({ button:GetRegions() }) do
+        local kind = region:GetObjectType()
+        if kind == "Texture" and Shown(region) then return nil end
+        if kind == "FontString" and not words and Shown(region) and (region:GetText() or "") ~= "" then
+            words = region
+        end
+    end
+    return words
+end
+
 -- Walk a panel: collect controls and texts with their clipped screen rects.
 local function Collect(frame, items, clip, panelArea)
     if frame._btlNoLayoutCheck or not Shown(frame) then return end
-    if frame.DoesClipChildren and frame:DoesClipChildren() then
+    -- A scroll frame always cuts its content to its own rectangle.
+    if frame:GetObjectType() == "ScrollFrame" or (frame.DoesClipChildren and frame:DoesClipChildren()) then
         local l, b, r, t = ScreenRect(frame)
         if l then clip = { Clip(l, b, r, t, clip) } end
     end
@@ -1280,7 +1303,9 @@ local function Collect(frame, items, clip, panelArea)
         -- _btlLayoutItem: a plain frame that takes space (an icon, a pile).
         local isItem = CONTROL_TYPES[child:GetObjectType()] or child._btlLayoutItem
         if isItem and Shown(child) and not child._btlNoLayoutCheck then
-            local l, b, r, t = ScreenRect(child)
+            local words = DrawnText(child)
+            local l, b, r, t
+            if words then l, b, r, t = ScreenRect(words, true) else l, b, r, t = ScreenRect(child) end
             if l then
                 l, b, r, t = Clip(l, b, r, t, clip)
                 -- A catcher or backdrop the size of the panel is not a control.
@@ -1334,7 +1359,10 @@ end
 -- Content on the border art of the panel it sits in. Things wholly outside
 -- the panel (tabs hung below it) are deliberate and not reported.
 local function OnBorder(item, isPanel)
-    local host, f = nil, item.owner
+    if item.owner._btlEdgeOK then return end
+    -- A control that is itself a panel (a styled search box) is measured
+    -- against the panel around it, not against its own edges.
+    local host, f = nil, item.text and item.owner or item.owner:GetParent()
     while f and not host do
         if f._btlEdgeOK then return end
         if isPanel[f] then host = f end
@@ -1353,7 +1381,8 @@ local function OnBorder(item, isPanel)
     if host._btlKind == "bare" then return end
     local scale = host:GetEffectiveScale()
     local need = EDGE[host._btlKind] or EDGE.window
-    if gaps[side] / scale < need then
+    -- Half a unit of slack: an inset of exactly the border width measures 10.99.
+    if gaps[side] / scale < need - 0.5 then
         return sformat("%s sits on the border of %s (%d from the %s edge, needs %d)",
             Label(item.obj), Label(host), mfloor(gaps[side] / scale), EDGE_NAMES[side], need)
     end
@@ -1377,6 +1406,8 @@ function LayoutCheck:Scan()
             if pl then
                 local items = {}
                 Collect(panel, items, nil, (pr - pl) * (pt - pb))
+                -- Overlaps and gaps in UI units, the units the code places things in.
+                local scale = EffectiveScale(panel)
                 for i = 1, #items do
                     local a = items[i]
                     local border = OnBorder(a, isPanel)
@@ -1384,14 +1415,14 @@ function LayoutCheck:Scan()
                     for j = i + 1, #items do
                         local b = items[j]
                         if not Layered(a, b) and not Related(a, b) then
-                            local w = mmin(a[3], b[3]) - mmax(a[1], b[1])
-                            local h = mmin(a[4], b[4]) - mmax(a[2], b[2])
+                            local w = (mmin(a[3], b[3]) - mmax(a[1], b[1])) / scale
+                            local h = (mmin(a[4], b[4]) - mmax(a[2], b[2])) / scale
                             if w >= MIN_OVERLAP and h >= MIN_OVERLAP then
-                                tinsert(found, sformat("%s over %s (%dx%d px) in %s",
+                                tinsert(found, sformat("%s over %s (%dx%d) in %s",
                                     Label(a.obj), Label(b.obj), mfloor(w), mfloor(h), Label(panel)))
                             elseif not a.text and not b.text and h >= MIN_OVERLAP and w > -MIN_GAP then
                                 -- Side by side on one row with next to no gap.
-                                tinsert(found, sformat("%s crowds %s (%d px gap) in %s",
+                                tinsert(found, sformat("%s crowds %s (%d gap) in %s",
                                     Label(a.obj), Label(b.obj), mfloor(mmax(0, -w)), Label(panel)))
                             end
                         end
@@ -1524,6 +1555,7 @@ function LayoutCheck:Run(arg)
             sweeping = false
             Record(sformat("Layout check done: %d findings on %d screens, %d could not open.",
                 total, index - 1, failed))
+            BoundToLearn:SongCheck()
             return
         end
         -- One broken screen must not end the sweep; it is reported instead.
