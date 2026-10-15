@@ -1207,6 +1207,26 @@ local function Label(obj)
     return obj:GetDebugName():match("[^%.]+$") or obj:GetObjectType()
 end
 
+-- Retail gives a text or texture region no GetEffectiveAlpha (only frames
+-- have it), so a region's values come from its own times its frame's.
+local function EffectiveAlpha(obj)
+    if obj.GetEffectiveAlpha then return obj:GetEffectiveAlpha() end
+    local alpha, parent = obj:GetAlpha(), obj:GetParent()
+    if parent and not (obj.IsIgnoringParentAlpha and obj:IsIgnoringParentAlpha()) then
+        alpha = alpha * parent:GetEffectiveAlpha()
+    end
+    return alpha
+end
+
+local function EffectiveScale(obj)
+    if obj.GetEffectiveScale then return obj:GetEffectiveScale() end
+    local scale, parent = obj.GetScale and obj:GetScale() or 1, obj:GetParent()
+    if parent and not (obj.IsIgnoringParentScale and obj:IsIgnoringParentScale()) then
+        scale = scale * parent:GetEffectiveScale()
+    end
+    return scale
+end
+
 -- Screen rectangle of what is drawn: text uses its real width, not its anchors.
 local function ScreenRect(obj, isText)
     local left, bottom, width, height = obj:GetRect()
@@ -1223,7 +1243,7 @@ local function ScreenRect(obj, isText)
         bottom = bottom + (height - textH) / 2
         width, height = textW, textH
     end
-    local scale = obj:GetEffectiveScale()
+    local scale = EffectiveScale(obj)
     return left * scale, bottom * scale, (left + width) * scale, (bottom + height) * scale
 end
 
@@ -1233,7 +1253,7 @@ local function Clip(l, b, r, t, clip)
 end
 
 local function Shown(obj)
-    return obj:IsVisible() and obj:GetEffectiveAlpha() > 0.05
+    return obj:IsVisible() and EffectiveAlpha(obj) > 0.05
 end
 
 -- Walk a panel: collect controls and texts with their clipped screen rects.
