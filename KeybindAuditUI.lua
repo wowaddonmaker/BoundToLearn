@@ -333,7 +333,7 @@ function KeybindAuditUI:CreateFrame()
             "Bars: " .. (#bars > 0 and table.concat(bars, ", ") or "none"),
         }
     end)
-    feedbackBtn:SetPoint("TOPRIGHT", -34, -11)
+    ns.Feedback.PlaceBesideClose(feedbackBtn, close)
 
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
     accent:SetSize(550, 2)
@@ -480,7 +480,8 @@ function KeybindAuditUI:CreateSetupPage()
     skipBarsHint:SetText("Next time you open the audit, click Settings (bottom-left) to change these options.")
 
     -- Grouping checkbox (experimental)
-    local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 240)
+    -- 236 wide ends 14 inside the right border (11).
+    local groupingCb = ns.Theme.CreateToggle(setupPage, "Include grouping score  |cFFFF8800Experimental|r", nil, 236)
     groupingCb:SetPoint("TOPLEFT", optX, -242)
     groupingCb:SetScript("OnClick", function(self)
         PlayUISound(SOUND_CLICK)
@@ -837,8 +838,10 @@ function KeybindAuditUI:CreateMethodologyPage()
     methodologyPage:SetAllPoints()
 
     local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditMethScroll", methodologyPage, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 15, -42)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -30, 44)
+    -- Starts under the Methodology tab (it ends 52 down); the scroll bar hangs
+    -- right of the frame and must clear the right border (11).
+    scrollFrame:SetPoint("TOPLEFT", 15, -56)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -36, 44)
     ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditMethScrollScrollBar"])
 
     local content = CreateFrame("Frame", nil, scrollFrame)

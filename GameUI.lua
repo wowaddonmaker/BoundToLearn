@@ -1819,6 +1819,11 @@ function GameUI:CreateStatsPanel(f)
         GameUI:ConfirmResetStats()
     end)
 
+    -- The window's own Give feedback sits where the Summary / By Song toggle
+    -- goes, so this page has one level with Reset Stats.
+    sp.feedbackBtn = ns.Feedback.CreateButton(sp, function() return GameUI:FeedbackContext() end)
+    sp.feedbackBtn:SetPoint("BOTTOMRIGHT", -2, 10)
+
     local title = sp:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -8)
     title:SetText("Your Stats")
@@ -2270,6 +2275,8 @@ function GameUI:ShowStatsPage(songKey)
     if songSelect.mainTitle then songSelect.mainTitle:Hide() end
     if songSelect.statsBtn then songSelect.statsBtn:Hide() end
     if songSelect.backToMenuBtn then songSelect.backToMenuBtn:Hide() end
+    -- The Summary / By Song toggle takes the title row; the page has its own.
+    if songSelect.feedbackBtn then songSelect.feedbackBtn:Hide() end
     if songSelect.searchBox then
         songSelect.searchBox:SetText("")
         songSelect.searchBox:Hide()
@@ -3255,7 +3262,7 @@ function GameUI:CreateMainMenu()
 
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-    title:SetPoint("TOP", 0, -9)
+    title:SetPoint("TOP", 0, -13)   -- below the window's border band (11)
     title:SetText("Icon Game")
     title:SetTextColor(Theme.RGB(Theme.C.ACCENT_BRIGHT))
 
@@ -3352,7 +3359,8 @@ function GameUI:BuildMainMenuBars(f)
     end
 
     f.barToggles = {}
-    local COLS, CELL_W, CELL_H = 2, 156, 22
+    -- A row is as tall as the toggle (26), or each row overlaps the next.
+    local COLS, CELL_W, CELL_H = 2, 156, 26
     for i = 1, #BARS do
         local bar = BARS[i]
         local col = (i - 1) % COLS

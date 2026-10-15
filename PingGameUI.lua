@@ -591,7 +591,7 @@ function PingGameUI:CreateUI()
 
     -- Title
     local title = ns.Theme.CreateTitle(mainFrame, "Ping Trainer", 20)
-    title:SetPoint("TOP", 0, -6)
+    title:SetPoint("TOP", 0, -11)   -- below the window's border band (11)
 
     -- Drag hint at upper right
     local dragHint = mainFrame:CreateFontString(nil, "OVERLAY")

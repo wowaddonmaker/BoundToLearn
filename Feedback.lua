@@ -246,3 +246,11 @@ function Feedback.CreateButton(parent, context)
     end)
     return b
 end
+
+-- On a window's title row, left of its close button (Theme.CreateCloseButton
+-- at TOPRIGHT -8, -8): a clear gap from the button, and the top 12 down, under
+-- the border band (11).
+function Feedback.PlaceBesideClose(button, close)
+    button:ClearAllPoints()
+    button:SetPoint("TOPRIGHT", close, "TOPLEFT", -6, -4)
+end

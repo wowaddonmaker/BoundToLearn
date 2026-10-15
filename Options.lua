@@ -800,7 +800,7 @@ local function BuildFrame()
         local label = btn and btn.label and btn.label:GetText()
         return "Options", { "Tab: " .. (label or "?") }
     end)
-    feedbackBtn:SetPoint("TOPRIGHT", -34, -12)
+    ns.Feedback.PlaceBesideClose(feedbackBtn, close)
 
     nav = Theme.CreateSidebar(optionsFrame, {
         width = SIDEBAR_W,
