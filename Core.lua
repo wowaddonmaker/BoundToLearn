@@ -465,6 +465,18 @@ function BoundToLearn:SongCheck()
     end
     lines[#lines + 1] = sformat("Same picture on 4+ tracks: %s",
         #repeats > 0 and table.concat(repeats, "; ") or "none")
+    -- What the client answered, so "0 tracks play" can be told apart from a
+    -- muted channel: the sound settings and the first track on two channels.
+    local first = ns.SongData.songs[1]
+    local function try(channel)
+        local willPlay, handle = PlaySoundFile(first.id, channel)
+        if handle then StopSound(handle) end
+        return sformat("%s=%s", channel, tostring(willPlay))
+    end
+    lines[#lines + 1] = sformat("Sound: all %s, sfx %s, music %s, master volume %s, music volume %s; %s (%d): %s %s",
+        tostring(GetCVar("Sound_EnableAllSound")), tostring(GetCVar("Sound_EnableSFX")),
+        tostring(GetCVar("Sound_EnableMusic")), tostring(GetCVar("Sound_MasterVolume")),
+        tostring(GetCVar("Sound_MusicVolume")), first.key, first.id, try("Master"), try("Music"))
     BoundToLearnDB.songReport = lines
     for _, line in ipairs(lines) do Utils.Print(line) end
 end

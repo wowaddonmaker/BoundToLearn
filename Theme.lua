@@ -1420,7 +1420,8 @@ function LayoutCheck:Scan()
                             if w >= MIN_OVERLAP and h >= MIN_OVERLAP then
                                 tinsert(found, sformat("%s over %s (%dx%d) in %s",
                                     Label(a.obj), Label(b.obj), mfloor(w), mfloor(h), Label(panel)))
-                            elseif not a.text and not b.text and h >= MIN_OVERLAP and w > -MIN_GAP then
+                            -- Half a unit of slack, as at the border: a gap of 4 measures 3.99.
+                            elseif not a.text and not b.text and h >= MIN_OVERLAP and w > -(MIN_GAP - 0.5) then
                                 -- Side by side on one row with next to no gap.
                                 tinsert(found, sformat("%s crowds %s (%d gap) in %s",
                                     Label(a.obj), Label(b.obj), mfloor(mmax(0, -w)), Label(panel)))
