@@ -2,7 +2,7 @@
 ## Title: BoundToLearn
 ## Notes: Click-vs-keybind tracking and keybind practice game
 ## Author: justawower
-## Version: 1.0.1
+## Version: 1.1.0
 ## IconTexture: Interface\MacroFrame\MacroFrame-Icon
 ## AddonCompartmentFunc: BoundToLearn_OnAddonCompartmentClick
 ## SavedVariables: BoundToLearnDB
