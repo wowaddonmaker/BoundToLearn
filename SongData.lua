@@ -588,6 +588,48 @@ local TRACK_ART = {
     s68 = { 131883, 1, { 0.025, 0.975, 0.362, 0.638 } }, -- PvP
 }
 
+-- Retail tracks the guide finds nothing for fell back to their era's main
+-- raid, five pictures across 34 tracks. Each now shows the place its music
+-- comes from: { file, crop }, the crop cut to the bubble's shape (a nil crop
+-- is a guide background, cut with INSTANCE_TEXCOORD). Retail only: Forever
+-- keeps FOREVER_ART for the ones it plays.
+local RETAIL_ART = {
+    s10 = { 1035009, { 0.080, 0.920, 0.400, 0.721 } }, -- Draenor, the warlords
+    s11 = { 1060205, { 0.050, 0.900, 0.400, 0.643 } }, -- The Everbloom, Gorgrond
+    s12 = { 1032622, { 0.100, 0.950, 0.400, 0.643 } }, -- Blackrock Foundry
+    s14 = { 574578, { 0.075, 0.925, 0.350, 0.593 } },  -- The Wandering Isle
+    s15 = { 633149, { 0.075, 0.925, 0.330, 0.573 } },  -- Jade Forest temple
+    s16 = { 651994, { 0.180, 0.980, 0.280, 0.586 } },  -- Pandaria
+    s20 = { 1375896, { 0.050, 0.950, 0.300, 0.644 } }, -- Peak of Serenity
+    s21 = { 633150, { 0.075, 0.925, 0.400, 0.643 } },  -- Mogu'shan Palace
+    s22 = { 774865, { 0.050, 0.900, 0.300, 0.543 } },  -- Lion's Landing
+    s23 = { 651536, { 0.050, 0.950, 0.380, 0.637 } },  -- Theramore
+    s24 = { 534812, { 0.075, 0.925, 0.260, 0.503 } },  -- Deathwing
+    s25 = { 2529512, { 0.050, 0.950, 0.280, 0.624 } }, -- Darkshore
+    s26 = { 512032, { 0.075, 0.925, 0.420, 0.663 } },  -- The Maelstrom (Lost Isles)
+    s27 = { 1417745, { 0.200, 0.900, 0.365, 0.632 } }, -- Night elf grove
+    s28 = { 1099378, { 0.050, 0.900, 0.420, 0.663 } }, -- Alliance town
+    s29 = { 424078, { 0.075, 0.925, 0.380, 0.623 } },  -- Deepholm
+    s31 = { 514085, { 0.075, 0.925, 0.300, 0.543 } },  -- Firelands
+    s32 = { 343003, { 0.100, 0.900, 0.240, 0.546 } },  -- Northrend, Arthas
+    s33 = { 608167 },                                  -- Halls of Stone
+    s35 = { 608165 },                                  -- Halls of Lightning
+    s38 = { 1496467, { 0.050, 0.950, 0.360, 0.704 } }, -- Dalaran, Violet Hold
+    s39 = { 236058, { 0.050, 0.900, 0.560, 0.803 } },  -- Dalaran prison portals
+    s40 = { 236060, { 0.075, 0.925, 0.290, 0.533 } },  -- Acherus over New Avalon
+    s41 = { 1382383, { 0.050, 0.950, 0.300, 0.644 } }, -- Ebon Hold
+    s42 = { 131836, { 0.075, 0.925, 0.360, 0.603 } },  -- Drak'Tharon Keep
+    s43 = { 236061, { 0.075, 0.925, 0.400, 0.643 } },  -- Gundrak, beside Grizzly Hills
+    s44 = { 311102, { 0.075, 0.925, 0.380, 0.623 } },  -- Argent coliseum
+    s45 = { 318964, { 0.075, 0.925, 0.310, 0.553 } },  -- Icecrown Citadel
+    s55 = { 131874, { 0.050, 0.900, 0.340, 0.583 } },  -- Quel'Danas at sunset
+    s56 = { 131826, { 0.075, 0.925, 0.260, 0.503 } },  -- Black Temple, Illidan
+    s57 = { 343004, { 0.150, 0.950, 0.240, 0.546 } },  -- Outland, Illidan and Kael'thas
+    s59 = { 131873, { 0.075, 0.925, 0.280, 0.523 } },  -- Sunwell, Kil'jaeden
+    s60 = { 7439363, { 0.050, 0.950, 0.400, 0.744 } }, -- Magisters' Terrace library
+    s61 = { 534166, { 0.075, 0.925, 0.300, 0.543 } },  -- Darkmoon Faire
+}
+
 local songResolveCache = {}
 resolveSong = function(song)
     local cached = songResolveCache[song.key]
@@ -612,6 +654,12 @@ resolveSong = function(song)
     local img, tier = matchInstance(song.title:lower())
     if not tier then
         tier = tierForIndex(tonumber(song.key:match("%d+")) or 1)
+    end
+    local placed = RETAIL_ART[song.key]
+    if placed then
+        cached = { img = placed[1], tier = tier, tc = placed[2] }
+        songResolveCache[song.key] = cached
+        return cached
     end
     -- No name match: fall back to the era's flagship raid so the bubble still
     -- shows fitting art instead of the neutral silver look.
