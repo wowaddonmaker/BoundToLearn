@@ -246,9 +246,10 @@ local function CreateIssueRow(parent, index)
     text:SetTextColor(0.9, 0.9, 0.9)
     row.text = text
 
+    -- Under the text, so a recommendation that wraps pushes it down.
     local detail = row:CreateFontString(nil, "OVERLAY")
     detail:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    detail:SetPoint("TOPLEFT", 34, -17)
+    detail:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -3)
     detail:SetWidth(210)
     detail:SetJustifyH("LEFT")
     detail:SetTextColor(0.6, 0.6, 0.6)
@@ -1078,8 +1079,8 @@ local function BuildGroupingDetail(results)
             local info = roleScores[role]
             local label = roleLabels[role] or role
             local color = info.score >= 75 and "66DD66" or info.score >= 50 and "DDDD44" or "DD8844"
-            tinsert(lines, sformat("\n|cFF%s%s|r  |cFFAAAAAA%d abilities, avg distance %.1f, score %d|r",
-                color, label, info.count, info.avgDist, info.score))
+            tinsert(lines, sformat("\n|cFF%s%s|r  |cFFAAAAAA%s, avg distance %.1f, score %d|r",
+                color, label, Utils.Count(info.count, "ability", "abilities"), info.avgDist, info.score))
             local group = roleGroups[role]
             if group then
                 for _, slotData in ipairs(group.slots) do
@@ -1361,6 +1362,9 @@ function KeybindAuditUI:RefreshResults()
     local rowW = (auditFrame:GetWidth() - 305) - (hasScroll and 20 or 2)
     issueScrollChild:SetWidth(rowW)
 
+    -- Each row is as tall as its wrapped text and detail, never under the
+    -- standard height; rows stack by their real heights.
+    local rowY, visibleH = 0, 0
     for i = 1, 20 do
         local row = issueRows[i]
         local issue = issues[i]
@@ -1373,33 +1377,37 @@ function KeybindAuditUI:RefreshResults()
                 row.icon:SetTexture(issue.icon)
                 row.icon:Show()
                 row.text:SetPoint("TOPLEFT", 34, -3)
-                row.detail:SetPoint("TOPLEFT", 34, -17)
                 row.text:SetWidth(rowW - 40)
                 row.detail:SetWidth(rowW - 40)
             else
                 row.icon:Hide()
                 row.text:SetPoint("TOPLEFT", 12, -3)
-                row.detail:SetPoint("TOPLEFT", 12, -17)
                 row.text:SetWidth(rowW - 18)
                 row.detail:SetWidth(rowW - 18)
             end
 
             row.text:SetText(issue.text)
             row.detail:SetText(issue.detail or "")
+            local h = mmax(ISSUE_ROW_HEIGHT,
+                mfloor(3 + row.text:GetStringHeight() + 3 + row.detail:GetStringHeight() + 7 + 0.5))
+            row:SetHeight(h)
+            row.strip:SetHeight(h - 4)
+            row:SetPoint("TOPLEFT", 0, -rowY)
+            rowY = rowY + h
+            if i <= 8 then visibleH = visibleH + h end
             row:Show()
         else
             row:Hide()
         end
     end
 
-    issueScrollChild:SetHeight(mmax(1, #issues * ISSUE_ROW_HEIGHT))
+    issueScrollChild:SetHeight(mmax(1, rowY))
 
     -- Fit the card height to whichever column runs longer, so short results don't
     -- leave a baggy empty band. Bottom-anchored elements (buttons, skipped note,
     -- issue list) ride the frame's bottom edge and stay put as the frame shrinks.
     local leftBottom = 252 + groupingShift + mmax(0, barIdx - 1) * 16 + 14
-    local visibleIssues = mmin(#issues, 8)
-    local rightBottom = #issues == 0 and 150 or (64 + visibleIssues * ISSUE_ROW_HEIGHT + 6)
+    local rightBottom = #issues == 0 and 150 or (64 + visibleH + 6)
     auditFrame:SetHeight(mmax(360, mmin(480, mmax(leftBottom, rightBottom) + 54)))
 end
 

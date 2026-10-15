@@ -359,7 +359,8 @@ function StatsUI:RefreshQuizData()
                 timeStr = sformat("%d.%ds", secs, tenths)
             end
             local roundStr = session.rounds == 1 and "perfect" or sformat("%d rounds", session.rounds)
-            row.detailText:SetText(sformat("%s  |cFF888888(%s, %d abilities)|r", timeStr, roundStr, session.totalAbilities))
+            row.detailText:SetText(sformat("%s  |cFF888888(%s, %s)|r", timeStr, roundStr,
+                Utils.Count(session.totalAbilities, "ability", "abilities")))
             row:Show()
         else
             row:Hide()

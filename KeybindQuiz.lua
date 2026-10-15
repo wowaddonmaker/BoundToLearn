@@ -807,7 +807,8 @@ function KeybindQuiz:FinishRound()
         if roundNumber == 1 then
             promptText:SetText(sformat("Perfect: all %d correct on the first try (%s)", total, timeStr))
         else
-            promptText:SetText(sformat("All %d abilities learned in %d rounds (%s)", total, roundNumber, timeStr))
+            promptText:SetText(sformat("All %s learned in %d rounds (%s)",
+                Utils.Count(total, "ability", "abilities"), roundNumber, timeStr))
         end
         promptText:SetTextColor(0.7, 0.7, 0.7)
         answerLabel:Hide()
@@ -888,7 +889,7 @@ function KeybindQuiz:Start()
     if not quizFrame then CreateQuizUI() end
 
     local readyFrame = quizFrame.readyFrame
-    readyFrame.desc:SetText(sformat("Quizzing %d abilities from your action bars.", #allCards))
+    readyFrame.desc:SetText(sformat("Quizzing %s from your action bars.", Utils.Count(#allCards, "ability", "abilities")))
 
     local function StartQuiz(practice)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)

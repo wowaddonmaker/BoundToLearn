@@ -488,7 +488,9 @@ function KeybindAudit:Scan(options)
             tinsert(issues, {
                 severity = "medium",
                 icon = nil,
-                text = sformat("%s has %d abilities but none are keybound", barData.label, barData.filledCount),
+                text = barData.filledCount == 1
+                    and sformat("%s has 1 ability but it is not keybound", barData.label)
+                    or sformat("%s has %d abilities but none are keybound", barData.label, barData.filledCount),
                 detail = "Every ability on your bar should have a keybind.",
             })
         end

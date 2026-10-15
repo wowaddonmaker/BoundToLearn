@@ -46,6 +46,11 @@ Utils.CreateFrame = CreateFrame
 Utils.PlaySound   = PlaySound
 Utils.wipe        = wipe
 
+-- "1 ability", "3 abilities".
+function Utils.Count(n, one, many)
+    return sformat("%d %s", n, n == 1 and one or many)
+end
+
 -- UI click sounds (SOUNDKIT IDs - PlaySound works reliably)
 Utils.SOUND_CLICK = 856   -- igMainMenuOptionCheckboxOn
 Utils.SOUND_TAB   = 841   -- igCharacterInfoTab
