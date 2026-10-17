@@ -89,6 +89,30 @@ local TRACKING_SPELLS = {
     [5502] = true, [5503] = true, [1241115] = true,  -- Sense Undead
 }
 
+-- Profession spells by name from the Forever SpellName table (every rank and
+-- variant), for clients where GetProfessions leaves them out (First Aid and
+-- the other classic professions); retail's list also comes from the spellbook.
+local STATIC_PROFESSION_SPELLS = {}
+for _, id in ipairs({
+    746, 1159, 3267, 3268, 3273, 3274, 7162, 7924, 7926, 7927, 10838, 10839, 10846, 18608, 18610, 23567, 23568, 23569, 23696, 24412, 24413, 24414, 30020, 470345, 1240927, 1240928, 1240929, 1240930, 1290863, 1290865, 1290867,  -- First Aid
+    2550, 3102, 3413, 18260, 1240945, 1240956, 1240967, 1240980,  -- Cooking
+    7620, 7731, 7732, 13615, 18248, 24303, 1229271, 1240948, 1240959, 1240970, 1240983,  -- Fishing
+    2259, 3101, 3464, 11611, 1240943, 1240954, 1240965, 1240977,  -- Alchemy
+    2018, 3100, 3538, 9785, 1240944, 1240955, 1240966, 1240979,  -- Blacksmithing
+    7411, 7412, 7413, 13920, 1240946, 1240957, 1240968, 1240981,  -- Enchanting
+    4036, 4037, 4038, 12656, 1235244, 1240947, 1240958, 1240969, 1240982,  -- Engineering
+    2108, 3104, 3811, 10662, 1240950, 1240961, 1240972, 1240985,  -- Leatherworking
+    3908, 3909, 3910, 12180, 1240953, 1240964, 1240976, 1240988,  -- Tailoring
+    2656,  -- Smelting
+    2575, 2576, 2577, 2578, 2579, 3564, 10248, 12560, 13611, 1235230, 1240951, 1240962, 1240973, 1240986, 1264639, 1272073,  -- Mining
+    2366, 2368, 2369, 2371, 3570, 9134, 11993, 13614, 1240949, 1240960, 1240971, 1240984,  -- Herbalism
+    8613, 8617, 8618, 10768, 13697, 1240952, 1240963, 1240974, 1240987, 1248530, 1300763, 1300766,  -- Skinning
+    13262,  -- Disenchant
+    818, 1290, 1229737, 1307227,  -- Basic Campfire
+    2842, 2995, 364159, 1298494,  -- Poisons
+    1804, 6461, 6463,  -- Pick Lock
+}) do STATIC_PROFESSION_SPELLS[id] = true end
+
 -- Hunter pet care: feeding, taming and teaching the pet, never combat binds.
 -- IDs from the Forever SpellName table (every variant it lists).
 local PET_CARE_SPELLS = {
@@ -196,6 +220,7 @@ local toyCache = {}
 
 local function BuildProfessionCache()
     wipe(professionSpells)
+    if not GetProfessions then return end
     local profs = {GetProfessions()}
     for i = 1, 6 do
         if profs[i] then
@@ -255,7 +280,7 @@ local function ShouldIgnoreAction(slot)
         if filter.hearthstones and HEARTHSTONE_SPELLS[id] then return true end
         if filter.teleports and TELEPORT_SPELLS[id] then return true end
         if filter.consumables and CONSUMABLE_SPELLS[id] then return true end
-        if filter.professions and professionSpells[id] then return true end
+        if filter.professions and (professionSpells[id] or STATIC_PROFESSION_SPELLS[id]) then return true end
         if filter.tracking and TRACKING_SPELLS[id] then return true end
         if filter.petCare and PET_CARE_SPELLS[id] then return true end
     end
@@ -289,6 +314,8 @@ local function ShouldIgnoreAction(slot)
 end
 
 Tracker.ShouldIgnoreAction = ShouldIgnoreAction
+-- The audit builds it too: it runs with the tracker off, when no session started.
+Tracker.BuildProfessionCache = BuildProfessionCache
 
 local function GetActionIdentifier(slot)
     local actionType, id = GetActionInfo(slot)

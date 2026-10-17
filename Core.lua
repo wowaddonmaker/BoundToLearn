@@ -366,6 +366,8 @@ local function OnInitialize()
             BoundToLearn:SongCheck()
         elseif msg == "chartcheck" then
             if ns.Game then ns.Game:ChartCheck() end
+        elseif msg == "auditlist" then
+            if ns.KeybindAudit then ns.KeybindAudit:ListActions() end
         elseif msg == "modelcheck" then
             if ns.PingGameUI then ns.PingGameUI:ModelCheck() end
         elseif msg == "ping" then

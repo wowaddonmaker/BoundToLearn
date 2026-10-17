@@ -322,6 +322,7 @@ function KeybindAudit:Scan(options)
     local mmoMouse = options.mmoMouse
     local uniqueBinds = options.uniqueBinds
     local ShouldIgnoreAction = ns.Tracker and ns.Tracker.ShouldIgnoreAction
+    if ns.Tracker and ns.Tracker.BuildProfessionCache then ns.Tracker.BuildProfessionCache() end
 
     local bars = {}
     local allSlots = {}
@@ -389,6 +390,8 @@ function KeybindAudit:Scan(options)
                             barIndex = i,
                             barLabel = resolvedLabel,
                             actionName = name,
+                            actionType = actionType,
+                            actionId = actionId,
                             icon = icon,
                             keybind = keybind,
                             tier = tier,
@@ -646,4 +649,22 @@ end
 
 function KeybindAudit:GetResults()
     return auditResults
+end
+
+-- Probe (/btl auditlist): every action the last audit counted, with its type
+-- and ID, saved in BoundToLearnDB.auditActions so non-combat actions that
+-- slip past the filters show up all at once.
+function KeybindAudit:ListActions()
+    local results = auditResults
+    if not results then
+        BoundToLearn:Print("Run the Keybind Audit first, then /btl auditlist.")
+        return
+    end
+    local lines = {}
+    for _, s in ipairs(results.allSlots) do
+        lines[#lines + 1] = sformat("%s: %s (%s %s) %s", tostring(s.barLabel), tostring(s.actionName),
+            tostring(s.actionType), tostring(s.actionId), s.keybind or "unbound")
+    end
+    BoundToLearnDB.auditActions = lines
+    BoundToLearn:Print(sformat("Audit counted %d actions; saved for review.", #lines))
 end
