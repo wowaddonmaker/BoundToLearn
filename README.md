@@ -27,6 +27,8 @@ You can modify which type of buttons get tracked for clicking, in case you don't
 - Skyriding abilities (auto-detected via mounted + override bar)
 - Non-combat macros (macros without /cast, /use, or similar combat commands)
 - Buffs (helpful spells cast out of combat, e.g. Arcane Intellect, Fortitude)
+- Tracking (Find Herbs, Find Minerals, Find Treasure, and the Track spells)
+- Pet care (Feed Pet, Tame Beast, Beast Training)
 - Blank action bar slots (always filtered, not toggleable)
 
 ### Practice Game
@@ -42,11 +44,11 @@ A **Stats** button on the track-select screen opens an overview of your play: tr
 
 ### Ping Trainer
 
-Pings are keybinds too, and almost nobody binds them: you open the wheel and click. But in real group content, a fast "attack this" or "watch out" can be the difference between a clean pull and a wipe. The Ping Trainer drills exactly that. Enemies, allies, and hazards appear on screen and you fire the matching ping (attack, assist, or warning) before they expire. Build combos, keep your health bar up, and pick your difficulty. Render targets as full 3D models, race portraits, or simple colored blobs, whichever reads fastest for you.
+Pings are keybinds too, and almost nobody binds them: you open the wheel and click. But in real group content, a fast "attack this" or "watch out" can be the difference between a clean pull and a wipe. The Ping Trainer drills exactly that. Enemies, allies, and hazards appear on screen and you fire the matching ping (attack, assist, or warning) before they expire. Build combos and keep your health bar up: it drains steadily and every hit refills it. Easy starts with one large target at a time, and each difficulty up adds a target and shortens the time. Your grade comes from accuracy, and your best score is kept for each difficulty. Render targets as full 3D models, race portraits, or simple colored blobs, whichever reads fastest for you.
 
 ### Keybind Quiz
 
-Flashcards for your action bars. One of your own abilities flashes on screen and you press its keybind as fast as you can, before the timer runs out. Your action bars are hidden the whole time, so it's pure recall, not reading off the screen. It's the quickest way to find the binds you still hesitate on. Run it timed, where your score is saved, or in practice mode when you just want to drill.
+Flashcards for your action bars. One of your own abilities flashes on screen and you press its keybind as fast as you can, before the timer runs out. Your action bars are hidden the whole time, so it's pure recall, not reading off the screen. It's the quickest way to find the binds you still hesitate on. Run it timed, where your score is saved, or in practice mode when you just want to drill. **Try Again** at the end starts a fresh run in the same mode.
 
 ### Statistics Panel
 
@@ -82,7 +84,7 @@ Scans your action bars and scores your keybinding setup (0-100 with letter grade
 - Choose which bars to include in the audit
 - MMO mouse option: marks number keys (1-12) as reachable instead of penalizing distant keys
 - Skip non-combat macros toggle
-- "Skip this setup next time" option (settings still accessible via Settings button on results)
+- "Skip this setup next time" option (Back at the top left of the results still returns to it)
 
 **What it grades:**
 - **Coverage** - How many of your action bar abilities have keybinds
@@ -90,6 +92,6 @@ Scans your action bars and scores your keybinding setup (0-100 with letter grade
 - **Modifier usage** - Use of Shift/Ctrl/Alt combos to expand your keybinds
 - **Anti-patterns** - Keyboard turning, unbound abilities, and awkward key choices
 
-**Results view** uses a two-column layout: grade, scores, and per-bar breakdown on the left; full-height scrollable recommendations on the right.
+**Results view** uses a two-column layout: grade, scores, and per-bar breakdown on the left; full-height scrollable recommendations on the right, grouped under each action bar. The results update by themselves when you change a keybind or an action bar.
 
-Lists specific recommendations: unbound abilities, distant keybinds, keyboard turning detection, and more.
+Lists specific recommendations: unbound abilities, distant keybinds, keyboard turning detection, and more. Modifier combos are only expected once your abilities outnumber the keys around WASD. The methodology behind every score opens from the link under the title.
