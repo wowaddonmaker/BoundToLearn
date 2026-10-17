@@ -67,14 +67,16 @@ PingGame.CORRECT_PING = CORRECT_PING
 -- prompt. onmyway is intentionally excluded: it is not a target ping.
 local PING_LABEL = { attack = "Attack", assist = "Assist", warning = "Warning" }
 
--- Difficulty scales through time pressure (shorter lifetime + faster spawn cadence) and
--- precision (smaller targets), keeping the on-screen count low and steady, rather than
--- piling on more targets at once. Mirrors how aim trainers scale.
+-- Difficulty follows how aim trainers ramp: the entry tier is one large target at
+-- a time that waits long and is replaced the moment it is hit; each tier above adds
+-- one target on screen and shortens the timeout and the size. A ping asks more than
+-- a click (find the target, read its type, press the right modifier and key), so
+-- the timeouts sit well above a click trainer's. damage scales every health loss.
 local DIFFICULTY_SETTINGS = {
-    Easy    = { spawnInterval = 1.8, targetLifetime = 4.0, maxActive = 3, duration = 30, sizeScale = 1.15 },
-    Normal  = { spawnInterval = 1.4, targetLifetime = 3.0, maxActive = 3, duration = 45, sizeScale = 1.0 },
-    Hard    = { spawnInterval = 1.0, targetLifetime = 2.2, maxActive = 4, duration = 60, sizeScale = 0.88 },
-    Extreme = { spawnInterval = 0.7, targetLifetime = 1.6, maxActive = 4, duration = 60, sizeScale = 0.78 },
+    Easy    = { spawnInterval = 0.6,  targetLifetime = 6.0, maxActive = 1, duration = 30, sizeScale = 1.3,  damage = 0.5 },
+    Normal  = { spawnInterval = 1.2,  targetLifetime = 4.5, maxActive = 2, duration = 45, sizeScale = 1.1,  damage = 0.75 },
+    Hard    = { spawnInterval = 1.0,  targetLifetime = 3.2, maxActive = 3, duration = 60, sizeScale = 0.95, damage = 1.0 },
+    Extreme = { spawnInterval = 0.75, targetLifetime = 2.2, maxActive = 4, duration = 60, sizeScale = 0.82, damage = 1.25 },
 }
 
 PingGame.DIFFICULTIES = { "Easy", "Normal", "Hard", "Extreme" }
@@ -94,6 +96,12 @@ local HEALTH_COMBO_HEAL = 2     -- bonus heal per combo level (capped)
 
 local function GetSettings()
     return DIFFICULTY_SETTINGS[difficulty]
+end
+
+-- A health loss (amount < 0), scaled by the difficulty's damage.
+local function Hurt(amount)
+    local s = GetSettings()
+    health = mmax(0, health + amount * (s and s.damage or 1))
 end
 
 -- Build keybind -> ping action reverse lookup
@@ -290,7 +298,7 @@ function PingGame:OnUpdate(elapsed)
             expired = expired + 1
             score = score + SCORE_EXPIRED
             combo = 0
-            health = mmax(0, health + HEALTH_EXPIRED)
+            Hurt(HEALTH_EXPIRED)
             if ns.PingGameUI then
                 ns.PingGameUI:OnTargetExpired(target)
             end
@@ -303,6 +311,10 @@ function PingGame:OnUpdate(elapsed)
 
     -- Spawn new targets
     spawnAccumulator = spawnAccumulator + elapsed
+    -- Time spent full does not bank up: a freed slot refills once, not in a burst.
+    if #activeTargets >= settings.maxActive then
+        spawnAccumulator = mmin(spawnAccumulator, settings.spawnInterval)
+    end
     if spawnAccumulator >= settings.spawnInterval and #activeTargets < settings.maxActive then
         spawnAccumulator = spawnAccumulator - settings.spawnInterval
         self:SpawnTarget(settings)
@@ -368,7 +380,7 @@ function PingGame:OnPingAction(targetID, pingAction)
                 wrongType = wrongType + 1
                 score = score + SCORE_WRONG_TYPE
                 combo = 0
-                health = mmax(0, health + HEALTH_WRONG_TYPE)
+                Hurt(HEALTH_WRONG_TYPE)
                 if ns.PingGameUI then
                     ns.PingGameUI:OnTargetResult(target, "wrong_type", reactionTime, nil, pingAction)
                 end
@@ -393,7 +405,7 @@ end
 function PingGame:OnPingMiss(pingAction)
     if not isRunning or isPaused then return end
     combo = 0
-    health = mmax(0, health + HEALTH_MISS)
+    Hurt(HEALTH_MISS)
     if ns.PingGameUI then
         ns.PingGameUI:OnMissClick(pingAction)
     end
