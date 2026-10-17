@@ -46,6 +46,15 @@ local MMO_MOUSE_PRIME = {
     ["0"] = true, ["-"] = true, ["="] = true,
 }
 
+-- How many abilities fit on prime keys before modifiers are expected.
+local function CountKeys(set)
+    local n = 0
+    for _ in pairs(set) do n = n + 1 end
+    return n
+end
+local PRIME_KEY_COUNT = CountKeys(PRIME_KEYS)
+local MMO_PRIME_COUNT = CountKeys(MMO_MOUSE_PRIME)
+
 local BAR_MAPPINGS = {
     { key = "main",        label = "Action Bar 1",  bindPrefix = "ACTIONBUTTON",          buttonPrefix = "ActionButton",               startSlot = 1 },
     { key = "bottomLeft",  label = "Action Bar 2",  bindPrefix = "MULTIACTIONBAR1BUTTON", buttonPrefix = "MultiBarBottomLeftButton",   startSlot = 61 },
@@ -321,6 +330,7 @@ function KeybindAudit:Scan(options)
     local totalFilled = 0
     local totalBound = 0
     local totalModified = 0
+    local nearModified = 0   -- modifier combos on a prime or acceptable base key
     local reachSum = 0
     local poorCount = 0
     local skippedMacros = 0
@@ -396,7 +406,10 @@ function KeybindAudit:Scan(options)
                         if keybind then
                             barData.boundCount = barData.boundCount + 1
                             totalBound = totalBound + 1
-                            if hasModifier then totalModified = totalModified + 1 end
+                            if hasModifier then
+                                totalModified = totalModified + 1
+                                if tier ~= "poor" then nearModified = nearModified + 1 end
+                            end
 
                             if tier == "prime" then
                                 reachSum = reachSum + 100
@@ -420,14 +433,23 @@ function KeybindAudit:Scan(options)
     -- Reachability score (30%)
     local reachScore = totalBound > 0 and (reachSum / totalBound) or 0
 
-    -- Modifier usage score (15%)
-    local modRatio = totalBound > 0 and (totalModified / totalBound) or 0
+    -- Modifier usage score (15%). A modifier is only worth reaching for once the
+    -- abilities outnumber the prime keys: before that an unmodified near key is as
+    -- good or better. Expected: every ability past the prime keys sits on a
+    -- modifier combo of a near key (a combo on a far key saves no reach).
+    local primeKeys = PRIME_KEY_COUNT + (mmoMouse and MMO_PRIME_COUNT or 0)
+    local modNeeded = mmax(0, totalBound - primeKeys)
     local modScore
-    if modRatio >= 0.51 then modScore = 100
-    elseif modRatio >= 0.31 then modScore = 80
-    elseif modRatio >= 0.16 then modScore = 60
-    elseif modRatio >= 0.01 then modScore = 40
-    else modScore = 20 end
+    if modNeeded == 0 then
+        modScore = 100
+    else
+        local share = nearModified / modNeeded
+        if share >= 1 then modScore = 100
+        elseif share >= 0.66 then modScore = 80
+        elseif share >= 0.33 then modScore = 60
+        elseif share > 0 then modScore = 40
+        else modScore = 20 end
+    end
 
     -- Anti-pattern score (15%)
     local antiScore = 100
@@ -473,12 +495,13 @@ function KeybindAudit:Scan(options)
         end
     end
 
-    if totalBound >= 6 and totalModified == 0 then
+    if modNeeded > nearModified then
+        local short = modNeeded - nearModified
         tinsert(issues, {
             severity = "low",
             icon = nil,
-            text = "No modifier combos used",
-            detail = "Shift/Ctrl/Alt combos let you triple your available keys without moving your hand.",
+            text = sformat("%d abilities, %d prime keys: put %d more on modifier combos", totalBound, primeKeys, short),
+            detail = "Shift/Ctrl/Alt combos of your near keys reach the extra abilities without moving your hand.",
         })
     end
 
@@ -601,6 +624,9 @@ function KeybindAudit:Scan(options)
             overall = overall,
         },
         scoredGroups = scoredGroups,
+        primeKeys = primeKeys,
+        modNeeded = modNeeded,
+        nearModified = nearModified,
         issues = issues,
         grade = grade,
         gradeColor = gradeColor,

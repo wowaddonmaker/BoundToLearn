@@ -878,8 +878,9 @@ function KeybindAuditUI:CreateMethodologyPage()
         .. "  |cFFDD8844Poor (20)|r: 7-0, -, =, F1-F12\n"
         .. "Modifier combos (Shift-Q, Ctrl-3) inherit their base key's tier.\n\n"
         .. "|cFFFF8A33Modifier Usage (15%)|r\n"
-        .. "Rewards using Shift, Ctrl, and Alt combos to expand your keybind space "
-        .. "without moving your hand. Scored by the ratio of modified binds to total binds.\n\n"
+        .. "Modifiers are expected only once your abilities outnumber your prime keys (22 above, "
+        .. "29 with the MMO mouse option). Past that, scored by how many of the extra abilities sit on "
+        .. "Shift, Ctrl or Alt combos of near keys; a combo on a far key does not count.\n\n"
         .. "|cFFFF8A33Anti-patterns (15%)|r\n"
         .. "Starts at 100 and deducts for common issues:\n"
         .. "  Keyboard turning (A/D bound to turn): -40\n"
@@ -1001,14 +1002,19 @@ local function BuildModifierDetail(results)
     for _, slot in ipairs(results.allSlots) do
         if slot.keybind and slot.hasModifier then modCount = modCount + 1 end
     end
-    local ratio = results.totalBound > 0 and (modCount / results.totalBound * 100) or 0
-    tinsert(lines, sformat("\n%d of %d keybinds use modifiers (%.0f%%).", modCount, results.totalBound, ratio))
-    tinsert(lines, "\n\n|cFFFF8A33Scoring tiers:|r")
-    tinsert(lines, "  51%+ modified: 100 pts")
-    tinsert(lines, "  31-50%: 80 pts")
-    tinsert(lines, "  16-30%: 60 pts")
-    tinsert(lines, "  1-15%: 40 pts")
-    tinsert(lines, "  0%: 20 pts")
+    local needed, near, prime = results.modNeeded or 0, results.nearModified or 0, results.primeKeys or 0
+    tinsert(lines, sformat("\n%d abilities bound, %d prime keys.", results.totalBound, prime))
+    if needed == 0 then
+        tinsert(lines, "Every ability fits on a prime key, so no modifiers are needed yet.")
+    else
+        tinsert(lines, sformat("%d abilities go past your prime keys; %d of them are on modifier combos of near keys.",
+            needed, mmin(near, needed)))
+    end
+    tinsert(lines, sformat("%d keybinds use modifiers in all.", modCount))
+    tinsert(lines, "\n\n|cFFFF8A33Scoring:|r")
+    tinsert(lines, "  Fewer abilities than prime keys: 100 pts")
+    tinsert(lines, "  Otherwise, by how many of the abilities past the prime keys are on modifier combos of near keys:")
+    tinsert(lines, "  all: 100, two thirds: 80, a third: 60, some: 40, none: 20")
     if modCount > 0 then
         tinsert(lines, "\n\n|cFFFF8A33Modified keybinds:|r")
         for _, slot in ipairs(results.allSlots) do
@@ -1017,7 +1023,7 @@ local function BuildModifierDetail(results)
             end
         end
     end
-    tinsert(lines, "\n\n|cFF666666Using Shift, Ctrl, and Alt combos triples your available keybinds without moving your hand. More modifiers means more abilities within easy reach.|r")
+    tinsert(lines, "\n\n|cFF666666A modifier is worth reaching for once your near keys run out: Shift, Ctrl and Alt combos of them reach more abilities without moving your hand, where the next free key would be farther away. A combo on a far key saves no reach and does not count.|r")
     return table.concat(lines, "\n")
 end
 
