@@ -2,6 +2,35 @@
 
 All notable changes to BoundToLearn are documented here.
 
+## [1.2.0] - 2026-10-17
+
+### Added
+- **Keybind Quiz**: Try Again when a quiz ends starts a fresh run in the same mode.
+- **Ping Trainer bests per difficulty**: Your best score is kept for each difficulty, so a high Easy score never stands in for a good Extreme run.
+- **Tracking and Pet care filters**: Find Herbs, Find Minerals, Find Treasure and the Track spells, plus the hunter's Feed Pet, Tame Beast and Beast Training, are skipped by the tracker and the audit. Both are on by default in Options.
+
+### Changed
+- **Ping Trainer difficulty**: Easy is one large target at a time with six seconds to ping it, and each step up adds a target and shortens the time. Health drains steadily and every hit refills it, so standing still loses the round while steady play keeps you up.
+- **Ping Trainer grade**: Comes from accuracy (S at 95%, A at 90%, B at 80%, C at 70%). Expired targets and pings into empty space count as misses, and a round that runs out of health is an F.
+- **Ping Trainer start screen**: Shows the backdrop of the expansion you picked.
+- **Keybind Audit modifiers**: Modifier combos are expected only once your abilities outnumber the keys around WASD, so a character with a dozen abilities is no longer told to use them.
+- **Keybind Audit recommendations**: Grouped under each action bar, with General for the rest.
+- **Keybind Audit navigation**: A Back button at the top left replaces the Settings, Scorecard and Back buttons. The results update by themselves when you change a keybind or an action bar, so Refresh is gone. The methodology opens from a link under the title.
+- **Keybind Quiz piles**: The correct and wrong piles spread out more.
+- **Scroll bars**: The game's own, shown only when there is something to scroll.
+
+### Fixed
+- **Icon Game**: Two notes in the same screen column no longer fall on top of each other.
+- **Ping Trainer**: Start lights up as soon as the last ping is bound from its own key bar.
+- **Ping Trainer**: 3D targets no longer stay invisible; a target whose model does not load shows its portrait.
+- **Ping Trainer**: Target timer bars no longer overlap the health bar.
+- **Ping Trainer**: Pings and texts from one round no longer show up in the next.
+- **Windows**: Names in the world no longer show through window backgrounds.
+- **Keybind Audit**: Skips the Hearthstone and profession spells such as First Aid, even with the tracker off.
+- **Keybind Audit**: Says "No major issues found" when the score is below 100.
+
+---
+
 ## [1.1.0] - 2026-10-15
 
 ### Added
