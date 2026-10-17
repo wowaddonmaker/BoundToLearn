@@ -565,9 +565,9 @@ function Game:Start()
     -- Game started silently; UI shows everything needed
 end
 
--- The track and the falling notes both start on GO. Notes due sooner than their fall
--- time are left out of the chart (PrepChart), so nothing falls during the countdown
--- and nothing pops in partway down.
+-- The track and the first falling note both start on GO (PrepChart picks and times
+-- that note), so nothing falls during the countdown and nothing pops in partway
+-- down.
 local roundToken = 0
 function Game:CountIn(songKey, difficulty)
     roundToken = roundToken + 1
@@ -1071,9 +1071,24 @@ function Game:PrepChart(settings)
             end
         end
     end
-    -- The highway starts with the track on GO, so a note due sooner than its fall
-    -- time could only pop in partway down: it is left out, and the score budget
-    -- follows the notes that are left.
+    -- The track and the highway start together on GO, and the first note starts
+    -- falling right then: the note whose beat sits nearest one fall time after GO,
+    -- timed from GO to its beat. Over every chart its speed is within 10% of the
+    -- rest on a typical track and 38% at worst. Any other note due sooner than its
+    -- fall time could only pop in partway down, so it is left out, and the score
+    -- budget follows the notes that are left.
+    local first, firstOff
+    for i = 1, #notes do
+        local cn = notes[i]
+        if cn.t > 0 then
+            local off = math.abs(math.log(cn.fallTime / cn.t))
+            if not firstOff or off < firstOff then first, firstOff = cn, off end
+        end
+    end
+    if first then
+        first.fallTime = first.t
+        first.spawnT = 0
+    end
     local kept = 0
     for i = 1, #notes do
         if notes[i].spawnT >= 0 then
