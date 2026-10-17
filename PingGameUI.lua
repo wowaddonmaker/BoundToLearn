@@ -28,6 +28,8 @@ local GAME_WIDTH  = 600
 local GAME_HEIGHT = 400
 local TARGET_SIZE = 44
 local SPAWN_MARGIN = 40
+local MODEL_RETRY = 0.35     -- seconds before a blank 3D target asks for its creature again
+local MODEL_GIVE_UP = 0.9    -- seconds before a still-blank 3D target shows its portrait
 
 -- Target visuals
 local TARGET_COLORS = {
@@ -68,7 +70,6 @@ local ALLIANCE_NPC_IDS = {
     5595,   -- Ironforge Guard (Dwarf)
     4262,   -- Darnassus Sentinel (Night Elf)
     5564,   -- Gnomeregan Commando (Gnome)
-    16549,  -- Draenei Vindicator
     44914,  -- Gilnean Survivor (Worgen)
 }
 local HORDE_NPC_IDS = {
@@ -570,6 +571,14 @@ function PingGameUI:CreateUI()
     mainFrame:SetPoint("CENTER")
     mainFrame:SetFrameStrata("HIGH")
     ns.Theme.StylePanel(mainFrame)
+    -- The picked expansion's backdrop behind the start screen (the round has its
+    -- own in the arena), dimmed so the labels and panels stay readable.
+    local backdrop = mainFrame:CreateTexture(nil, "ARTWORK")
+    backdrop:SetPoint("TOPLEFT", 7, -7)
+    backdrop:SetPoint("BOTTOMRIGHT", -7, 7)
+    backdrop:SetAlpha(0.85)
+    backdrop:SetVertexColor(0.7, 0.7, 0.72)
+    mainFrame.backdropTex = backdrop
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
     mainFrame:RegisterForDrag("LeftButton")
@@ -1413,7 +1422,20 @@ function PingGameUI:CreateResultsScreen()
     end)
 end
 
+-- The window backdrop follows the Expansion pick. With Random on, one pick is
+-- kept per visit (force = a new visit) so it does not change on every click.
+function PingGameUI:UpdateStartBackdrop(force)
+    local tex = mainFrame and mainFrame.backdropTex
+    if not tex then return end
+    local pt = GetPingTrainerDB()
+    if pt and pt.randomBG and tex.bgID and not force then return end
+    local bg = GetSelectedBackground()
+    ApplyBackground(tex, bg)
+    tex.bgID = bg and bg.id
+end
+
 function PingGameUI:UpdateBackgroundButtons()
+    self:UpdateStartBackdrop()
     if not startFrame or not startFrame.bgBtns then return end
     local pt = GetPingTrainerDB()
     local selectedID = pt and pt.background or "classic"
@@ -1551,6 +1573,88 @@ local function GetRandomRaceAtlas(isEnemy)
     return sformat("raceicon128-%s-%s", raceInfo.clientFileString, gender)
 end
 
+-- A target's portrait (race icon, or a hazard icon) with its colored ring:
+-- the portrait style, and the stand-in when a 3D model does not load.
+local function ShowTargetPortrait(frame, targetType)
+    if targetType == TARGET_HAZARD then
+        frame.icon:SetTexture(HAZARD_ICONS[math.random(#HAZARD_ICONS)])
+    else
+        local atlas = GetRandomRaceAtlas(targetType == TARGET_ENEMY)
+        if not atlas then return end
+        frame.icon:SetAtlas(atlas)
+    end
+    frame.icon:SetTexCoord(0, 1, 0, 1)
+    frame.icon:Show()
+    frame.ring:Show()
+end
+
+-- Every target NPC asked for once while the start screen is up, so a round's
+-- models come from the client's cache instead of a first, blank, ask.
+local warmModel
+function PingGameUI:WarmTargetModels()
+    if not mainFrame then return end
+    if not warmModel then
+        warmModel = CreateFrame("PlayerModel", nil, mainFrame)
+        warmModel:SetSize(1, 1)
+        warmModel:SetPoint("BOTTOMLEFT")
+        warmModel:SetAlpha(0)
+    end
+    warmModel:Show()
+    local ids = {}
+    for _, list in ipairs({ ALLIANCE_NPC_IDS, HORDE_NPC_IDS }) do
+        for _, id in ipairs(list) do ids[#ids + 1] = id end
+    end
+    for i, id in ipairs(ids) do
+        C_Timer.After(i * 0.1, function()
+            if warmModel:IsVisible() then warmModel:SetCreature(id) end
+        end)
+    end
+end
+
+-- Probe (/btl modelcheck): asks for each target NPC on its own, records
+-- whether and when its model loaded (first ask or the retry) and its model
+-- file. Printed, and saved in BoundToLearnDB.modelReport.
+function PingGameUI:ModelCheck()
+    local ids = {}
+    for _, list in ipairs({ ALLIANCE_NPC_IDS, HORDE_NPC_IDS }) do
+        for _, id in ipairs(list) do ids[#ids + 1] = id end
+    end
+    local probe = CreateFrame("PlayerModel", nil, UIParent)
+    probe:SetSize(64, 64)
+    probe:SetPoint("BOTTOMLEFT")
+    probe:SetAlpha(0.01)
+    probe:Show()
+    local lines = {}
+    Utils.Print(sformat("Model check: %d NPCs, about %d seconds.", #ids, #ids * 2))
+    local i = 0
+    local function nextOne()
+        i = i + 1
+        local id = ids[i]
+        if not id then
+            probe:Hide()
+            lines[#lines + 1] = sformat("Model check done on %s.", Utils.IS_FOREVER and "Forever" or "retail")
+            BoundToLearnDB.modelReport = lines
+            for _, line in ipairs(lines) do Utils.Print(line) end
+            return
+        end
+        local start, loadedAt, ask = GetTime(), nil, 1
+        probe:ClearModel()
+        probe:SetScript("OnModelLoaded", function()
+            if not loadedAt then loadedAt = sformat("%.2fs on ask %d", GetTime() - start, ask) end
+        end)
+        probe:SetCreature(id)
+        C_Timer.After(0.6, function()
+            if not loadedAt then ask = 2; probe:SetCreature(id) end
+        end)
+        C_Timer.After(2, function()
+            local file = probe.GetModelFileID and probe:GetModelFileID()
+            lines[#lines + 1] = sformat("%d: %s, model file %s", id, loadedAt and ("loaded after " .. loadedAt) or "never loaded", tostring(file))
+            nextOne()
+        end)
+    end
+    nextOne()
+end
+
 -- Reflect the chosen icon style in the three start-screen previews, live.
 function PingGameUI:RefreshShowcase()
     if not startFrame or not startFrame.showcaseCells then return end
@@ -1612,6 +1716,8 @@ function PingGameUI:ShowStartScreen()
     self:UpdateDiffButtons()
     self:UpdateStyleButtons()
     self:UpdateKeybindDisplay()
+    self:UpdateStartBackdrop(true)
+    self:WarmTargetModels()
     self:UpdateBackgroundButtons()
     self:UpdateSoundButtons()
     self:UpdateStartButton()
@@ -1761,7 +1867,9 @@ function PingGameUI:OnTargetSpawned(target)
         local halfBtn = TARGET_SIZE * sizeScale / 2
         marginL = halfModelW
         marginR = halfModelW
-        marginB = halfBtn + 10
+        -- The timer bar hangs 18 below the target (4 tall): keep it 4 above
+        -- the arena floor, clear of the round's health bar under the arena.
+        marginB = halfBtn + 18 + 4
         marginT = modelH - halfBtn - 10
     else
         marginL = SPAWN_MARGIN
@@ -1876,8 +1984,24 @@ function PingGameUI:OnTargetSpawned(target)
         frame.model:SetCamDistanceScale(1.4)
         frame.model:SetPosition(0, 0, -0.5)
         frame.model:SetCreature(npcID)
+        -- A creature the client has not cached comes back blank on the first
+        -- ask, and one its server lacks never loads: ask once more, then show
+        -- the target's portrait so it is never invisible.
+        local thisTarget = target.id
+        frame.modelPending = true
+        C_Timer.After(MODEL_RETRY, function()
+            if frame.targetID == thisTarget and frame.modelPending then frame.model:SetCreature(npcID) end
+        end)
+        C_Timer.After(MODEL_GIVE_UP, function()
+            if frame.targetID == thisTarget and frame.modelPending then
+                frame.modelPending = false
+                frame.model:Hide()
+                ShowTargetPortrait(frame, targetType)
+            end
+        end)
         -- Defer animation and facing until model loads
         frame.model:SetScript("OnModelLoaded", function(self)
+            frame.modelPending = false
             self:SetFacing(facing)
             if targetType == TARGET_ENEMY then
                 -- Try combat stance - guards are melee so 26 (ReadyUnarmed) should work
