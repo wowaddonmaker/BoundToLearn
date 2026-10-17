@@ -417,51 +417,24 @@ function Game:DiscoverCompetitiveSlots()
     end
 end
 
-local musicFadeTicker
 local gameMusicTarget
-
-local function CancelMusicFade()
-    if musicFadeTicker then
-        musicFadeTicker:Cancel()
-        musicFadeTicker = nil
-    end
-end
-
--- Ramp Sound_MusicVolume from `from` to `to` over `dur` seconds, then call onDone.
--- Used to fade the round's track in from silence so a cut track is not abrupt.
-local function FadeMusicVolume(from, to, dur, onDone)
-    CancelMusicFade()
-    local steps = mmax(1, mfloor(dur / 0.05))
-    local i = 0
-    musicFadeTicker = C_Timer.NewTicker(0.05, function(self)
-        i = i + 1
-        if i >= steps then
-            SetCVar("Sound_MusicVolume", to)
-            self:Cancel()
-            musicFadeTicker = nil
-            if onDone then onDone() end
-        else
-            SetCVar("Sound_MusicVolume", from + (to - from) * (i / steps))
-        end
-    end, steps)
-end
 
 local function MuteGameAudio()
     savedAmbienceVol = tonumber(GetCVar("Sound_AmbienceVolume")) or 0.5
     SetCVar("Sound_AmbienceVolume", 0)
-    -- Silence the music channel too, so the zone track cannot leak in during the
-    -- countdown and lead-in before BeginGameMusic takes the channel. Persisted so a
-    -- crash before the music starts still restores it on next load.
+    -- Silence the music channel too: the round's track starts on it unheard during
+    -- the countdown (StartGameMusicMuted). Persisted so a crash before GO still
+    -- restores it on next load.
     savedMusicVol = tonumber(GetCVar("Sound_MusicVolume")) or 0.4
     BoundToLearn.db.pendingMusicRestore = savedMusicVol
     SetCVar("Sound_MusicVolume", 0)
 end
 
--- Play the round's track, fading up from silence so the start is not abrupt. The
--- target volume is persisted so a crash mid-fade still restores it on next load
--- (Core clears pendingMusicRestore once applied).
-local function BeginGameMusic(track)
-    -- Fade up to the player's saved level (the channel is muted by MuteGameAudio).
+-- Start the round's track on the muted channel, so its lead-in plays unheard during
+-- the countdown (the client cannot seek into a track). The target volume is
+-- persisted so a crash before GO still restores it on next load (Core clears
+-- pendingMusicRestore once applied).
+local function StartGameMusicMuted(track)
     local target = savedMusicVol or tonumber(GetCVar("Sound_MusicVolume")) or 0.4
     if target < 0.05 then target = 0.4 end
     gameMusicTarget = target
@@ -469,13 +442,18 @@ local function BeginGameMusic(track)
     SetCVar("Sound_MusicVolume", 0)
     PlayMusic(track)
     isPlayingGameMusic = true
-    FadeMusicVolume(0, target, 1.2)
+end
+
+-- GO: the track is past its lead-in and comes in at full volume at once.
+local function UnmuteGameMusic()
+    if isPlayingGameMusic and gameMusicTarget then
+        SetCVar("Sound_MusicVolume", gameMusicTarget)
+    end
 end
 
 local function RestoreGameAudio()
     if savedAmbienceVol then SetCVar("Sound_AmbienceVolume", savedAmbienceVol) end
     savedAmbienceVol = nil
-    CancelMusicFade()
     if isPlayingGameMusic then
         isPlayingGameMusic = false
         -- Do not stop the track: the round-over screen keeps it playing. Just
@@ -565,14 +543,22 @@ function Game:Start()
     -- Game started silently; UI shows everything needed
 end
 
--- The track and the first falling note both start on GO (PrepChart picks and times
--- that note), so nothing falls during the countdown and nothing pops in partway
--- down.
+-- Many tracks open on a quiet lead-in (Fire Festival: 4 s, 15 dB under the rest).
+-- The track starts muted during the countdown, timed so its lead-in (measured per
+-- track, SongData.LeadIn) is over by GO, and comes in at full volume on GO. A lead-in
+-- over 3 s runs the countdown longer, up to MAX_COUNTDOWN; past that, GO lands
+-- MAX_COUNTDOWN into the track. The first falling note also starts on GO (PrepChart
+-- picks and times it from goOffset, the track's position at GO), so nothing falls
+-- during the countdown and nothing pops in partway down.
+local MAX_COUNTDOWN = 5
 local roundToken = 0
 function Game:CountIn(songKey, difficulty)
     roundToken = roundToken + 1
     local token = roundToken
+    local function Live() return isRunning and token == roundToken end
+    self.goOffset = 0
     if not ns.GameUI then
+        gameStartTime = GetTime()
         gameFrame:Show()
         inputFrame:Show()
         return
@@ -583,12 +569,29 @@ function Game:CountIn(songKey, difficulty)
         local song = ns.SongData and ns.SongData.Get(songKey)
         track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
     end
-    ns.GameUI:ShowCountdown(3, function()
-        if not isRunning or token ~= roundToken then return end
-        gameStartTime = GetTime()
+    local leadIn = track and mmin(ns.SongData.LeadIn(songKey), MAX_COUNTDOWN) or 0
+    local countdown = mmax(3, mmin(MAX_COUNTDOWN, math.ceil(leadIn)))
+
+    local musicAt
+    local function StartMusic()
+        if musicAt or not track then return end
+        StartGameMusicMuted(track)
+        musicAt = GetTime()
+    end
+    if leadIn > 0 then
+        C_Timer.After(countdown - leadIn, function()
+            if Live() then StartMusic() end
+        end)
+    end
+    ns.GameUI:ShowCountdown(countdown, function()
+        if not Live() then return end
+        StartMusic()   -- a track with no lead-in starts here, on GO
+        local now = GetTime()
+        self.goOffset = musicAt and (now - musicAt) or 0
+        gameStartTime = now - self.goOffset
+        UnmuteGameMusic()
         gameFrame:Show()
         inputFrame:Show()
-        if track then BeginGameMusic(track) end
     end)
 end
 
@@ -779,6 +782,7 @@ function Game:Resume()
             end
         end
         gameStartTime = now - gameElapsed
+        UnmuteGameMusic()   -- a pause during the countdown left the track muted
         gameFrame:Show()
         inputFrame:Show()
     end
@@ -1071,27 +1075,28 @@ function Game:PrepChart(settings)
             end
         end
     end
-    -- The track and the highway start together on GO, and the first note starts
-    -- falling right then: the note whose beat sits nearest one fall time after GO,
-    -- timed from GO to its beat. Over every chart its speed is within 10% of the
-    -- rest on a typical track and 38% at worst. Any other note due sooner than its
-    -- fall time could only pop in partway down, so it is left out, and the score
-    -- budget follows the notes that are left.
+    -- The highway starts on GO, `go` seconds into the track (its lead-in, see
+    -- CountIn), and the first note starts falling right then: the note whose beat
+    -- sits nearest one fall time after GO, timed from GO to its beat. Over every
+    -- chart its speed is within 10% of the rest on a typical track and 38% at worst.
+    -- Any other note due sooner than its fall time after GO could only pop in partway
+    -- down, so it is left out, and the score budget follows the notes that are left.
+    local go = self.goOffset or 0
     local first, firstOff
     for i = 1, #notes do
         local cn = notes[i]
-        if cn.t > 0 then
-            local off = math.abs(math.log(cn.fallTime / cn.t))
+        if cn.t > go then
+            local off = math.abs(math.log(cn.fallTime / (cn.t - go)))
             if not firstOff or off < firstOff then first, firstOff = cn, off end
         end
     end
     if first then
-        first.fallTime = first.t
-        first.spawnT = 0
+        first.fallTime = first.t - go
+        first.spawnT = go
     end
     local kept = 0
     for i = 1, #notes do
-        if notes[i].spawnT >= 0 then
+        if notes[i].spawnT >= go then
             kept = kept + 1
             notes[kept] = notes[i]
         end
