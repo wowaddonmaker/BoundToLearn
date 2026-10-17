@@ -2902,21 +2902,49 @@ function GameUI:CreateHealthBar()
     self.healthFrame = hf
 end
 
+-- Width of a HUD readout's widest round text, measured in that readout's own font.
+local function HudTextWidth(hf, fs, sample)
+    local m = hf.measureFS
+    if not m then
+        m = hf:CreateFontString(nil, "OVERLAY")
+        m:Hide()
+        hf.measureFS = m
+    end
+    m:SetFont(fs:GetFont())
+    m:SetText(sample)
+    return m:GetStringWidth()
+end
+
+-- Everything on the bar but the life gauge, at its widest: the LIFE label, the
+-- difficulty, a 3-digit combo, a 5-digit score, the timer, Stop, and Pause when
+-- it shows (Practice only), with the gaps between them.
+local function HudFixedWidth(hf)
+    local w = 44 + 16 + HudTextWidth(hf, hf.diffFS, "EXTREME") + 16
+        + HudTextWidth(hf, hf.comboFS, "999 Combo") + 14
+        + HudTextWidth(hf, hf.scoreFS, "99999") + 16
+        + HudTextWidth(hf, hf.timerFS, "9:59") + 12
+        + hf.stopBtn:GetWidth() + 8
+    if hf.pauseBtn:IsShown() then w = w + hf.pauseBtn:GetWidth() + 4 end
+    return w
+end
+
 -- Sit the health bar just above the note start line, so notes appear to fall out from
 -- under it. screenY is the shared start line in screen pixels (from PrepChart).
 -- spanLeft/spanRight (screen pixels) are the included horizontal action bars:
--- the bar takes their full width, centered on them, and the life gauge takes
--- up the slack. HUD_FIXED_W is everything on the bar but the gauge.
-local HUD_FIXED_W, HUD_MIN_GAUGE = 472, 60
+-- the bar takes their full width, centered on them (wider only when the readouts
+-- and a GAUGE_MIN gauge need it), and the life gauge takes the room the readouts
+-- leave, up to GAUGE_MAX.
+local GAUGE_MIN, GAUGE_MAX = 160, 280
 function GameUI:PlaceHealthBarAtLine(screenY, spanLeft, spanRight)
     local hf = self.healthFrame
     if not hf or not screenY then return end
     local scale = hf:GetEffectiveScale()
     hf:ClearAllPoints()
     if spanLeft then
-        local width = mmax(HUD_FIXED_W + HUD_MIN_GAUGE, (spanRight - spanLeft) / scale)
+        local fixed = HudFixedWidth(hf)
+        local width = mmax(fixed + GAUGE_MIN, (spanRight - spanLeft) / scale)
         hf:SetWidth(width)
-        hf.lifeBar:SetWidth(width - HUD_FIXED_W)
+        hf.lifeBar:SetWidth(mmin(GAUGE_MAX, width - fixed))
         hf:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", (spanLeft + spanRight) / 2 / scale, (screenY + 6) / scale)
     else
         hf:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, (screenY + 6) / scale)
