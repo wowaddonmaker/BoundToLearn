@@ -4,6 +4,7 @@ local Game = {}
 ns.Game = Game
 
 local Utils    = ns.Utils
+local sformat  = Utils.sformat
 local GetTime  = Utils.GetTime
 local tinsert  = Utils.tinsert
 local tremove  = Utils.tremove
@@ -1075,6 +1076,18 @@ function Game:PrepChart(settings)
         cn.fallTime = ft or defaultFT
         cn.spawnT = cn.t - cn.fallTime
     end
+    if self:SeparateColumns(notes, settings, lineY) then
+        for i = 1, #notes do
+            local cn = notes[i]
+            local btn = cn.slotInfo and cn.slotInfo.button
+            local cy
+            if btn then cy = select(2, btn:GetCenter()) end
+            if cy then
+                cn.fallTime = mmax(0.2, (lineY - cy * btn:GetEffectiveScale()) / fallSpeed)
+                cn.spawnT = cn.t - cn.fallTime
+            end
+        end
+    end
     tsort(notes, bySpawnT)
     self.chartCursor = 1
     return true
@@ -1120,6 +1133,145 @@ function Game:AssignChartBinds(notes, diff)
         note.slotInfo = chosen or assignPool[self:ChartRandInt(nP)]
         prev = note
     end
+end
+
+-- Two notes in one screen column (bars stacked so their buttons line up) fall
+-- the same path at the same speed. Started closer than a note's height apart,
+-- one covers the other all the way down. Such a note moves to the nearest bind
+-- by ease whose column is clear at that moment, keeping the no-repeat and
+-- rapid-run modifier rules. Deterministic for a given bar layout. Returns
+-- whether a note moved (its fall time then changes with its button) and how
+-- many notes started inside another; countOnly counts without moving.
+local COLUMN_MARGIN = 6   -- screen px of clear air between two notes in one column
+local columnOrder, columnRank, columnGeo = {}, {}, {}
+local function byChartTime(a, b) return a.t < b.t end
+function Game:SeparateColumns(notes, settings, lineY, countOnly)
+    local speed = settings.fallSpeed
+    local noteW = ((ns.GameUI and ns.GameUI.NOTE_SIZE) or 40) * UIParent:GetEffectiveScale()
+    local minGap = (noteW + COLUMN_MARGIN) / speed
+    wipe(columnGeo)
+    local maxFT = 0
+    for i = 1, #availableSlots do
+        local s = availableSlots[i]
+        local btn = s.button
+        local cx, cy
+        if btn then cx, cy = btn:GetCenter() end
+        if cx and cy then
+            local bs = btn:GetEffectiveScale()
+            local ft = mmax(0.2, (lineY - cy * bs) / speed)
+            columnGeo[s.slot] = { x = cx * bs, ft = ft }
+            if ft > maxFT then maxFT = ft end
+        end
+    end
+    wipe(assignEase)
+    for i = 1, #availableSlots do assignEase[i] = availableSlots[i] end
+    tsort(assignEase, byEase)
+    wipe(columnRank)
+    for i = 1, #assignEase do columnRank[assignEase[i].slot] = i end
+    wipe(columnOrder)
+    for i = 1, #notes do columnOrder[i] = notes[i] end
+    tsort(columnOrder, byChartTime)
+
+    local moved, clashes = false, 0
+    for i = 1, #columnOrder do
+        local n = columnOrder[i]
+        -- Clear: no earlier note in the same column starts within minGap of it.
+        local function clear(slotInfo)
+            local g = columnGeo[slotInfo.slot]
+            if not g then return true end
+            local start = n.t - g.ft
+            for k = i - 1, 1, -1 do
+                local o = columnOrder[k]
+                if n.t - o.t > maxFT + minGap then break end
+                local og = columnGeo[o.slotInfo.slot]
+                if og and mabs(og.x - g.x) < noteW and mabs((o.t - og.ft) - start) < minGap then
+                    return false
+                end
+            end
+            return true
+        end
+        if n.slotInfo and not clear(n.slotInfo) then
+            clashes = clashes + 1
+        end
+        if not countOnly and n.slotInfo and not clear(n.slotInfo) then
+            local prev, nxt = columnOrder[i - 1], columnOrder[i + 1]
+            local function fits(cand)
+                if not columnGeo[cand.slot] then return false end
+                for _, nb in ipairs({ prev, nxt }) do
+                    if nb and nb.slotInfo then
+                        if cand.slot == nb.slotInfo.slot then return false end
+                        if mabs(n.t - nb.t) < RAPID_GAP and not modCompatible(cand.mods or "", nb.slotInfo.mods or "") then
+                            return false
+                        end
+                    end
+                end
+                return clear(cand)
+            end
+            local r0 = columnRank[n.slotInfo.slot] or 1
+            for d = 1, #assignEase do
+                local cand = assignEase[r0 - d]
+                if not (cand and fits(cand)) then cand = assignEase[r0 + d] end
+                if cand and fits(cand) then
+                    n.slotInfo = cand
+                    moved = true
+                    break
+                end
+            end
+        end
+    end
+    return moved, clashes
+end
+
+-- Probe (/btl chartcheck): builds every track's chart on every difficulty
+-- against the live bars (no round starts, nothing shows) and counts notes that
+-- start inside another note in one screen column, before and after
+-- SeparateColumns. Printed, and saved in BoundToLearnDB.chartReport.
+function Game:ChartCheck()
+    if self:IsRunning() then
+        Utils.Print("Chart check runs between rounds.")
+        return
+    end
+    self:DiscoverSlots()
+    local lines = {}
+    if #availableSlots == 0 then
+        lines[1] = "Chart check: no bars picked for the game."
+    else
+        local savedDuration, before = gameDuration, {}
+        local songs = ns.SongData.songs
+        for _, diff in ipairs({ "Easy", "Medium", "Hard", "Extreme" }) do
+            local preset = DIFFICULTY_PRESETS[diff]
+            local lineY = self:ComputeNoteLine(preset)
+            local charts, total, was, left, movedNotes, worst = 0, 0, 0, 0, 0, {}
+            for _, song in ipairs(lineY and songs or {}) do
+                self:SeedChart(song.key, diff)
+                gameDuration = ns.SongData.PlayLength(song)
+                if self:BuildChart(song.key, diff) then
+                    local notes = self.chartNotes
+                    for i = 1, #notes do before[i] = notes[i].slotInfo end
+                    local _, b = self:SeparateColumns(notes, preset, lineY, true)
+                    self:SeparateColumns(notes, preset, lineY)
+                    local _, a = self:SeparateColumns(notes, preset, lineY, true)
+                    for i = 1, #notes do
+                        if notes[i].slotInfo ~= before[i] then movedNotes = movedNotes + 1 end
+                    end
+                    charts, total, was, left = charts + 1, total + #notes, was + b, left + a
+                    if a > 0 then worst[#worst + 1] = sformat("%s %d", song.key, a) end
+                    if song.key == BoundToLearn.db.game.songKey then
+                        lines[#lines + 1] = sformat("%s on %s (last played): %d of %d notes overlapped, %d after",
+                            song.title, diff, b, #notes, a)
+                    end
+                end
+            end
+            lines[#lines + 1] = sformat("%s: %d charts, %d notes; overlapping in one column %d before, %d after; %d notes moved%s",
+                diff, charts, total, was, left, movedNotes,
+                #worst > 0 and (". Still overlapping: " .. table.concat(worst, ", ")) or "")
+        end
+        gameDuration = savedDuration
+        self.chartNotes, self.chartCursor, self.chartPrepped = nil, 1, nil
+        lines[#lines + 1] = sformat("Layout: %d binds on the picked bars.", #availableSlots)
+    end
+    BoundToLearnDB.chartReport = lines
+    for _, line in ipairs(lines) do Utils.Print(line) end
 end
 
 -- Money-score calibration: a flawless run should land at SCORE_CAP. Spread the cap

@@ -362,6 +362,8 @@ local function OnInitialize()
             BoundToLearn:ShowWelcome()
         elseif msg == "songcheck" then
             BoundToLearn:SongCheck()
+        elseif msg == "chartcheck" then
+            if ns.Game then ns.Game:ChartCheck() end
         elseif msg == "ping" then
             if ns.PingGameUI then ns.PingGameUI:Toggle() end
         elseif msg == "hide" then

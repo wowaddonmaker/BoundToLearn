@@ -45,6 +45,7 @@ local projectilePool = {}
 local NOTE_POOL_SIZE = 30
 local RESULT_POOL_SIZE = 10
 local NOTE_SIZE = 40
+GameUI.NOTE_SIZE = NOTE_SIZE   -- Game:SeparateColumns keeps notes in one column this far apart
 local ICON_CROP = 0.07
 local COMP_BTN_SIZE = 48
 local COMP_BTN_GAP = 6
