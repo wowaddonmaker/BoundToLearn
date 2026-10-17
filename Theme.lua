@@ -315,6 +315,11 @@ local function CreateWindowArt(frame)
     bg:SetVertTile(true)
     bg:SetPoint("TOPLEFT", DIALOG_BG_INSET, -DIALOG_BG_INSET)
     bg:SetPoint("BOTTOMRIGHT", -DIALOG_BG_INSET, DIALOG_BG_INSET)
+    -- The dialog background is see-through: names and nameplates in the world
+    -- behind a window showed through it and ran into its text. Black under it.
+    local under = art:CreateTexture(nil, "BACKGROUND", nil, -6)
+    under:SetColorTexture(0, 0, 0, 1)
+    under:SetAllPoints(bg)
     return art
 end
 

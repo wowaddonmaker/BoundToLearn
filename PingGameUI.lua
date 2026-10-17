@@ -579,6 +579,15 @@ function PingGameUI:CreateUI()
         end
     end)
     mainFrame:SetScript("OnDragStop", mainFrame.StopMovingOrSizing)
+    -- A ping bound anywhere (this window or the client's Key Bindings) updates
+    -- the key list and the Start button while the window is open.
+    mainFrame:RegisterEvent("UPDATE_BINDINGS")
+    mainFrame:SetScript("OnEvent", function(self, event)
+        if event == "UPDATE_BINDINGS" and self:IsShown() and startFrame and startFrame:IsShown() then
+            PingGameUI:UpdateKeybindDisplay()
+            PingGameUI:UpdateStartButton()
+        end
+    end)
     mainFrame:Hide()
     mainFrame:SetScript("OnHide", function()
         -- Closing the window ends a round still in play (or paused).
@@ -1316,16 +1325,19 @@ function PingGameUI:CreateStartScreen()
             if IsControlKeyDown() then fullKey = fullKey .. "CTRL-" end
             if IsShiftKeyDown() then fullKey = fullKey .. "SHIFT-" end
             fullKey = fullKey .. key
-            SetBinding(fullKey, self.bindingName)
-            SaveBindings(GetCurrentBindingSet())
+            if SetBinding(fullKey, self.bindingName) then
+                SaveBindings(GetCurrentBindingSet())
+            end
             self:EnableKeyboard(false)
-            self.keyText:SetText(fullKey)
-            self.keyText:SetTextColor(0.85, 0.85, 0.85)
             ns.Theme.SetFillColor(self, ns.Theme.C.SECTION_FILL)
             bindingInProgress = nil
             if ns.PingGame and ns.PingGame.HasPingKeybinds then
                 ns.PingGame:Initialize()
             end
+            -- Show what the client now holds (not the key pressed), and let
+            -- Start light up as soon as the last ping is bound.
+            PingGameUI:UpdateKeybindDisplay()
+            PingGameUI:UpdateStartButton()
         end)
 
         bindBtn:SetScript("OnEnter", function(self)
