@@ -606,6 +606,7 @@ function GameUI:BuildModifierDropdown()
 
     if not modifierDropdown then
         modifierDropdown = CreateFrame("Frame", nil, UIParent)
+        modifierDropdown:Hide()
         Theme.StylePanel(modifierDropdown, 0.97)
         modifierDropdown:SetFrameStrata("FULLSCREEN_DIALOG")
         modifierDropdown:SetFrameLevel(100)
@@ -3969,20 +3970,22 @@ function GameUI:UpdateScoreDisplay(currentScore, currentCombo, currentMultiplier
     end
 end
 
-local countdownCancelFlag = false
+-- Bumped by every countdown and every cancel, so callbacks of a countdown that was
+-- cancelled (or replaced by a quick restart) never act on the next one.
+local countdownToken = 0
 
--- Drive Blizzard's TimerTracker so the countdown shows the big fiery numerals from the
--- default UI (BG/arena starts, /pull). There's no public API to trigger it solo, so we
--- call the event handler directly, guarded: if anything is missing on this client the
--- pcall fails and ShowCountdown falls back to the in-house numeral.
-function GameUI:TryNativeCountdown(seconds)
+-- The client's countdown ends on its own GO sound (kit UI_COUNTDOWN_FINISHED, file
+-- 567438): a 4 s musical sting that ran over the opening of the round's track. The
+-- timer is released this long before its last number ends, so the sting never plays.
+local NATIVE_RELEASE_EARLY = 0.2
+
+-- Release the client's countdown timers: all of them, or only those of timerType.
+local function FreeNativeTimers(timerType)
     local tt = _G.TimerTracker
-    local st = Enum and Enum.StartTimerType
-    local timerType = st and (st.PlayerCountdown or st.PvPBeginTimer)
-    if not tt or not timerType then return false end
-    return pcall(function()
-        if tt.timerList then
-            for _, timer in pairs(tt.timerList) do
+    if not (tt and tt.timerList) then return end
+    pcall(function()
+        for _, timer in pairs(tt.timerList) do
+            if not timerType or timer.type == timerType then
                 if FreeTimerTrackerTimer then
                     FreeTimerTrackerTimer(timer)
                 elseif timer.bar then
@@ -3990,23 +3993,45 @@ function GameUI:TryNativeCountdown(seconds)
                 end
             end
         end
+    end)
+end
+
+-- Drive Blizzard's TimerTracker so the countdown shows the big fiery numerals from the
+-- default UI (BG/arena starts, /pull). There's no public API to trigger it solo, so we
+-- call the event handler directly, guarded: if anything is missing on this client the
+-- pcall fails and ShowCountdown falls back to the in-house numeral. Returns the timer
+-- type it started, or nil.
+function GameUI:TryNativeCountdown(seconds)
+    local tt = _G.TimerTracker
+    local st = Enum and Enum.StartTimerType
+    local timerType = st and (st.PlayerCountdown or st.PvPBeginTimer)
+    if not tt or not timerType then return nil end
+    FreeNativeTimers()
+    local ok = pcall(function()
         if TimerTracker_OnEvent then
             TimerTracker_OnEvent(tt, "START_TIMER", timerType, seconds, seconds)
         else
             tt:OnEvent("START_TIMER", timerType, seconds, seconds)
         end
     end)
+    return ok and timerType or nil
 end
 
 function GameUI:ShowCountdown(seconds, onComplete)
-    countdownCancelFlag = false
+    countdownToken = countdownToken + 1
+    local token = countdownToken
+    local function Live() return token == countdownToken end
 
     -- Native fiery countdown first; the custom numeral is the fallback.
-    if self:TryNativeCountdown(seconds) then
+    local nativeType = self:TryNativeCountdown(seconds)
+    if nativeType then
         usingNativeCountdown = true
+        C_Timer.After(mmax(0, seconds - NATIVE_RELEASE_EARLY), function()
+            if Live() then FreeNativeTimers(nativeType) end
+        end)
         if onComplete then
             C_Timer.After(seconds, function()
-                if not countdownCancelFlag then onComplete() end
+                if Live() then onComplete() end
             end)
         end
         return
@@ -4016,7 +4041,7 @@ function GameUI:ShowCountdown(seconds, onComplete)
     countdownFrame:Show()
     local remaining = seconds
     local function Tick()
-        if countdownCancelFlag then return end
+        if not Live() then return end
         if remaining > 0 then
             countdownText:SetText(tostring(remaining))
             countdownText:SetTextColor(1, 0.84, 0)
@@ -4030,10 +4055,11 @@ function GameUI:ShowCountdown(seconds, onComplete)
             countdownText:SetText("GO!")
             countdownText:SetTextColor(0.2, 1.0, 0.2)
             if countdownPopAG then countdownPopAG:Stop() countdownPopAG:Play() end
-            PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_FINISHED or 8960)
+            -- No GO sound: kit 25478 is the same 4 s sting as the client's countdown
+            -- end, and the round's track starting is the cue.
             if onComplete then onComplete() end
             C_Timer.After(0.5, function()
-                if not countdownCancelFlag then
+                if Live() then
                     countdownFrame:Hide()
                 end
             end)
@@ -4043,21 +4069,10 @@ function GameUI:ShowCountdown(seconds, onComplete)
 end
 
 function GameUI:CancelCountdown()
-    countdownCancelFlag = true
+    countdownToken = countdownToken + 1
     if usingNativeCountdown then
         usingNativeCountdown = false
-        local tt = _G.TimerTracker
-        if tt and tt.timerList then
-            pcall(function()
-                for _, timer in pairs(tt.timerList) do
-                    if FreeTimerTrackerTimer then
-                        FreeTimerTrackerTimer(timer)
-                    elseif timer.bar then
-                        timer.bar:Hide()
-                    end
-                end
-            end)
-        end
+        FreeNativeTimers()
     end
     if countdownFrame then countdownFrame:Hide() end
 end

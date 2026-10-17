@@ -560,32 +560,46 @@ function Game:Start()
         self:PlaceNoteLine()   -- put the start line + health bar in place before the countdown
     end
 
-    local countdownDuration = 3
-    -- Lead the music by one fall time so the first notes fall from the top instead of
-    -- popping in partway down. The highway starts at GO; the music starts leadIn later.
-    local settings = self:GetSettings()
-    local leadIn = settings.fallDistance / settings.fallSpeed
-    if ns.GameUI then
-        ns.GameUI:ShowCountdown(countdownDuration, function()
-            gameStartTime = GetTime() + leadIn
-            gameFrame:Show()
-            inputFrame:Show()
-            if BoundToLearn.db.game.soundEnabled then
-                local song = ns.SongData and ns.SongData.Get(db.songKey)
-                local track = (song and song.id) or DIFFICULTY_MUSIC[db.difficulty]
-                if track then
-                    C_Timer.After(leadIn, function()
-                        if isRunning then BeginGameMusic(track) end
-                    end)
-                end
-            end
-        end)
-    else
-        gameFrame:Show()
-        inputFrame:Show()
-    end
+    self:CountIn(db.songKey, db.difficulty)
 
     -- Game started silently; UI shows everything needed
+end
+
+-- The track starts on GO. The highway starts one fall time before it, during the
+-- countdown, so the first notes fall from the top and land on the music. A
+-- countdown shorter than the fall time (Easy falls for 3.65 s) is lengthened to fit.
+local roundToken = 0
+function Game:CountIn(songKey, difficulty)
+    roundToken = roundToken + 1
+    local token = roundToken
+    local function Live() return isRunning and token == roundToken end
+
+    local settings = self:GetSettings()
+    local leadIn = settings.fallDistance / settings.fallSpeed
+    if not ns.GameUI then
+        gameFrame:Show()
+        inputFrame:Show()
+        return
+    end
+
+    local track
+    if BoundToLearn.db.game.soundEnabled then
+        local song = ns.SongData and ns.SongData.Get(songKey)
+        track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
+    end
+    local countdown = mmax(3, math.ceil(leadIn))
+    C_Timer.After(countdown - leadIn, function()
+        if not Live() or isPaused then return end   -- a pause cancels the countdown; Resume starts the highway
+        gameStartTime = GetTime() + leadIn
+        gameFrame:Show()
+        inputFrame:Show()
+        if track then
+            C_Timer.After(leadIn, function()
+                if Live() then BeginGameMusic(track) end
+            end)
+        end
+    end)
+    ns.GameUI:ShowCountdown(countdown)
 end
 
 function Game:StartCompetitive()
@@ -623,28 +637,7 @@ function Game:StartCompetitive()
         self:PlaceNoteLine()   -- put the start line + health bar in place before the countdown
     end
 
-    local difficulty = db.difficulty
-    local settings = self:GetSettings()
-    local leadIn = settings.fallDistance / settings.fallSpeed
-    if ns.GameUI then
-        ns.GameUI:ShowCountdown(3, function()
-            gameStartTime = GetTime() + leadIn
-            gameFrame:Show()
-            inputFrame:Show()
-            if BoundToLearn.db.game.soundEnabled then
-                local song = ns.SongData and ns.SongData.Get(db.songKey)
-                local track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
-                if track then
-                    C_Timer.After(leadIn, function()
-                        if isRunning then BeginGameMusic(track) end
-                    end)
-                end
-            end
-        end)
-    else
-        gameFrame:Show()
-        inputFrame:Show()
-    end
+    self:CountIn(db.songKey, db.difficulty)
 end
 
 function Game:Stop()
