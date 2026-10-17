@@ -388,6 +388,7 @@ function KeybindAudit:Scan(options)
                         local slotData = {
                             slot = slot,
                             barIndex = i,
+                            barKey = barDef.key,
                             barLabel = resolvedLabel,
                             actionName = name,
                             actionType = actionType,
@@ -481,8 +482,10 @@ function KeybindAudit:Scan(options)
             tinsert(issues, {
                 severity = "medium",
                 icon = slotData.icon,
+                kind = "unbound",
+                barKey = slotData.barKey,   -- shown under its bar's section
                 text = sformat("%s has no keybind", slotData.actionName),
-                detail = sformat("On %s, slot %d.", slotData.barLabel, slotData.barIndex),
+                detail = sformat("Slot %d.", slotData.barIndex),
             })
         end
     end
@@ -492,6 +495,8 @@ function KeybindAudit:Scan(options)
             tinsert(issues, {
                 severity = "low",
                 icon = slotData.icon,
+                kind = "distant",
+                barKey = slotData.barKey,
                 text = sformat("%s is on a distant key (%s)", slotData.actionName, slotData.keybind),
                 detail = "Move this to a key closer to WASD for faster access.",
             })
@@ -508,19 +513,8 @@ function KeybindAudit:Scan(options)
         })
     end
 
-    for _, barDef in ipairs(BAR_MAPPINGS) do
-        local barData = bars[barDef.key]
-        if not barData.excluded and barData.filledCount > 0 and barData.boundCount == 0 then
-            tinsert(issues, {
-                severity = "medium",
-                icon = nil,
-                text = barData.filledCount == 1
-                    and sformat("%s has 1 ability but it is not keybound", barData.label)
-                    or sformat("%s has %d abilities but none are keybound", barData.label, barData.filledCount),
-                detail = "Every ability on your bar should have a keybind.",
-            })
-        end
-    end
+    -- A bar with nothing keybound needs no row of its own: its section in the
+    -- results already lists every unbound ability under the bar's name.
 
     -- Grouping score (experimental, opt-in)
     -- Measures physical key proximity of abilities in the same role group

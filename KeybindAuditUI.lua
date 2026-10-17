@@ -813,7 +813,8 @@ function KeybindAuditUI:CreateResultsPage()
     issueScrollChild:SetSize(250, 1)
     issueContainer:SetScrollChild(issueScrollChild)
 
-    for i = 1, 20 do
+    -- Room for every action bar's section header and its rows.
+    for i = 1, 48 do
         issueRows[i] = CreateIssueRow(issueScrollChild, i)
     end
 
@@ -1369,9 +1370,41 @@ function KeybindAuditUI:RefreshResults()
         or "No major issues found. Nice work.")
     resultsPage.noIssues:SetShown(#issues == 0)
 
+    -- Sections: each action bar with its own rows (unbound abilities, distant
+    -- keys) under its name and a tally, then General for the rest.
+    local entries, byBar, general = {}, {}, {}
+    for _, issue in ipairs(issues) do
+        if issue.barKey then
+            byBar[issue.barKey] = byBar[issue.barKey] or {}
+            tinsert(byBar[issue.barKey], issue)
+        else
+            tinsert(general, issue)
+        end
+    end
+    for _, barDef in ipairs(results.barOrder or {}) do
+        local list = byBar[barDef.key]
+        if list then
+            local unbound, distant = 0, 0
+            for _, issue in ipairs(list) do
+                if issue.kind == "unbound" then unbound = unbound + 1 end
+                if issue.kind == "distant" then distant = distant + 1 end
+            end
+            local tally = {}
+            if unbound > 0 then tally[#tally + 1] = sformat("%d unbound", unbound) end
+            if distant > 0 then tally[#tally + 1] = sformat("%d on distant keys", distant) end
+            local bar = results.bars and results.bars[barDef.key]
+            tinsert(entries, { header = (bar and bar.label or barDef.label), tally = table.concat(tally, ", ") })
+            for _, issue in ipairs(list) do tinsert(entries, issue) end
+        end
+    end
+    if #general > 0 then
+        tinsert(entries, { header = "General", tally = "" })
+        for _, issue in ipairs(general) do tinsert(entries, issue) end
+    end
+
     -- Hide scroll bar when nothing to scroll
     local scrollBar = issueContainer.ScrollBar or _G["BoundToLearnAuditScrollScrollBar"]
-    local hasScroll = #issues > 10
+    local hasScroll = #entries > 10
     if scrollBar then
         scrollBar:SetShown(hasScroll)
     end
@@ -1385,13 +1418,33 @@ function KeybindAuditUI:RefreshResults()
     -- Each row is as tall as its wrapped text and detail, never under the
     -- standard height; rows stack by their real heights.
     local rowY, visibleH = 0, 0
-    for i = 1, 20 do
+    for i = 1, #issueRows do
         local row = issueRows[i]
-        local issue = issues[i]
-        if issue then
+        local issue = entries[i]
+        if issue and issue.header then
+            row.strip:Hide()
+            row.icon:Hide()
+            row:SetWidth(rowW)
+            row.text:SetFontObject("GameFontNormal")
+            row.text:SetTextColor(1, 0.82, 0)   -- the client's heading gold
+            row.text:SetPoint("TOPLEFT", 2, -6)
+            row.text:SetWidth(rowW - 4)
+            row.text:SetText(issue.header)
+            row.detail:SetWidth(rowW - 4)
+            row.detail:SetText(issue.tally)
+            local h = mfloor(6 + row.text:GetStringHeight() + 3 + row.detail:GetStringHeight() + 4 + 0.5)
+            row:SetHeight(h)
+            row:SetPoint("TOPLEFT", 0, -rowY)
+            rowY = rowY + h
+            if i <= 10 then visibleH = visibleH + h end
+            row:Show()
+        elseif issue then
             local sc = SEVERITY_COLORS[issue.severity] or SEVERITY_COLORS.low
             row.strip:SetColorTexture(sc[1], sc[2], sc[3], 1)
+            row.strip:Show()
             row:SetWidth(rowW)
+            row.text:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            row.text:SetTextColor(0.9, 0.9, 0.9)
 
             if issue.icon then
                 row.icon:SetTexture(issue.icon)
@@ -1414,7 +1467,7 @@ function KeybindAuditUI:RefreshResults()
             row.strip:SetHeight(h - 4)
             row:SetPoint("TOPLEFT", 0, -rowY)
             rowY = rowY + h
-            if i <= 8 then visibleH = visibleH + h end
+            if i <= 10 then visibleH = visibleH + h end
             row:Show()
         else
             row:Hide()
