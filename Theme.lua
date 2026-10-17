@@ -556,26 +556,18 @@ function Theme.CreateArrow(parent, size, color)
     return tex
 end
 
+-- The client's own scroll bar (track, thumb and arrows as each client draws
+-- them), shown only while there is something to scroll. It used to be
+-- repainted as a flat accent block, which stood alone as a yellow square on
+-- a page with nothing to scroll.
 function Theme.StyleScrollBar(scrollBar)
     if not scrollBar then return end
-    -- Modern (retail) ScrollBar: has a Track/Thumb. Older: has Up/Down/Thumb.
-    local thumb = scrollBar.GetThumb and scrollBar:GetThumb()
-        or (scrollBar.ThumbTexture)
-        or _G[(scrollBar:GetName() or "") .. "ThumbTexture"]
-    if thumb and thumb.SetColorTexture then
-        thumb:SetColorTexture(RGB(C.ACCENT_DIM, 0.9))
-    end
-    for _, part in ipairs({ "ScrollUpButton", "ScrollDownButton", "Back", "Forward" }) do
-        local b = scrollBar[part] or _G[(scrollBar:GetName() or "") .. part]
-        if b and b.Hide then b:Hide() end
-    end
-    -- Catch arrow buttons the named lookups miss (anonymous scrollbars): the classic
-    -- thumb is a texture, so hiding Button children removes the arrows but keeps the thumb.
-    for _, child in ipairs({ scrollBar:GetChildren() }) do
-        if child.GetObjectType and child:GetObjectType() == "Button" then
-            child:Hide()
-        end
-    end
+    local frame = scrollBar:GetParent()
+    if not (frame and frame.GetVerticalScrollRange) then return end
+    frame.scrollBarHideable = true   -- the client's scroll template hides it at no range
+    local function Sync() scrollBar:SetShown(frame:GetVerticalScrollRange() > 0.5) end
+    frame:HookScript("OnScrollRangeChanged", Sync)
+    Sync()
 end
 
 --------------------------------------------------------------------------
