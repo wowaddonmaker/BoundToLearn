@@ -69,6 +69,26 @@ local ACTION_LOG_CAP = 50
 local spellClickStats = {}
 
 -- Hearthstone spell IDs (base hearthstone + toy variants)
+-- Tracking abilities (gathering finds, hunter tracks, Sense Demons/Undead):
+-- toggles for the minimap, never combat binds. IDs from the Forever SpellName
+-- table, both ranks or variants where the client has two.
+local TRACKING_SPELLS = {
+    [2383] = true, [8387] = true,       -- Find Herbs
+    [2580] = true, [8388] = true,       -- Find Minerals
+    [2481] = true,                      -- Find Treasure
+    [43308] = true,                     -- Find Fish
+    [1494] = true, [1284017] = true,    -- Track Beasts
+    [5225] = true, [19883] = true,      -- Track Humanoids (druid, hunter)
+    [19878] = true,                     -- Track Demons
+    [19879] = true,                     -- Track Dragonkin
+    [19880] = true,                     -- Track Elementals
+    [19882] = true,                     -- Track Giants
+    [19884] = true,                     -- Track Undead
+    [19885] = true,                     -- Track Hidden
+    [5500] = true,                      -- Sense Demons
+    [5502] = true, [5503] = true, [1241115] = true,  -- Sense Undead
+}
+
 local HEARTHSTONE_SPELLS = {
     [8690]   = true,   -- Hearthstone
     [556]    = true,   -- Astral Recall (Shaman)
@@ -226,11 +246,18 @@ local function ShouldIgnoreAction(slot)
         if filter.teleports and TELEPORT_SPELLS[id] then return true end
         if filter.consumables and CONSUMABLE_SPELLS[id] then return true end
         if filter.professions and professionSpells[id] then return true end
+        if filter.tracking and TRACKING_SPELLS[id] then return true end
     end
 
-    -- Items: check for toys, consumables
+    -- Items: check for toys, consumables, and by the spell they cast (the
+    -- Hearthstone on a bar is an item that casts the Hearthstone spell)
     if actionType == "item" and id then
         if filter.toys and IsToyItem(id) then return true end
+        local itemSpell = C_Item.GetItemSpell and select(2, C_Item.GetItemSpell(id))
+        if itemSpell then
+            if filter.hearthstones and HEARTHSTONE_SPELLS[itemSpell] then return true end
+            if filter.teleports and TELEPORT_SPELLS[itemSpell] then return true end
+        end
         if filter.consumables then
             local classID = select(6, C_Item.GetItemInfoInstant(id))
             if classID == CONSUMABLE_CLASS_ID then return true end

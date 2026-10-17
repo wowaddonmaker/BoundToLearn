@@ -26,6 +26,7 @@ local DB_DEFAULTS = {
         skyriding = true,
         nonCombatMacros = true,
         buffs = true,
+        tracking = true,
     },
     tracker = {
         enabled = true,
