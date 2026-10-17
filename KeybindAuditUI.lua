@@ -336,34 +336,43 @@ function KeybindAuditUI:CreateFrame()
     end)
     ns.Feedback.PlaceBesideClose(feedbackBtn, close)
 
+    -- Divider under the title in the window border's bronze (measured from the
+    -- Dialog frame's lit metal), with its darker underside.
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
-    accent:SetSize(550, 2)
     accent:SetPoint("TOP", 0, -34)
-    accent:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT))
+    accent:SetSize(550, 1)
+    accent:SetColorTexture(0.55, 0.41, 0.27)
+    local accentShade = auditFrame:CreateTexture(nil, "ARTWORK")
+    accentShade:SetPoint("TOP", accent, "BOTTOM")
+    accentShade:SetSize(550, 1)
+    accentShade:SetColorTexture(0.30, 0.21, 0.13)
 
-    -- Methodology tab on the accent line
-    local methTab = CreateFrame("Button", nil, auditFrame)
-    methTab:SetSize(80, 16)
-    methTab:SetPoint("TOPRIGHT", accent, "BOTTOMRIGHT", 0, 0)
-    local methTabBg = methTab:CreateTexture(nil, "BACKGROUND")
-    methTabBg:SetAllPoints()
-    methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.15))
-    local methTabText = methTab:CreateFontString(nil, "OVERLAY")
-    methTabText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    methTabText:SetPoint("CENTER", 0, 0)
-    methTabText:SetText("Methodology")
-    methTabText:SetTextColor(ns.Theme.RGB(ns.Theme.C.ACCENT))
-    methTab:SetScript("OnEnter", function(self)
-        methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.3))
-    end)
-    methTab:SetScript("OnLeave", function(self)
-        methTabBg:SetColorTexture(ns.Theme.RGB(ns.Theme.C.ACCENT, 0.15))
-    end)
-    methTab:SetScript("OnClick", function()
+    -- Under the divider: the audit is opinion, and its methodology is one click
+    -- away ("here"). Hidden on the methodology page itself.
+    local note = CreateFrame("Frame", nil, auditFrame)
+    note:SetPoint("TOP", accent, "BOTTOM", 0, -3)
+    note:SetHeight(14)
+    local noteText = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    noteText:SetPoint("LEFT")
+    noteText:SetText("This is extremely subjective and still heavily a WIP. See current methodology ")
+    local here = CreateFrame("Button", nil, note)
+    local hereText = here:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hereText:SetPoint("LEFT")
+    hereText:SetText("here")
+    here:SetFontString(hereText)
+    here:SetNormalFontObject("GameFontNormalSmall")
+    here:SetHighlightFontObject("GameFontHighlightSmall")
+    here:SetSize(hereText:GetStringWidth() + 1, 14)
+    here:SetPoint("LEFT", noteText, "RIGHT", 0, 0)
+    here:SetScript("OnClick", function()
         PlayUISound(SOUND_CLICK)
         KeybindAuditUI:ToggleMethodology()
     end)
-    auditFrame.methTab = methTab
+    local dot = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dot:SetPoint("LEFT", here, "RIGHT", 0, 0)
+    dot:SetText(".")
+    note:SetWidth(noteText:GetStringWidth() + here:GetWidth() + dot:GetStringWidth())
+    auditFrame.methNote = note
 
     self:CreateSetupPage()
     self:CreateResultsPage()
@@ -382,7 +391,7 @@ function KeybindAuditUI:CreateSetupPage()
 
     local desc = setupPage:CreateFontString(nil, "OVERLAY")
     desc:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-    desc:SetPoint("TOPLEFT", 25, -56)
+    desc:SetPoint("TOPLEFT", 25, -58)
     desc:SetWidth(530)
     desc:SetJustifyH("LEFT")
     desc:SetTextColor(0.6, 0.6, 0.6)
@@ -626,7 +635,7 @@ function KeybindAuditUI:ShowUniqueBindsPanel()
     GetDb().uniqueBinds = GetDb().uniqueBinds or {}
     if not uniqueBindsPanel then
         local p = CreateFrame("Frame", nil, auditFrame)
-        p:SetPoint("TOPLEFT", 20, -46)
+        p:SetPoint("TOPLEFT", 20, -58)
         p:SetPoint("BOTTOMRIGHT", -20, 18)
         p:SetFrameStrata("FULLSCREEN_DIALOG")
         p:SetFrameLevel(auditFrame:GetFrameLevel() + 20)
@@ -723,7 +732,7 @@ function KeybindAuditUI:CreateResultsPage()
     -- Left column header
     gradeText = resultsPage:CreateFontString(nil, "OVERLAY")
     gradeText:SetFont("Fonts\\FRIZQT__.TTF", 38, "OUTLINE")
-    gradeText:SetPoint("TOP", resultsPage, "TOPLEFT", 140, -48)
+    gradeText:SetPoint("TOP", resultsPage, "TOPLEFT", 140, -60)
 
     scoreText = resultsPage:CreateFontString(nil, "OVERLAY")
     scoreText:SetFont("Fonts\\FRIZQT__.TTF", 13, "")
@@ -754,7 +763,7 @@ function KeybindAuditUI:CreateResultsPage()
     -- Divider (positioned dynamically based on grouping bar visibility)
     local div = resultsPage:CreateTexture(nil, "ARTWORK")
     div:SetSize(250, 1)
-    div:SetPoint("TOPLEFT", 15, -244)
+    div:SetPoint("TOPLEFT", 15, -256)
     div:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
     resultsPage.divider = div
 
@@ -762,7 +771,7 @@ function KeybindAuditUI:CreateResultsPage()
     for i = 1, 8 do
         local lbl = resultsPage:CreateFontString(nil, "OVERLAY")
         lbl:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-        lbl:SetPoint("TOPLEFT", 20, -252 - (i - 1) * 16)
+        lbl:SetPoint("TOPLEFT", 20, -264 - (i - 1) * 16)
         lbl:SetWidth(250)
         lbl:SetJustifyH("LEFT")
         lbl:Hide()
@@ -785,18 +794,18 @@ function KeybindAuditUI:CreateResultsPage()
     -- Vertical divider
     local vDiv = resultsPage:CreateTexture(nil, "ARTWORK")
     vDiv:SetSize(1, 1)
-    vDiv:SetPoint("TOPLEFT", rightX - 10, -42)
+    vDiv:SetPoint("TOPLEFT", rightX - 10, -54)
     vDiv:SetPoint("BOTTOMLEFT", rightX - 10, 40)
     vDiv:SetColorTexture(ns.Theme.RGB(ns.Theme.C.BORDER, 0.35))
 
     local recHeader = resultsPage:CreateFontString(nil, "OVERLAY")
     recHeader:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
-    recHeader:SetPoint("TOPLEFT", rightX, -44)
+    recHeader:SetPoint("TOPLEFT", rightX, -56)
     recHeader:SetTextColor(0.9, 0.9, 0.9)
     recHeader:SetText("Recommendations")
 
     issueContainer = CreateFrame("ScrollFrame", "BoundToLearnAuditScroll", resultsPage, "UIPanelScrollFrameTemplate")
-    issueContainer:SetPoint("TOPLEFT", rightX, -64)
+    issueContainer:SetPoint("TOPLEFT", rightX, -76)
     issueContainer:SetPoint("BOTTOMRIGHT", -15, 44)
     ns.Theme.StyleScrollBar(issueContainer.ScrollBar or _G["BoundToLearnAuditScrollScrollBar"])
 
@@ -813,7 +822,7 @@ function KeybindAuditUI:CreateResultsPage()
     noIssues:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     noIssues:SetPoint("TOP", issueContainer, "TOP", 0, -40)
     noIssues:SetTextColor(0.4, 0.7, 0.4)
-    noIssues:SetText("No issues found. Nice work.")
+    noIssues:SetText("No issues found. Nice work.")   -- set per result in ShowResults
     noIssues:Hide()
     resultsPage.noIssues = noIssues
 
@@ -839,9 +848,9 @@ function KeybindAuditUI:CreateMethodologyPage()
     methodologyPage:SetAllPoints()
 
     local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditMethScroll", methodologyPage, "UIPanelScrollFrameTemplate")
-    -- Starts under the Methodology tab (it ends 52 down); the scroll bar hangs
-    -- right of the frame and must clear the right border (11).
-    scrollFrame:SetPoint("TOPLEFT", 15, -56)
+    -- Starts under the divider (the methodology note is hidden on this page);
+    -- the scroll bar hangs right of the frame and must clear the right border (11).
+    scrollFrame:SetPoint("TOPLEFT", 15, -44)
     scrollFrame:SetPoint("BOTTOMRIGHT", -36, 44)
     ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditMethScrollScrollBar"])
 
@@ -907,6 +916,7 @@ end
 function KeybindAuditUI:ToggleMethodology()
     if methodologyPage:IsShown() then
         methodologyPage:Hide()
+        auditFrame.methNote:Show()
         if methodologyPage.returnToResults then
             resultsPage:Show()
         else
@@ -915,6 +925,7 @@ function KeybindAuditUI:ToggleMethodology()
         end
     else
         methodologyPage.returnToResults = resultsPage:IsShown() or categoryDetailPage:IsShown()
+        auditFrame.methNote:Hide()
         methodologyPage:Show()
         setupPage:Hide()
         resultsPage:Hide()
@@ -1124,12 +1135,12 @@ function KeybindAuditUI:CreateCategoryDetailPage()
 
     local titleText = categoryDetailPage:CreateFontString(nil, "OVERLAY")
     titleText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
-    titleText:SetPoint("TOP", 0, -48)
+    titleText:SetPoint("TOP", 0, -60)
     titleText:SetTextColor(ns.Theme.RGB(ns.Theme.C.GOLD))
     categoryDetailPage.titleText = titleText
 
     local scrollFrame = CreateFrame("ScrollFrame", "BoundToLearnAuditCatScroll", categoryDetailPage, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 20, -72)
+    scrollFrame:SetPoint("TOPLEFT", 20, -84)
     scrollFrame:SetPoint("BOTTOMRIGHT", -35, 44)
     ns.Theme.StyleScrollBar(scrollFrame.ScrollBar or _G["BoundToLearnAuditCatScrollScrollBar"])
 
@@ -1347,6 +1358,9 @@ function KeybindAuditUI:RefreshResults()
 
     -- Issues
     local issues = results.issues
+    -- Below a perfect score something was found, just nothing big enough to list.
+    resultsPage.noIssues:SetText((results.scores.overall or 0) >= 100 and "No issues found. Nice work."
+        or "No major issues found. Nice work.")
     resultsPage.noIssues:SetShown(#issues == 0)
 
     -- Hide scroll bar when nothing to scroll
@@ -1406,8 +1420,8 @@ function KeybindAuditUI:RefreshResults()
     -- Fit the card height to whichever column runs longer, so short results don't
     -- leave a baggy empty band. Bottom-anchored elements (buttons, skipped note,
     -- issue list) ride the frame's bottom edge and stay put as the frame shrinks.
-    local leftBottom = 252 + groupingShift + mmax(0, barIdx - 1) * 16 + 14
-    local rightBottom = #issues == 0 and 150 or (64 + visibleH + 6)
+    local leftBottom = 264 + groupingShift + mmax(0, barIdx - 1) * 16 + 14
+    local rightBottom = #issues == 0 and 162 or (76 + visibleH + 6)
     auditFrame:SetHeight(mmax(360, mmin(480, mmax(leftBottom, rightBottom) + 54)))
 end
 
