@@ -33,7 +33,7 @@ local ICON_CROP = 0.07
 local HEAP_ICON_SIZE = 36
 local HEAP_X_OFFSET = 240
 local HEAP_Y_BASE = -20
-local HEAP_SCATTER = 20
+local HEAP_SCATTER = 34      -- a pile spreads over icon + 2 x this: overlapping, not a ball
 local FLY_DURATION = 0.35
 
 local MODIFIER_KEYS = {
@@ -556,6 +556,17 @@ local function CreateQuizUI()
     escHint:SetTextColor(0.4, 0.4, 0.4)
     escHint:SetText("ESC to exit")
 
+    -- Shown when the quiz is complete: the same mode again, or close.
+    local againBtn = ns.Theme.CreateAccentButton(quizFrame, "Try Again", 120, 28)
+    againBtn:SetPoint("TOPRIGHT", promptText, "BOTTOM", -6, -18)
+    againBtn:SetScript("OnClick", function() KeybindQuiz:TryAgain() end)
+    againBtn:Hide()
+    local closeBtn = ns.Theme.CreateButton(quizFrame, "Close", 120, 28)
+    closeBtn:SetPoint("TOPLEFT", promptText, "BOTTOM", 6, -18)
+    closeBtn:SetScript("OnClick", function() KeybindQuiz:Stop() end)
+    closeBtn:Hide()
+    quizFrame.againBtn, quizFrame.closeBtn = againBtn, closeBtn
+
     -- Ready screen (standalone frame above dimmer)
     local readyFrame = CreateFrame("Frame", nil, UIParent)
     readyFrame:SetSize(300, 204)
@@ -813,8 +824,10 @@ function KeybindQuiz:FinishRound()
         promptText:SetTextColor(0.7, 0.7, 0.7)
         answerLabel:Hide()
         answerKeybind:Hide()
-        progressText:SetText("Press any key to close")
+        progressText:SetText("Any key closes")
         progressText:SetTextColor(0.5, 0.5, 0.5)
+        quizFrame.againBtn:Show()
+        quizFrame.closeBtn:Show()
 
         if not isPractice and ns.Stats then
             ns.Stats:RecordQuizSession({
@@ -971,6 +984,8 @@ function KeybindQuiz:BeginRound()
     isRunning = true
     quizStartTime = GetTime()
 
+    quizFrame.againBtn:Hide()
+    quizFrame.closeBtn:Hide()
     quizFrame:Show()
     quizFrame:SetScript("OnUpdate", function()
         if not isRunning then return end
@@ -1045,10 +1060,22 @@ function KeybindQuiz:Stop()
         quizFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
         quizFrame:SetScript("OnEvent", nil)
         quizFrame.readyFrame:Hide()
+        quizFrame.againBtn:Hide()
+        quizFrame.closeBtn:Hide()
         quizFrame:Hide()
     end
     if dimmer then dimmer:Hide() end
     if inputFrame then inputFrame:Hide() end
+end
+
+-- Try Again on the completed quiz: a fresh run in the same mode (Timed or
+-- Practice), with the deck rebuilt from the bars as they are now.
+function KeybindQuiz:TryAgain()
+    local practice = isPractice
+    self:Stop()
+    self:Start()
+    local btn = quizFrame and quizFrame[practice and "practiceBtn" or "timedBtn"]
+    if btn and quizFrame.readyFrame:IsShown() then btn:Click() end
 end
 
 function KeybindQuiz:Toggle()
