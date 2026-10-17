@@ -89,6 +89,16 @@ local TRACKING_SPELLS = {
     [5502] = true, [5503] = true, [1241115] = true,  -- Sense Undead
 }
 
+-- Hunter pet care: feeding, taming and teaching the pet, never combat binds.
+-- IDs from the Forever SpellName table (every variant it lists).
+local PET_CARE_SPELLS = {
+    [1584] = true, [6991] = true,       -- Feed Pet
+    [5149] = true, [5300] = true,       -- Beast Training
+    [1515] = true, [1579] = true, [13481] = true, [13535] = true, [411624] = true,
+    [411631] = true, [469277] = true, [469301] = true, [469306] = true,
+    [1277794] = true, [1278028] = true, [1278029] = true,   -- Tame Beast
+}
+
 local HEARTHSTONE_SPELLS = {
     [8690]   = true,   -- Hearthstone
     [556]    = true,   -- Astral Recall (Shaman)
@@ -247,6 +257,7 @@ local function ShouldIgnoreAction(slot)
         if filter.consumables and CONSUMABLE_SPELLS[id] then return true end
         if filter.professions and professionSpells[id] then return true end
         if filter.tracking and TRACKING_SPELLS[id] then return true end
+        if filter.petCare and PET_CARE_SPELLS[id] then return true end
     end
 
     -- Items: check for toys, consumables, and by the spell they cast (the

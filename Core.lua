@@ -27,6 +27,7 @@ local DB_DEFAULTS = {
         nonCombatMacros = true,
         buffs = true,
         tracking = true,
+        petCare = true,
     },
     tracker = {
         enabled = true,

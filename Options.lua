@@ -566,6 +566,7 @@ local function BuildGeneralTab()
         { key = "nonCombatMacros", label = "Non-combat macros" },
         { key = "buffs",           label = "Buffs" },
         { key = "tracking",        label = "Tracking" },
+        { key = "petCare",         label = "Pet care" },
     }
     y = AddGrid(tab, y, "Ignore these action types:", filterNames, 3,
         function(key) return BoundToLearn.db.filter[key] end,
@@ -719,6 +720,7 @@ local function DoResetDefaults()
     db.filter.nonCombatMacros = true
     db.filter.buffs = true
     db.filter.tracking = true
+    db.filter.petCare = true
     db.clickBlock.enabled = false
     db.clickBlock.mode = "all"
     wipe(db.clickBlock.customBlacklist)
