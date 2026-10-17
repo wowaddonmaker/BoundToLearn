@@ -26,6 +26,7 @@ local maxCombo = 0
 local hits = 0
 local wrongType = 0    -- correct target, wrong ping type
 local expired = 0
+local strayPings = 0   -- pings into empty space
 local gameStartTime = 0
 local gameDuration = 30
 local gameElapsed = 0
@@ -71,12 +72,22 @@ local PING_LABEL = { attack = "Attack", assist = "Assist", warning = "Warning" }
 -- a time that waits long and is replaced the moment it is hit; each tier above adds
 -- one target on screen and shortens the timeout and the size. A ping asks more than
 -- a click (find the target, read its type, press the right modifier and key), so
--- the timeouts sit well above a click trainer's. damage scales every health loss.
+-- the timeouts sit well above a click trainer's.
+-- Health drains all the time (drain per second, as rhythm games do) and hits refill
+-- it (heal, plus comboHeal per combo step up to 5); damage scales every loss. Tuned
+-- in a simulation of these rules with model players: a player who does nothing
+-- fails at about 23 s on Easy, 17 s on Normal, 15 s on Hard and 12 s on Extreme; a
+-- beginner always survives Easy and about 7 in 10 Normal rounds, an average player
+-- about 2 in 3 Hard rounds, a good player about 4 in 10 Extreme rounds.
 local DIFFICULTY_SETTINGS = {
-    Easy    = { spawnInterval = 0.6,  targetLifetime = 6.0, maxActive = 1, duration = 30, sizeScale = 1.3,  damage = 0.5 },
-    Normal  = { spawnInterval = 1.2,  targetLifetime = 4.5, maxActive = 2, duration = 45, sizeScale = 1.1,  damage = 0.75 },
-    Hard    = { spawnInterval = 1.0,  targetLifetime = 3.2, maxActive = 3, duration = 60, sizeScale = 0.95, damage = 1.0 },
-    Extreme = { spawnInterval = 0.75, targetLifetime = 2.2, maxActive = 4, duration = 60, sizeScale = 0.82, damage = 1.25 },
+    Easy    = { spawnInterval = 0.6,  targetLifetime = 6.0, maxActive = 1, duration = 30, sizeScale = 1.3,
+                drain = 3.0, damage = 1.0, heal = 8, comboHeal = 1 },
+    Normal  = { spawnInterval = 1.2,  targetLifetime = 5.0, maxActive = 2, duration = 45, sizeScale = 1.1,
+                drain = 2.5, damage = 1.0, heal = 6, comboHeal = 1 },
+    Hard    = { spawnInterval = 1.0,  targetLifetime = 4.5, maxActive = 3, duration = 60, sizeScale = 0.95,
+                drain = 3.0, damage = 0.8, heal = 5, comboHeal = 1 },
+    Extreme = { spawnInterval = 0.75, targetLifetime = 3.6, maxActive = 4, duration = 60, sizeScale = 0.82,
+                drain = 3.5, damage = 0.7, heal = 4, comboHeal = 1 },
 }
 
 PingGame.DIFFICULTIES = { "Easy", "Normal", "Hard", "Extreme" }
@@ -86,13 +97,25 @@ local SCORE_HIT         = 100
 local SCORE_SPEED_BONUS = 200
 local SCORE_WRONG_TYPE  = -50   -- right target, wrong ping type
 local SCORE_EXPIRED     = -50
+local SCORE_STRAY       = -25   -- ping into empty space
 
--- Health damage/heal per event (scales with difficulty)
-local HEALTH_HIT        = 5     -- heal on correct ping
+-- Grade from accuracy (hits out of every target and every ping), the way rhythm
+-- games grade; a round that ran out of health is an F. Score, which also rewards
+-- speed, is kept per difficulty as the record.
+local GRADES = { { 95, "S" }, { 90, "A" }, { 80, "B" }, { 70, "C" } }
+local function GradeFor(accuracy, failed)
+    if failed then return "F" end
+    for _, g in ipairs(GRADES) do
+        if accuracy >= g[1] then return g[2] end
+    end
+    return "D"
+end
+
+-- Health loss per event, scaled by the difficulty's damage (heal and drain are per
+-- difficulty, in DIFFICULTY_SETTINGS)
 local HEALTH_WRONG_TYPE = -12   -- wrong ping type
-local HEALTH_MISS       = -8    -- ping into empty space
+local HEALTH_MISS       = -6    -- ping into empty space
 local HEALTH_EXPIRED    = -10   -- target timed out
-local HEALTH_COMBO_HEAL = 2     -- bonus heal per combo level (capped)
 
 local function GetSettings()
     return DIFFICULTY_SETTINGS[difficulty]
@@ -196,6 +219,7 @@ function PingGame:Start()
     hits = 0
     wrongType = 0
     expired = 0
+    strayPings = 0
     health = MAX_HEALTH
     spawnAccumulator = 999  -- immediate first spawn
     targetIDCounter = 0
@@ -227,20 +251,37 @@ function PingGame:Stop()
     end
     wipe(activeTargets)
 
-    local totalTargetable = hits + wrongType + expired
-    local accuracy = totalTargetable > 0 and mfloor(hits / totalTargetable * 100) or 0
+    -- Every target and every ping counts: a stray ping is a miss, as in aim trainers.
+    local attempts = hits + wrongType + expired + strayPings
+    local accuracy = attempts > 0 and mfloor(hits / attempts * 100) or 0
+    local failed = health <= 0
 
     local results = {
         score = mmax(0, score),
         hits = hits,
         wrongType = wrongType,
         expired = expired,
+        strayPings = strayPings,
         maxCombo = maxCombo,
         accuracy = accuracy,
+        grade = GradeFor(accuracy, failed),
         elapsed = gameElapsed,
         difficulty = difficulty,
-        healthDepleted = health <= 0,
+        healthDepleted = failed,
     }
+
+    -- Records per difficulty: an Easy score never stands against an Extreme one.
+    local pt = BoundToLearn.db and BoundToLearn.db.pingTrainer
+    if pt and attempts > 0 then
+        pt.best = pt.best or {}
+        local prev = pt.best[difficulty]
+        results.prevBest = prev
+        if not prev or results.score > prev.score then
+            pt.best[difficulty] = { score = results.score, accuracy = accuracy, grade = results.grade,
+                combo = maxCombo, time = time() }
+            results.newBest = true
+        end
+    end
 
     if ns.PingGameUI then
         ns.PingGameUI:OnGameEnd(results)
@@ -252,6 +293,7 @@ function PingGame:Stop()
             type = "ping",
             score = results.score,
             accuracy = accuracy,
+            grade = results.grade,
             combo = maxCombo,
             difficulty = difficulty,
             elapsed = mfloor(gameElapsed * 10) / 10,
@@ -290,6 +332,9 @@ function PingGame:OnUpdate(elapsed)
 
     local settings = GetSettings()
     local now = GetTime()
+
+    -- Health drains all the time; hits refill it.
+    health = mmax(0, health - settings.drain * elapsed)
 
     -- Expire old targets
     for i = #activeTargets, 1, -1 do
@@ -370,8 +415,8 @@ function PingGame:OnPingAction(targetID, pingAction)
                 score = score + points
                 combo = combo + 1
                 if combo > maxCombo then maxCombo = combo end
-                local comboHeal = mmin(combo, 5) * HEALTH_COMBO_HEAL
-                health = mmin(MAX_HEALTH, health + HEALTH_HIT + comboHeal)
+                local s = GetSettings()
+                health = mmin(MAX_HEALTH, health + s.heal + mmin(combo, 5) * s.comboHeal)
                 if ns.PingGameUI then
                     ns.PingGameUI:OnTargetResult(target, "hit", reactionTime, points, pingAction)
                 end
@@ -405,6 +450,8 @@ end
 function PingGame:OnPingMiss(pingAction)
     if not isRunning or isPaused then return end
     combo = 0
+    strayPings = strayPings + 1
+    score = score + SCORE_STRAY
     Hurt(HEALTH_MISS)
     if ns.PingGameUI then
         ns.PingGameUI:OnMissClick(pingAction)

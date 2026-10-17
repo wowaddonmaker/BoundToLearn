@@ -1791,26 +1791,27 @@ function PingGameUI:OnGameEnd(results)
     resultsFrame.scoreLabel:SetText(sformat("|cFFFFD700%d|r", results.score))
 
     local lines = {
-        sformat("Correct pings: |cFF44CC44%d|r    Wrong type: |cFFFF8844%d|r    Expired: |cFFCC6644%d|r",
-            results.hits, results.wrongType, results.expired),
+        sformat("Correct pings: |cFF44CC44%d|r    Wrong type: |cFFFF8844%d|r    Expired: |cFFCC6644%d|r    Missed: |cFFCC6644%d|r",
+            results.hits, results.wrongType, results.expired, results.strayPings or 0),
         sformat("Best combo: |cFFFF8A33%d|r    Accuracy: |cFFFFD700%d%%|r    Time: %ds",
             results.maxCombo, results.accuracy, mfloor(results.elapsed)),
     }
+    -- Records are per difficulty.
+    local diffName = results.difficulty or "?"
+    if results.newBest then
+        lines[#lines + 1] = sformat("|cFF44CC44New best on %s!|r", diffName)
+            .. (results.prevBest and sformat("  (was %d)", results.prevBest.score) or "")
+    elseif results.prevBest then
+        lines[#lines + 1] = sformat("Best on %s: |cFFFFD700%d|r (%s)", diffName, results.prevBest.score,
+            results.prevBest.grade or "?")
+    end
     resultsFrame.statsText:SetText(table.concat(lines, "\n"))
     resultsFrame.statsText:SetTextColor(0.75, 0.75, 0.75)
 
-    local s = results.score
-    local grade, gradeColor
-    if s >= 8000 then     grade = "S";  gradeColor = "FF55FF"
-    elseif s >= 6000 then grade = "A+"; gradeColor = "44CC44"
-    elseif s >= 4500 then grade = "A";  gradeColor = "44CC44"
-    elseif s >= 3500 then grade = "B+"; gradeColor = "88CC44"
-    elseif s >= 2500 then grade = "B";  gradeColor = "CCCC44"
-    elseif s >= 1500 then grade = "C";  gradeColor = "CC8844"
-    elseif s >= 800 then  grade = "D";  gradeColor = "CC6644"
-    else                  grade = "F";  gradeColor = "884444"
-    end
-    resultsFrame.gradeLabel:SetText(sformat("|cFF%s%s|r", gradeColor, grade))
+    -- Grade from accuracy, F for a round that ran out of health (PingGame GradeFor).
+    local GRADE_COLORS = { S = "FF55FF", A = "44CC44", B = "CCCC44", C = "CC8844", D = "CC6644", F = "884444" }
+    local grade = results.grade or "D"
+    resultsFrame.gradeLabel:SetText(sformat("|cFF%s%s|r", GRADE_COLORS[grade] or "CCCCCC", grade))
 
     resultsFrame:Show()
 end
