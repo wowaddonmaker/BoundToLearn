@@ -137,6 +137,10 @@ local targetPool = {}
 local activeTargetFrames = {}  -- targetID -> frame
 local floatingPool = {}
 local groundPinPool = {}
+-- Feedback still on screen. Their fades run on OnUpdate, which stops while the
+-- arena is hidden, so a round's end clears them (ClearRoundEffects) instead of
+-- leaving them to resume in the next round.
+local liveFloating, liveGroundPins = {}, {}
 local hoveredTargetID = nil
 local debugHitbox = false
 local isInitialized = false
@@ -298,6 +302,7 @@ local function AcquireFloating()
 end
 
 local function ReleaseFloating(frame)
+    liveFloating[frame] = nil
     frame:Hide()
     frame:ClearAllPoints()
     frame:SetScript("OnUpdate", nil)
@@ -307,6 +312,7 @@ end
 
 local function ShowFloatingText(x, y, msg, r, g, b)
     local frame = AcquireFloating()
+    liveFloating[frame] = true
     frame:SetPoint("CENTER", gameArea, "BOTTOMLEFT", x, y)
     frame.text:SetText(msg)
     frame.text:SetTextColor(r, g, b)
@@ -360,6 +366,7 @@ local function AcquireGroundPin()
 end
 
 local function ReleaseGroundPin(frame)
+    liveGroundPins[frame] = nil
     frame:Hide()
     frame:ClearAllPoints()
     frame:SetScript("OnUpdate", nil)
@@ -369,6 +376,7 @@ end
 
 local function ShowGroundPin(x, y, kit)
     local pin = AcquireGroundPin()
+    liveGroundPins[pin] = true
     pin:SetPoint("BOTTOM", gameArea, "BOTTOMLEFT", x, y)
     pin.bg:SetAtlas("Ping_GroundMarker_BG_" .. kit)
     pin.stroke:SetAtlas("Ping_GroundMarker_Stroke_" .. kit)
@@ -389,6 +397,11 @@ local function ShowGroundPin(x, y, kit)
             self:SetAlpha(1 - (elapsed - fadeStart) / (GROUND_PIN_DURATION - fadeStart))
         end
     end)
+end
+
+local function ClearRoundEffects()
+    for frame in pairs(liveFloating) do ReleaseFloating(frame) end
+    for frame in pairs(liveGroundPins) do ReleaseGroundPin(frame) end
 end
 
 local function AcquireTarget()
@@ -1755,6 +1768,7 @@ function PingGameUI:OnGameStart()
         ReleaseTarget(frame)
     end
     wipe(activeTargetFrames)
+    ClearRoundEffects()
 end
 
 function PingGameUI:OnGameEnd(results)
@@ -1764,6 +1778,7 @@ function PingGameUI:OnGameEnd(results)
     if mainFrame.healthFrame then mainFrame.healthFrame:Hide() end
     hoveredTargetID = nil
     StopBackgroundMusic()
+    ClearRoundEffects()
 
     -- Check for newly unlocked backgrounds
     local newUnlocks = CheckUnlocks(results)
