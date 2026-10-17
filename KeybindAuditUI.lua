@@ -336,6 +336,31 @@ function KeybindAuditUI:CreateFrame()
     end)
     ns.Feedback.PlaceBesideClose(feedbackBtn, close)
 
+    -- Back, top left on the title row (mirrors Give feedback): one level up.
+    -- Hidden on setup, the first page.
+    local backBtn = ns.Theme.CreateButton(auditFrame, "Back", 70, 22)
+    backBtn:SetPoint("TOPLEFT", 14, -12)
+    backBtn:SetScript("OnClick", function()
+        PlayUISound(SOUND_CLICK)
+        KeybindAuditUI:GoBack()
+    end)
+    backBtn:Hide()
+    auditFrame.backBtn = backBtn
+
+    -- The results follow the bars: a keybind or a bar slot changed while they
+    -- are open re-scans them (once, after the burst of events settles).
+    local rescanPending = false
+    auditFrame:RegisterEvent("UPDATE_BINDINGS")
+    auditFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+    auditFrame:SetScript("OnEvent", function()
+        if rescanPending or not (resultsPage and resultsPage:IsShown()) then return end
+        rescanPending = true
+        C_Timer.After(0.3, function()
+            rescanPending = false
+            if resultsPage:IsShown() then KeybindAuditUI:RefreshResults() end
+        end)
+    end)
+
     -- Divider under the title in the window border's bronze (measured from the
     -- Dialog frame's lit metal), with its darker underside.
     local accent = auditFrame:CreateTexture(nil, "ARTWORK")
@@ -826,22 +851,8 @@ function KeybindAuditUI:CreateResultsPage()
     noIssues:SetText("No issues found. Nice work.")   -- set per result in ShowResults
     noIssues:Hide()
     resultsPage.noIssues = noIssues
-
-    -- Settings button (bottom left)
-    local settingsBtn = ns.Theme.CreateButton(resultsPage, "Settings", 80, 24)
-    settingsBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    settingsBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        KeybindAuditUI:ShowSetup()
-    end)
-
-    -- Refresh button (bottom right)
-    local refreshBtn = ns.Theme.CreateButton(resultsPage, "Refresh", 80, 24)
-    refreshBtn:SetPoint("BOTTOMRIGHT", -15, 12)
-    refreshBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        KeybindAuditUI:RefreshResults()
-    end)
+    -- Back (top left, on the frame) returns to setup; the results re-scan by
+    -- themselves when a keybind or a bar slot changes (no Refresh button).
 end
 
 function KeybindAuditUI:CreateMethodologyPage()
@@ -906,13 +917,6 @@ function KeybindAuditUI:CreateMethodologyPage()
         .. "since they map to your thumb grid."
     text:SetText((methBody:gsub("FF8A33", ns.Theme.ACCENT_HEX)))
     content:SetHeight(text:GetStringHeight() + 10)
-
-    local backBtn = ns.Theme.CreateButton(methodologyPage, "Back", 80, 24)
-    backBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    backBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        KeybindAuditUI:ToggleMethodology()
-    end)
 end
 
 function KeybindAuditUI:ToggleMethodology()
@@ -934,6 +938,26 @@ function KeybindAuditUI:ToggleMethodology()
         categoryDetailPage:Hide()
         self:HideBarOverlays()
     end
+    self:UpdateBackButton()
+end
+
+-- Back is shown on every page but setup.
+function KeybindAuditUI:UpdateBackButton()
+    if auditFrame and auditFrame.backBtn then auditFrame.backBtn:SetShown(not setupPage:IsShown()) end
+end
+
+-- One level up: methodology to where it was opened from, a category's detail
+-- to the scorecard, the scorecard to setup.
+function KeybindAuditUI:GoBack()
+    if methodologyPage:IsShown() then
+        self:ToggleMethodology()
+    elseif categoryDetailPage:IsShown() then
+        categoryDetailPage:Hide()
+        resultsPage:Show()
+    elseif resultsPage:IsShown() then
+        self:ShowSetup()
+    end
+    self:UpdateBackButton()
 end
 
 local TIER_COLORS = {
@@ -1164,21 +1188,6 @@ function KeybindAuditUI:CreateCategoryDetailPage()
     categoryDetailPage.bodyText = bodyText
     categoryDetailPage.content = content
 
-    local backBtn = ns.Theme.CreateButton(categoryDetailPage, "Scorecard", 100, 24)
-    backBtn:SetPoint("BOTTOMLEFT", 15, 12)
-    backBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        categoryDetailPage:Hide()
-        resultsPage:Show()
-    end)
-
-    local settingsBtn = ns.Theme.CreateButton(categoryDetailPage, "Settings", 80, 24)
-    settingsBtn:SetPoint("BOTTOMRIGHT", -15, 12)
-    settingsBtn:SetScript("OnClick", function()
-        PlayUISound(SOUND_CLICK)
-        KeybindAuditUI:ShowSetup()
-    end)
-
     categoryDetailPage:Hide()
 end
 
@@ -1196,6 +1205,7 @@ function KeybindAuditUI:ShowCategoryDetail(index)
     setupPage:Hide()
     methodologyPage:Hide()
     categoryDetailPage:Show()
+    self:UpdateBackButton()
 end
 
 function KeybindAuditUI:ShowBarOverlays()
@@ -1268,6 +1278,7 @@ function KeybindAuditUI:ShowSetup()
     setupPage:Show()
     self:ShowBarOverlays()
     auditFrame:SetSize(580, 380)
+    self:UpdateBackButton()
 end
 
 function KeybindAuditUI:ShowResults()
@@ -1278,6 +1289,7 @@ function KeybindAuditUI:ShowResults()
     auditFrame:SetSize(580, 530)
     resultsPage:Show()
     self:RefreshResults()
+    self:UpdateBackButton()
 end
 
 function KeybindAuditUI:RefreshResults()
