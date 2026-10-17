@@ -565,17 +565,13 @@ function Game:Start()
     -- Game started silently; UI shows everything needed
 end
 
--- The track starts on GO. The highway starts one fall time before it, during the
--- countdown, so the first notes fall from the top and land on the music. A
--- countdown shorter than the fall time (Easy falls for 3.65 s) is lengthened to fit.
+-- The track and the falling notes both start on GO. Notes due sooner than their fall
+-- time are left out of the chart (PrepChart), so nothing falls during the countdown
+-- and nothing pops in partway down.
 local roundToken = 0
 function Game:CountIn(songKey, difficulty)
     roundToken = roundToken + 1
     local token = roundToken
-    local function Live() return isRunning and token == roundToken end
-
-    local settings = self:GetSettings()
-    local leadIn = settings.fallDistance / settings.fallSpeed
     if not ns.GameUI then
         gameFrame:Show()
         inputFrame:Show()
@@ -587,19 +583,13 @@ function Game:CountIn(songKey, difficulty)
         local song = ns.SongData and ns.SongData.Get(songKey)
         track = (song and song.id) or DIFFICULTY_MUSIC[difficulty]
     end
-    local countdown = mmax(3, math.ceil(leadIn))
-    C_Timer.After(countdown - leadIn, function()
-        if not Live() or isPaused then return end   -- a pause cancels the countdown; Resume starts the highway
-        gameStartTime = GetTime() + leadIn
+    ns.GameUI:ShowCountdown(3, function()
+        if not isRunning or token ~= roundToken then return end
+        gameStartTime = GetTime()
         gameFrame:Show()
         inputFrame:Show()
-        if track then
-            C_Timer.After(leadIn, function()
-                if Live() then BeginGameMusic(track) end
-            end)
-        end
+        if track then BeginGameMusic(track) end
     end)
-    ns.GameUI:ShowCountdown(countdown)
 end
 
 function Game:StartCompetitive()
@@ -1081,6 +1071,18 @@ function Game:PrepChart(settings)
             end
         end
     end
+    -- The highway starts with the track on GO, so a note due sooner than its fall
+    -- time could only pop in partway down: it is left out, and the score budget
+    -- follows the notes that are left.
+    local kept = 0
+    for i = 1, #notes do
+        if notes[i].spawnT >= 0 then
+            kept = kept + 1
+            notes[kept] = notes[i]
+        end
+    end
+    for i = #notes, kept + 1, -1 do notes[i] = nil end
+    self:SetScoreBudget()
     tsort(notes, bySpawnT)
     self.chartCursor = 1
     return true
