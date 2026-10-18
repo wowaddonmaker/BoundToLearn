@@ -335,15 +335,6 @@ local function FreeNearKeys(mmoMouse, uniqueBinds, layout)
     return free
 end
 
--- "Free near keys: R, F, SHIFT-E and 12 more." for a far or stretch row.
-local function FreeKeysText(free)
-    local shown = {}
-    for i = 1, mmin(4, #free) do shown[i] = free[i] end
-    local more = #free - #shown
-    return sformat("Free near keys: %s%s.", table.concat(shown, ", "),
-        more > 0 and sformat(" and %d more", more) or "")
-end
-
 -- Reachability points for one bound slot. A modifier combo keeps a prime key's
 -- 100 (Shift-Q is the combo the audit asks for), but on a key the hand already
 -- stretches for, holding Ctrl or Shift with the pinky spreads it further.
@@ -579,11 +570,11 @@ function KeybindAudit:Scan(options)
         end
     end
 
-    -- Far keys and stretch combos point at the near keys still free. With every near
-    -- key and combo taken there is nothing better to offer: a stretch combo gets no
-    -- row, a far key says so.
+    -- Far keys and stretch combos say closer keys are free when any near key or combo
+    -- is unbound. With every one taken there is nothing better to offer: a stretch
+    -- combo gets no row, a far key says so.
     local freeNear = FreeNearKeys(mmoMouse, uniqueBinds, layout)
-    local freeText = #freeNear > 0 and FreeKeysText(freeNear) or nil
+    local freeText = #freeNear > 0 and "You have free keys closer to WASD. Move this to one of them." or nil
     for _, slotData in ipairs(allSlots) do
         if slotData.keybind and slotData.tier == "poor" then
             tinsert(issues, {
