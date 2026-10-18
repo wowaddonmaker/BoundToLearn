@@ -31,6 +31,49 @@ local SPAWN_MARGIN = 40
 local MODEL_RETRY = 0.35     -- seconds before a blank 3D target asks for its creature again
 local MODEL_GIVE_UP = 0.9    -- seconds before a still-blank 3D target shows its portrait
 
+-- Every 3D model here (start-screen previews, round targets) is fed through
+-- FeedModel. A PlayerModel comes back blank when fed while hidden, when the client
+-- has not cached the creature yet, and after its window was hidden and shown again.
+-- So a model is fed while visible, asked again after MODEL_RETRY, and checked at
+-- MODEL_GIVE_UP: with a model file it counts as loaded (onLoaded runs once), still
+-- blank it goes to onFail (the portrait stand-in). A newer feed cancels an older one.
+local function ModelBlank(model)
+    if model.GetModelFileID then
+        local file = model:GetModelFileID()
+        return not file or file == 0
+    end
+    return model.modelPending
+end
+
+local function FeedModel(model, npcID, onLoaded, onFail)
+    model.feedToken = (model.feedToken or 0) + 1
+    local token = model.feedToken
+    local function Current() return model.feedToken == token end
+    local loaded = false
+    local function Loaded(m)
+        if loaded or not Current() then return end
+        loaded = true
+        m.modelPending = false
+        if onLoaded then onLoaded(m) end
+    end
+    model.modelPending = true
+    model:SetScript("OnModelLoaded", Loaded)
+    model:ClearModel()
+    model:SetCreature(npcID)
+    C_Timer.After(MODEL_RETRY, function()
+        if Current() and model.modelPending and model:IsVisible() then model:SetCreature(npcID) end
+    end)
+    C_Timer.After(MODEL_GIVE_UP, function()
+        if not Current() then return end
+        if ModelBlank(model) then
+            model.modelPending = false
+            if onFail then onFail(model) end
+        else
+            Loaded(model)
+        end
+    end)
+end
+
 -- Target visuals
 local TARGET_COLORS = {
     [TARGET_ENEMY]  = { 0.9, 0.2, 0.2 },
@@ -892,13 +935,9 @@ function PingGameUI:CreateStartScreen()
         modelFrame:SetPortraitZoom(0)
         modelFrame:SetCamDistanceScale(1.5)
         modelFrame:SetPosition(0, 0, -0.5)
-        modelFrame:SetCreature(sc.npcID)
-        local capturedFacing, capturedAnim = sc.facing, sc.anim
-        modelFrame:SetScript("OnModelLoaded", function(self)
-            self:SetFacing(capturedFacing)
-            self:SetAnimation(capturedAnim)
-            self:SetScript("OnModelLoaded", nil)
-        end)
+        -- Fed each time it comes on screen (the window opening, the 3D style picked):
+        -- one fed at build time, while hidden, stayed blank.
+        modelFrame:HookScript("OnShow", function() PingGameUI:FeedShowcaseCell(i) end)
 
         -- Portraits style: a race/hazard icon in the same spot as the model.
         local portraitIcon = showcaseRow:CreateTexture(nil, "ARTWORK")
@@ -1619,6 +1658,7 @@ function PingGameUI:WarmTargetModels()
     end
     for i, id in ipairs(ids) do
         C_Timer.After(i * 0.1, function()
+            -- direct feed: a cache warm-up nobody sees, no stand-in needed
             if warmModel:IsVisible() then warmModel:SetCreature(id) end
         end)
     end
@@ -1655,8 +1695,10 @@ function PingGameUI:ModelCheck()
         probe:SetScript("OnModelLoaded", function()
             if not loadedAt then loadedAt = sformat("%.2fs on ask %d", GetTime() - start, ask) end
         end)
+        -- direct feed: the probe records what the client does on its own
         probe:SetCreature(id)
         C_Timer.After(0.6, function()
+            -- direct feed: the probe's own retry
             if not loadedAt then ask = 2; probe:SetCreature(id) end
         end)
         C_Timer.After(2, function()
@@ -1668,48 +1710,63 @@ function PingGameUI:ModelCheck()
     nextOne()
 end
 
+-- A preview's portrait (race or hazard icon), or its blob when no portrait exists:
+-- the portrait style, and the stand-in for a 3D preview that stays blank.
+local function ShowShowcasePortrait(cell)
+    if not cell.portraitSet then
+        if cell.targetType == TARGET_HAZARD then
+            cell.portrait:SetTexture(HAZARD_ICONS[math.random(#HAZARD_ICONS)])
+            cell.portrait:SetTexCoord(0, 1, 0, 1)
+            cell.portraitSet = true
+        else
+            local atlas = GetRandomRaceAtlas(cell.targetType == TARGET_ENEMY)
+            if atlas then
+                cell.portrait:SetAtlas(atlas)
+                cell.portrait:SetTexCoord(0, 1, 0, 1)
+                cell.portraitSet = true
+            end
+        end
+    end
+    if cell.portraitSet then
+        cell.portrait:Show()
+    else
+        cell.blob:Show(); cell.blobLabel:Show()
+    end
+end
+
+-- Feed start-screen preview i its creature (FeedModel), posed once it loads; a
+-- preview still blank shows its portrait until the next time it comes on screen.
+function PingGameUI:FeedShowcaseCell(i)
+    local cell = startFrame and startFrame.showcaseCells and startFrame.showcaseCells[i]
+    if not cell or not cell.model:IsVisible() then return end
+    cell.portrait:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()
+    local facing, anim = cell.facing, cell.anim
+    FeedModel(cell.model, cell.npcID, function(m)
+        cell.portrait:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()   -- a late load replaces the stand-in
+        m:SetFacing(facing)
+        m:SetAnimation(anim)
+    end, function()
+        if self:GetTargetStyle() == "3d" then ShowShowcasePortrait(cell) end
+    end)
+end
+
 -- Reflect the chosen icon style in the three start-screen previews, live.
 function PingGameUI:RefreshShowcase()
     if not startFrame or not startFrame.showcaseCells then return end
     local style = self:GetTargetStyle()
-    for _, cell in ipairs(startFrame.showcaseCells) do
+    for i, cell in ipairs(startFrame.showcaseCells) do
         if style == "3d" then
             cell.portrait:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()
-            -- A PlayerModel can render blank after a hide/show cycle, so re-feed the
-            -- creature whenever it transitions back to visible.
-            if not cell.model:IsShown() then
-                cell.model:Show()
-                cell.model:SetCreature(cell.npcID)
-                local facing, anim = cell.facing, cell.anim
-                cell.model:SetScript("OnModelLoaded", function(m)
-                    m:SetFacing(facing)
-                    m:SetAnimation(anim)
-                    m:SetScript("OnModelLoaded", nil)
-                end)
+            if cell.model:IsShown() then
+                self:FeedShowcaseCell(i)    -- does nothing while the window is hidden; OnShow feeds it then
+            else
+                cell.model:Show()           -- OnShow feeds it
             end
         elseif style == "blobs" then
             cell.model:Hide(); cell.portrait:Hide(); cell.blob:Show(); cell.blobLabel:Show()
         else
             cell.model:Hide(); cell.blob:Hide(); cell.blobLabel:Hide()
-            if not cell.portraitSet then
-                if cell.targetType == TARGET_HAZARD then
-                    cell.portrait:SetTexture(HAZARD_ICONS[math.random(#HAZARD_ICONS)])
-                    cell.portrait:SetTexCoord(0, 1, 0, 1)
-                    cell.portraitSet = true
-                else
-                    local atlas = GetRandomRaceAtlas(cell.targetType == TARGET_ENEMY)
-                    if atlas then
-                        cell.portrait:SetAtlas(atlas)
-                        cell.portrait:SetTexCoord(0, 1, 0, 1)
-                        cell.portraitSet = true
-                    end
-                end
-            end
-            if cell.portraitSet then
-                cell.portrait:Show()
-            else
-                cell.blob:Show(); cell.blobLabel:Show()
-            end
+            ShowShowcasePortrait(cell)
         end
     end
 end
@@ -1992,32 +2049,16 @@ function PingGameUI:OnTargetSpawned(target)
 
         local npcID = npcIDs[math.random(#npcIDs)]
         local facing = (math.random() - 0.5) * 1.05  -- -30 to +30 degrees
-        -- Show before feeding the creature: SetCreature on a hidden model (fresh from
-        -- the pool) can render blank on first appearance, matching the showcase re-feed.
+        -- Shown before FeedModel: a model fed while hidden renders blank.
         frame.model:Show()
-        frame.model:ClearModel()
         frame.model:SetPortraitZoom(0)
         frame.model:SetCamDistanceScale(1.4)
         frame.model:SetPosition(0, 0, -0.5)
-        frame.model:SetCreature(npcID)
-        -- A creature the client has not cached comes back blank on the first
-        -- ask, and one its server lacks never loads: ask once more, then show
-        -- the target's portrait so it is never invisible.
+        -- A creature still blank at MODEL_GIVE_UP shows the target's portrait, so a
+        -- target is never invisible. Facing and animation wait for the model.
         local thisTarget = target.id
-        frame.modelPending = true
-        C_Timer.After(MODEL_RETRY, function()
-            if frame.targetID == thisTarget and frame.modelPending then frame.model:SetCreature(npcID) end
-        end)
-        C_Timer.After(MODEL_GIVE_UP, function()
-            if frame.targetID == thisTarget and frame.modelPending then
-                frame.modelPending = false
-                frame.model:Hide()
-                ShowTargetPortrait(frame, targetType)
-            end
-        end)
-        -- Defer animation and facing until model loads
-        frame.model:SetScript("OnModelLoaded", function(self)
-            frame.modelPending = false
+        FeedModel(frame.model, npcID, function(self)
+            if frame.targetID ~= thisTarget then return end
             self:SetFacing(facing)
             if targetType == TARGET_ENEMY then
                 -- Try combat stance - guards are melee so 26 (ReadyUnarmed) should work
@@ -2031,7 +2072,10 @@ function PingGameUI:OnTargetSpawned(target)
             else
                 self:SetAnimation(0)    -- idle
             end
-            self:SetScript("OnModelLoaded", nil)
+        end, function()
+            if frame.targetID ~= thisTarget then return end
+            frame.model:Hide()
+            ShowTargetPortrait(frame, targetType)
         end)
         frame.modelHit:Show()
     else
