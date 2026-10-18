@@ -31,7 +31,7 @@ read_globals = {
     "EJ_GetCurrentTier", "EJ_GetInstanceByIndex", "EJ_GetNumTiers", "EJ_SelectTier", "Enum",
     "FindBaseSpellByID", "FreeTimerTrackerTimer", "GameTooltip",
     "GetActionBarToggles", "GetActionInfo", "GetActionText", "GetActionTexture", "GetAddOnInfo",
-    "GetAddOnMetadata", "GetBindingAction", "GetBindingKey", "GetBonusBarOffset", "GetBuildInfo",
+    "GetAddOnMemoryUsage", "GetAddOnMetadata", "GetBindingAction", "GetBindingKey", "GetBonusBarOffset", "GetBuildInfo",
     "GetChannelName", "GetCurrentBindingSet", "GetCursorPosition", "GetCVar", "GetLocale", "GetMacroBody",
     "GetMacroInfo", "GetNormalizedRealmName", "GetNumAddOns", "GetNumGroupMembers", "GetPhysicalScreenSize",
     "GetProfessionInfo", "GetProfessions", "GetRealmName", "GetTime", "GetUnitName",
@@ -41,4 +41,5 @@ read_globals = {
     "PlayMusic", "PlaySound", "PlaySoundFile", "SaveBindings", "SendChatMessage", "SetBinding", "SetCVar",
     "SetOverrideBinding", "Settings", "SOUNDKIT", "StopMusic", "StopSound", "TimerTracker_OnEvent",
     "UIParent", "UnitClass", "UnitExists", "UnitFactionGroup", "UnitIsPlayer", "UnitLevel", "UnitName",
+    "UpdateAddOnMemoryUsage",
 }

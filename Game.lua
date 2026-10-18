@@ -118,8 +118,8 @@ local DIFFICULTY_PRESETS = {
 -- fallback for a song with no known BPM.
 local BEATS_PER_NOTE = { Easy = 3, Medium = 2, Hard = 1.4, Extreme = 1 }
 
--- Real audio charts (ns.SongCharts): notes are {t, register 1-5, level 1-4}, one
--- per 16th slot so the stream is monophonic (never two binds at once). Difficulty
+-- Real audio charts (ns.SongCharts, read through SongData.ChartNotes): each note is a
+-- time, a register 1-5 and a level 1-4, one per 16th slot so the stream is monophonic (never two binds at once). Difficulty
 -- keeps notes up to its level; the active bind pool grows with difficulty so lower
 -- levels stay hittable. Rapid consecutive notes are kept to modifier-compatible
 -- binds so a fast run never demands releasing one modifier to press another.
@@ -937,15 +937,14 @@ function Game:BuildChart(key, diff)
     if not (chart and chart.notes and #chart.notes > 0) then return false end
     if #availableSlots == 0 then return false end
     local cutoff = gameDuration > 0 and gameDuration or 1e9
-    local src = chart.notes
     for lvl = 1, 4 do wipe(buildBuckets[lvl]) end
     local lastT = 0
-    for i = 1, #src do
-        local cn = src[i]
-        if cn[1] <= cutoff then
-            local bucket = buildBuckets[cn[3] or 1]
-            bucket[#bucket + 1] = cn[1]
-            if cn[1] > lastT then lastT = cn[1] end
+    for ms, _, lvl in ns.SongData.ChartNotes(chart) do
+        local t = tonumber(ms) / 1000
+        if t <= cutoff then
+            local bucket = buildBuckets[tonumber(lvl)]
+            bucket[#bucket + 1] = t
+            if t > lastT then lastT = t end
         end
     end
     local roundLen = (gameDuration > 0 and gameDuration) or lastT

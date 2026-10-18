@@ -366,6 +366,8 @@ local function OnInitialize()
             BoundToLearn:SongCheck()
         elseif msg == "chartcheck" then
             if ns.Game then ns.Game:ChartCheck() end
+        elseif msg == "memcheck" then
+            BoundToLearn:MemCheck()
         elseif msg == "auditlist" then
             if ns.KeybindAudit then ns.KeybindAudit:ListActions() end
         elseif msg == "modelcheck" then
@@ -491,6 +493,31 @@ function BoundToLearn:SongCheck()
         tostring(GetCVar("Sound_EnableMusic")), tostring(GetCVar("Sound_MasterVolume")),
         tostring(GetCVar("Sound_MusicVolume")), first.key, first.id, try("Master"), try("Music"))
     BoundToLearnDB.songReport = lines
+    for _, line in ipairs(lines) do Utils.Print(line) end
+end
+
+-- Probe (/btl memcheck): this addon's memory as the client counts it, then again
+-- after a full garbage collection (the first figure still holds garbage the client
+-- has not collected yet). Printed, and saved in BoundToLearnDB.memReport.
+function BoundToLearn:MemCheck()
+    local usage = (C_AddOns and C_AddOns.GetAddOnMemoryUsage) or GetAddOnMemoryUsage
+    UpdateAddOnMemoryUsage()
+    local before = usage(ADDON_NAME)
+    collectgarbage("collect")
+    UpdateAddOnMemoryUsage()
+    local after = usage(ADDON_NAME)
+    local charts, chartBytes = 0, 0
+    for _, chart in pairs(ns.SongCharts or {}) do
+        charts = charts + 1
+        chartBytes = chartBytes + #chart.notes
+    end
+    local lines = {
+        sformat("Version %s on %s, %s", tostring(ns.version), Utils.IS_FOREVER and "Forever" or "retail",
+            date("%Y-%m-%d %H:%M")),
+        sformat("Memory %.0f KB, %.0f KB after a full garbage collection", before, after),
+        sformat("Song charts: %d, %.0f KB of note text", charts, chartBytes / 1024),
+    }
+    BoundToLearnDB.memReport = lines
     for _, line in ipairs(lines) do Utils.Print(line) end
 end
 

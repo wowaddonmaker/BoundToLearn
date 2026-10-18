@@ -439,15 +439,22 @@ local DIFF_GROOVE_SCALE = { Easy = 0.55, Medium = 0.75, Hard = 0.9, Extreme = 1.
 -- notes crawl, Extreme fly. Hard and Extreme share the fall speed, so Extreme only
 -- edges ahead on the extra density it also brings.
 local DIFF_SPEED_SCALE = { Easy = 0.40, Medium = 0.72, Hard = 0.92, Extreme = 1.0 }
+-- A chart's notes are one string, a word per note: time in ms, then register (1-5)
+-- and level (1-4) as one digit each. Unpacked only for the track in use; as a table
+-- per note, the 104 charts held over 4 MB all session. Yields ms, register, level as
+-- strings.
+function SongData.ChartNotes(chart)
+    return chart.notes:gmatch("(%d+)(%d)(%d)")
+end
+
 local function chartGroove(key)
     local chart = ns.SongCharts and ns.SongCharts[key]
     if not (chart and chart.notes and #chart.notes > 0) then return nil end
-    local notes, l2, l34 = chart.notes, 0, 0
-    local total = #notes
-    for i = 1, total do
-        local lv = notes[i][3] or 1
-        if lv == 2 then l2 = l2 + 1
-        elseif lv >= 3 then l34 = l34 + 1 end
+    local total, l2, l34 = 0, 0, 0
+    for _, _, lv in SongData.ChartNotes(chart) do
+        total = total + 1
+        if lv == "2" then l2 = l2 + 1
+        elseif lv ~= "1" then l34 = l34 + 1 end
     end
     return {
         density = total / mmax(1, chart.duration or 1),
