@@ -253,11 +253,26 @@ local function StripModifiers(bind)
     return base, hasModifier
 end
 
-local function ClassifyKey(bind, mmoMouse, uniqueBinds)
+-- The left hand on the movement keys reaches as far as the 6/Y/H/N column (x 7.25
+-- on the layout maps). A key right of it (U, I, O, P, J, K, L, M and beyond) is the
+-- right hand's, as far a reach as 7-0.
+local LEFT_HAND_MAX_X = 7.3
+
+-- Keys the layout maps do not place, all on the right side of the keyboard.
+local RIGHT_SIDE_KEYS = {
+    ["["] = true, ["]"] = true, ["\\"] = true, [";"] = true, ["'"] = true,
+    [","] = true, ["."] = true, ["/"] = true, ["ENTER"] = true, ["BACKSPACE"] = true,
+    ["INSERT"] = true, ["HOME"] = true, ["PAGEUP"] = true, ["DELETE"] = true,
+    ["END"] = true, ["PAGEDOWN"] = true, ["UP"] = true, ["DOWN"] = true,
+    ["LEFT"] = true, ["RIGHT"] = true,
+}
+
+local function ClassifyKey(bind, mmoMouse, uniqueBinds, layout)
     local base, hasModifier = StripModifiers(bind)
     -- A key the player has declared on their mouse is fully reachable; any other
     -- declared location (numpad, function row, other) is a far reach.
     local declared = uniqueBinds and uniqueBinds[base]
+    local pos = layout and layout[base]
     local tier
     if declared == "mouse" then
         tier = "prime"
@@ -269,8 +284,12 @@ local function ClassifyKey(bind, mmoMouse, uniqueBinds)
         tier = "prime"
     elseif POOR_KEYS[base] then
         tier = "poor"
+    elseif pos and pos[1] > LEFT_HAND_MAX_X then
+        tier = "poor"
+    elseif not pos and (RIGHT_SIDE_KEYS[base] or base:find("^NUMPAD")) then
+        tier = "poor"
     else
-        tier = "acceptable"
+        tier = "acceptable"   -- 6, Y, H, N, Space, the mouse wheel, extra mouse buttons
     end
     return tier, hasModifier, base
 end
@@ -321,6 +340,8 @@ function KeybindAudit:Scan(options)
     local barFilter = options.barFilter
     local mmoMouse = options.mmoMouse
     local uniqueBinds = options.uniqueBinds
+    local keyboardLayout = options.keyboardLayout or "QWERTY"
+    local layout = KEYBOARD_LAYOUTS[keyboardLayout] or KEYBOARD_LAYOUTS.QWERTY
     local ShouldIgnoreAction = ns.Tracker and ns.Tracker.ShouldIgnoreAction
     if ns.Tracker and ns.Tracker.BuildProfessionCache then ns.Tracker.BuildProfessionCache() end
 
@@ -372,7 +393,7 @@ function KeybindAudit:Scan(options)
 
                         local tier, hasModifier, base
                         if keybind then
-                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse, uniqueBinds)
+                            tier, hasModifier, base = ClassifyKey(keybind, mmoMouse, uniqueBinds, layout)
                         end
 
                         -- Resolve spell role for grouping
@@ -520,8 +541,6 @@ function KeybindAudit:Scan(options)
     -- Measures physical key proximity of abilities in the same role group
     -- (defensives near each other, CCs near each other, etc.)
     local includeGrouping = options.includeGrouping
-    local keyboardLayout = options.keyboardLayout or "QWERTY"
-    local layout = KEYBOARD_LAYOUTS[keyboardLayout] or KEYBOARD_LAYOUTS.QWERTY
     local groupingScore
     local roleGroups = {}  -- role → { baseKeys = {}, slots = {} }
 
