@@ -58,8 +58,7 @@ local function FeedModel(model, npcID, onLoaded, onFail)
     end
     model.modelPending = true
     model:SetScript("OnModelLoaded", Loaded)
-    model:ClearModel()
-    model:SetCreature(npcID)
+    model:SetCreature(npcID)   -- a model switching creature is cleared (ClearModel) by its caller first
     C_Timer.After(MODEL_RETRY, function()
         if Current() and model.modelPending and model:IsVisible() then model:SetCreature(npcID) end
     end)
@@ -122,6 +121,22 @@ local HORDE_NPC_IDS = {
     5953,   -- Sen'jin Guardian (Troll)
     16227,  -- Silvermoon City Guardian (Blood Elf)
 }
+-- Creatures this client never loads a model for, left out of every pick. The in-round
+-- probe (BoundToLearnDB.modelLog) showed Forever has no Gilnean Survivor (44914):
+-- never loaded, 3 of 3. One that fails to load during a session joins at runtime.
+local unloadableNPC = {}
+if Utils.IS_FOREVER then unloadableNPC[44914] = true end
+
+-- A random creature from list that this client loads (the whole list if none does).
+local function PickNPC(list)
+    local ok = {}
+    for _, id in ipairs(list) do
+        if not unloadableNPC[id] then ok[#ok + 1] = id end
+    end
+    if #ok == 0 then ok = list end
+    return ok[math.random(#ok)]
+end
+
 local playerFaction
 
 -- Backgrounds: texture, music FileDataID, unlock requirement, display name
@@ -2080,10 +2095,12 @@ function PingGameUI:OnTargetSpawned(target)
             npcIDs = allyNPCs
         end
 
-        local npcID = npcIDs[math.random(#npcIDs)]
+        local npcID = PickNPC(npcIDs)
         local facing = (math.random() - 0.5) * 1.05  -- -30 to +30 degrees
-        -- Shown before FeedModel: a model fed while hidden renders blank.
+        -- Shown before FeedModel: a model fed while hidden renders blank. Cleared
+        -- before the camera is set, the order a target always loaded in.
         frame.model:Show()
+        frame.model:ClearModel()
         frame.model:SetPortraitZoom(0)
         frame.model:SetCamDistanceScale(1.4)
         frame.model:SetPosition(0, 0, -0.5)
@@ -2110,6 +2127,7 @@ function PingGameUI:OnTargetSpawned(target)
             self:SetAnimation(anim)
         end, function()
             fellBack = true
+            unloadableNPC[npcID] = true   -- not picked again this session
             if frame.targetID ~= thisTarget then return end
             frame.model:Hide()
             ShowTargetPortrait(frame, targetType)
