@@ -574,7 +574,7 @@ function KeybindAudit:Scan(options)
     -- is unbound. With every one taken there is nothing better to offer: a stretch
     -- combo gets no row, a far key says so.
     local freeNear = FreeNearKeys(mmoMouse, uniqueBinds, layout)
-    local freeText = #freeNear > 0 and "You have free keys closer to WASD. Move this to one of them." or nil
+    local freeText = #freeNear > 0 and "Some keys closer to WASD are still free. It may be worth moving this to one." or nil
     for _, slotData in ipairs(allSlots) do
         if slotData.keybind and slotData.tier == "poor" then
             tinsert(issues, {
