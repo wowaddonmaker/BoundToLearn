@@ -294,6 +294,56 @@ local function ClassifyKey(bind, mmoMouse, uniqueBinds, layout)
     return tier, hasModifier, base
 end
 
+-- Where the left hand rests on the movement keys (centre of W, A, S, D on the maps).
+local MOVE_HOME_X, MOVE_HOME_Y = 2.69, 1.75
+
+-- Near keys and their Shift, Ctrl and Alt combos that nothing is bound to, easiest
+-- first: every free plain key, keyboard keys nearest WASD first and then mouse
+-- buttons (and the MMO thumb grid), then each modifier's combos in that order.
+local function FreeNearKeys(mmoMouse, uniqueBinds, layout)
+    local bases, seen = {}, {}
+    local function add(k)
+        if not seen[k] then seen[k] = true; bases[#bases + 1] = k end
+    end
+    for k in pairs(PRIME_KEYS) do add(k) end
+    if mmoMouse then for k in pairs(MMO_MOUSE_PRIME) do add(k) end end
+    if uniqueBinds then
+        for k, where in pairs(uniqueBinds) do
+            if where == "mouse" then add(k) end
+        end
+    end
+    local function reach(k)
+        local p = layout[k]
+        if not p or (mmoMouse and MMO_MOUSE_PRIME[k]) or (uniqueBinds and uniqueBinds[k] == "mouse") then
+            return 100   -- after every keyboard key (the farthest near key is under 15)
+        end
+        local dx, dy = p[1] - MOVE_HOME_X, p[2] - MOVE_HOME_Y
+        return dx * dx + dy * dy
+    end
+    table.sort(bases, function(a, b)
+        local ra, rb = reach(a), reach(b)
+        if ra ~= rb then return ra < rb end
+        return a < b
+    end)
+    local free = {}
+    for _, mod in ipairs({ "", "SHIFT-", "CTRL-", "ALT-" }) do
+        for _, base in ipairs(bases) do
+            local action = GetBindingAction(mod .. base)
+            if not action or action == "" then free[#free + 1] = mod .. base end
+        end
+    end
+    return free
+end
+
+-- "Free near keys: R, F, SHIFT-E and 12 more." for a far or stretch row.
+local function FreeKeysText(free)
+    local shown = {}
+    for i = 1, mmin(4, #free) do shown[i] = free[i] end
+    local more = #free - #shown
+    return sformat("Free near keys: %s%s.", table.concat(shown, ", "),
+        more > 0 and sformat(" and %d more", more) or "")
+end
+
 -- Reachability points for one bound slot. A modifier combo keeps a prime key's
 -- 100 (Shift-Q is the combo the audit asks for), but on a key the hand already
 -- stretches for, holding Ctrl or Shift with the pinky spreads it further.
@@ -361,6 +411,7 @@ function KeybindAudit:Scan(options)
     local bars = {}
     local allSlots = {}
     local issues = {}
+    local scanLog = {}   -- every slot of the audited bars and what the audit made of it
 
     local totalFilled = 0
     local totalBound = 0
@@ -452,6 +503,16 @@ function KeybindAudit:Scan(options)
                             reachSum = reachSum + KeybindAudit.ReachPoints(tier, hasModifier)
                             if tier == "poor" then poorCount = poorCount + 1 end
                         end
+                        scanLog[#scanLog + 1] = sformat("%s #%d (slot %d): %s (%s %s) %s", resolvedLabel, i, slot,
+                            name, tostring(actionType), tostring(actionId), keybind and sformat("%s, %s, %d pts",
+                            keybind, tier, KeybindAudit.ReachPoints(tier, hasModifier)) or "unbound")
+                else
+                    -- What the audit left out, for /btl auditlist.
+                    local actionType, actionId = GetActionInfo(slot)
+                    scanLog[#scanLog + 1] = sformat("%s #%d (slot %d): %s, key %s", resolvedLabel, i, slot,
+                        HasAction(slot) and sformat("%s (%s %s) skipped by a filter", GetActionName(slot) or "?",
+                            tostring(actionType), tostring(actionId)) or "empty",
+                        tostring(GetBindingKey(barDef.bindPrefix .. i)))
                 end
             end
 
@@ -518,6 +579,11 @@ function KeybindAudit:Scan(options)
         end
     end
 
+    -- Far keys and stretch combos point at the near keys still free. With every near
+    -- key and combo taken there is nothing better to offer: a stretch combo gets no
+    -- row, a far key says so.
+    local freeNear = FreeNearKeys(mmoMouse, uniqueBinds, layout)
+    local freeText = #freeNear > 0 and FreeKeysText(freeNear) or nil
     for _, slotData in ipairs(allSlots) do
         if slotData.keybind and slotData.tier == "poor" then
             tinsert(issues, {
@@ -526,16 +592,16 @@ function KeybindAudit:Scan(options)
                 kind = "distant",
                 barKey = slotData.barKey,
                 text = sformat("%s is on a distant key (%s)", slotData.actionName, slotData.keybind),
-                detail = "Move this to a key closer to WASD for faster access.",
+                detail = freeText or "Every near key and combo is taken, so this reach is hard to avoid.",
             })
-        elseif slotData.keybind and slotData.tier == "acceptable" and slotData.hasModifier then
+        elseif freeText and slotData.keybind and slotData.tier == "acceptable" and slotData.hasModifier then
             tinsert(issues, {
                 severity = "low",
                 icon = slotData.icon,
                 kind = "stretch",
                 barKey = slotData.barKey,
                 text = sformat("%s is a modifier on a stretch key (%s)", slotData.actionName, slotData.keybind),
-                detail = "Holding the modifier while reaching this far spreads the hand. A combo on a prime key is quicker.",
+                detail = freeText,
             })
         end
     end
@@ -671,6 +737,8 @@ function KeybindAudit:Scan(options)
         roleGroups = roleGroups,
         roleScores = roleScores,
         keyboardLayout = keyboardLayout,
+        freeNearKeys = freeNear,
+        scanLog = scanLog,
     }
 
     return auditResults
@@ -689,11 +757,14 @@ function KeybindAudit:ListActions()
         BoundToLearn:Print("Run the Keybind Audit first, then /btl auditlist.")
         return
     end
+    -- Every slot of the audited bars (counted with its key, tier and points, or why
+    -- it was left out), the free near keys, then every recommendation.
     local lines = {}
-    for _, s in ipairs(results.allSlots) do
-        lines[#lines + 1] = sformat("%s: %s (%s %s) %s", tostring(s.barLabel), tostring(s.actionName),
-            tostring(s.actionType), tostring(s.actionId), s.keybind or "unbound")
+    for _, l in ipairs(results.scanLog or {}) do lines[#lines + 1] = l end
+    lines[#lines + 1] = "Free near keys: " .. table.concat(results.freeNearKeys or {}, ", ")
+    for _, issue in ipairs(results.issues) do
+        lines[#lines + 1] = "Issue: " .. issue.text .. (issue.detail and (" | " .. issue.detail) or "")
     end
     BoundToLearnDB.auditActions = lines
-    BoundToLearn:Print(sformat("Audit counted %d actions; saved for review.", #lines))
+    BoundToLearn:Print(sformat("Audit counted %d actions; every slot saved for review.", #results.allSlots))
 end
