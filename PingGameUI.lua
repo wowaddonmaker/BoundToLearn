@@ -74,7 +74,9 @@ local function FeedModel(model, npcID, onLoaded, onFail)
         if Current() and model.modelPending and model:IsVisible() then model:SetCreature(npcID) end
     end)
     C_Timer.After(MODEL_GIVE_UP, function()
-        if not Current() then return end
+        -- A model its owner hid meanwhile (a target hit within MODEL_GIVE_UP) reads as
+        -- blank but proves nothing: only a model still on screen is judged.
+        if not Current() or not model:IsVisible() then return end
         if ModelBlank(model) then
             model.modelPending = false
             if onFail then onFail(model) end
@@ -2152,8 +2154,8 @@ function PingGameUI:OnTargetSpawned(target)
             self:SetAnimation(probe.anim)
         end, function()
             probe.fellBack = true
-            unloadableNPC[npcID] = true   -- not picked again this session
             if frame.targetID ~= thisTarget then return end
+            if not probe.loadedAt then unloadableNPC[npcID] = true end   -- never loaded: not picked again this session
             frame.model:Hide()
             ShowTargetPortrait(frame, targetType)
         end)
