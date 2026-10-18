@@ -2,6 +2,13 @@
 
 All notable changes to BoundToLearn are documented here.
 
+## [1.2.2] - 2026-10-17
+
+### Fixed
+- **Ping Trainer 3D models**: The figures on the start screen and the targets in a round no longer go missing. A figure that will not load shows a portrait instead, and on WoW Forever the one ally figure that client does not have is no longer picked.
+
+---
+
 ## [1.2.1] - 2026-10-17
 
 ### Changed
