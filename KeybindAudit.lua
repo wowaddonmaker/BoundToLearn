@@ -294,6 +294,19 @@ local function ClassifyKey(bind, mmoMouse, uniqueBinds, layout)
     return tier, hasModifier, base
 end
 
+-- Reachability points for one bound slot. A modifier combo keeps a prime key's
+-- 100 (Shift-Q is the combo the audit asks for), but on a key the hand already
+-- stretches for, holding Ctrl or Shift with the pinky spreads it further.
+local REACH_POINTS = {
+    prime      = { 100, 100 },
+    acceptable = { 60, 40 },
+    poor       = { 20, 10 },
+}
+function KeybindAudit.ReachPoints(tier, hasModifier)
+    local p = REACH_POINTS[tier] or REACH_POINTS.acceptable
+    return hasModifier and p[2] or p[1]
+end
+
 
 local function GetActionName(slot)
     local actionType, id = GetActionInfo(slot)
@@ -436,14 +449,8 @@ function KeybindAudit:Scan(options)
                                 if tier ~= "poor" then nearModified = nearModified + 1 end
                             end
 
-                            if tier == "prime" then
-                                reachSum = reachSum + 100
-                            elseif tier == "acceptable" then
-                                reachSum = reachSum + 60
-                            else
-                                reachSum = reachSum + 20
-                                poorCount = poorCount + 1
-                            end
+                            reachSum = reachSum + KeybindAudit.ReachPoints(tier, hasModifier)
+                            if tier == "poor" then poorCount = poorCount + 1 end
                         end
                 end
             end
@@ -520,6 +527,15 @@ function KeybindAudit:Scan(options)
                 barKey = slotData.barKey,
                 text = sformat("%s is on a distant key (%s)", slotData.actionName, slotData.keybind),
                 detail = "Move this to a key closer to WASD for faster access.",
+            })
+        elseif slotData.keybind and slotData.tier == "acceptable" and slotData.hasModifier then
+            tinsert(issues, {
+                severity = "low",
+                icon = slotData.icon,
+                kind = "stretch",
+                barKey = slotData.barKey,
+                text = sformat("%s is a modifier on a stretch key (%s)", slotData.actionName, slotData.keybind),
+                detail = "Holding the modifier while reaching this far spreads the hand. A combo on a prime key is quicker.",
             })
         end
     end

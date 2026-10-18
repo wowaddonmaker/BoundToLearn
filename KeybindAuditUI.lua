@@ -889,7 +889,9 @@ function KeybindAuditUI:CreateMethodologyPage()
         .. "  |cFFDDDD44Acceptable (60)|r: 6, Y, H, N, Space, the mouse wheel\n"
         .. "  |cFFDD8844Poor (20)|r: 7-0, -, =, F1-F12, and the right hand's keys: everything right of "
         .. "6/Y/H/N (U, I, O, P, J, K, L, M and on), the numpad, arrows and the Insert/Home block\n"
-        .. "Modifier combos (Shift-Q, Ctrl-3) inherit their base key's tier.\n\n"
+        .. "A modifier combo on a prime key (Shift-Q, Ctrl-3) keeps its 100. On an acceptable or "
+        .. "poor key the hand already stretches, and holding Shift, Ctrl or Alt spreads it further: "
+        .. "those combos score 40 and 10.\n\n"
         .. "|cFFFF8A33Modifier Usage (15%)|r\n"
         .. "Modifiers are expected only once your abilities outnumber your prime keys (22 above, "
         .. "29 with the MMO mouse option). Past that, scored by how many of the extra abilities sit on "
@@ -1007,17 +1009,18 @@ local function BuildReachabilityDetail(results)
         end
     end
     tinsert(lines, sformat("\nAverage reachability across %d bound slots.", results.totalBound))
-    tinsert(lines, sformat("\n  %sPrime: %d|r (100 pts each)", TIER_COLORS.prime, primeCount))
-    tinsert(lines, sformat("  %sAcceptable: %d|r (60 pts each)", TIER_COLORS.acceptable, acceptCount))
-    tinsert(lines, sformat("  %sPoor: %d|r (20 pts each)", TIER_COLORS.poor, poorCount))
+    tinsert(lines, sformat("\n  %sPrime: %d|r (100 pts each, with or without a modifier)", TIER_COLORS.prime, primeCount))
+    tinsert(lines, sformat("  %sAcceptable: %d|r (60 pts each, 40 with a modifier)", TIER_COLORS.acceptable, acceptCount))
+    tinsert(lines, sformat("  %sPoor: %d|r (20 pts each, 10 with a modifier)", TIER_COLORS.poor, poorCount))
     tinsert(lines, "\n\n|cFFFF8A33Bound slots:|r")
     for _, slot in ipairs(results.allSlots) do
         if slot.keybind then
             local tc = TIER_COLORS[slot.tier] or TIER_COLORS.acceptable
-            tinsert(lines, sformat("  %s%s|r - %s (%s)", tc, slot.keybind, slot.actionName, slot.tier))
+            tinsert(lines, sformat("  %s%s|r - %s (%s, %d pts)", tc, slot.keybind, slot.actionName, slot.tier,
+                ns.KeybindAudit.ReachPoints(slot.tier, slot.hasModifier)))
         end
     end
-    tinsert(lines, "\n\n|cFF666666Reachability scores how close your keybinds are to WASD. Prime keys (1-5, Q, E, R, F, etc.) score 100, acceptable keys score 60, and distant keys (7-0, F1-F12) score 20.|r")
+    tinsert(lines, "\n\n|cFF666666Reachability scores how close your keybinds are to WASD. Prime keys (1-5, Q, E, R, F, etc.) score 100, acceptable keys (6, Y, H, N) 60, and distant keys (7-0, F1-F12, the right hand's keys) 20. A modifier on a prime key costs nothing; on an acceptable or distant key, where the hand already stretches, it drops the slot to 40 or 10.|r")
     return table.concat(lines, "\n")
 end
 
@@ -1397,14 +1400,16 @@ function KeybindAuditUI:RefreshResults()
     for _, barDef in ipairs(results.barOrder or {}) do
         local list = byBar[barDef.key]
         if list then
-            local unbound, distant = 0, 0
+            local unbound, distant, stretch = 0, 0, 0
             for _, issue in ipairs(list) do
                 if issue.kind == "unbound" then unbound = unbound + 1 end
                 if issue.kind == "distant" then distant = distant + 1 end
+                if issue.kind == "stretch" then stretch = stretch + 1 end
             end
             local tally = {}
             if unbound > 0 then tally[#tally + 1] = sformat("%d unbound", unbound) end
             if distant > 0 then tally[#tally + 1] = sformat("%d on distant keys", distant) end
+            if stretch > 0 then tally[#tally + 1] = sformat("%d stretch combos", stretch) end
             local bar = results.bars and results.bars[barDef.key]
             tinsert(entries, { header = (bar and bar.label or barDef.label), tally = table.concat(tally, ", ") })
             for _, issue in ipairs(list) do tinsert(entries, issue) end
