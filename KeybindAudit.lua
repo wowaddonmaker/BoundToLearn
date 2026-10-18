@@ -512,7 +512,7 @@ function KeybindAudit:Scan(options)
                     scanLog[#scanLog + 1] = sformat("%s #%d (slot %d): %s, key %s", resolvedLabel, i, slot,
                         HasAction(slot) and sformat("%s (%s %s) skipped by a filter", GetActionName(slot) or "?",
                             tostring(actionType), tostring(actionId)) or "empty",
-                        tostring(GetBindingKey(barDef.bindPrefix .. i)))
+                        GetBindingKey(barDef.bindPrefix .. i) or "none")
                 end
             end
 
