@@ -1710,6 +1710,35 @@ function PingGameUI:ModelCheck()
     nextOne()
 end
 
+-- Probe: a ring of the last MODEL_LOG_MAX lines in BoundToLearnDB.modelLog, one per
+-- 3D round target 2 s after it spawned (what its model did and whether it shows),
+-- plus a line at each round start. Read from SavedVariables after a /reload.
+local MODEL_LOG_MAX = 150
+local function LogModelLine(line)
+    local log = BoundToLearnDB.modelLog
+    if type(log) ~= "table" then log = {}; BoundToLearnDB.modelLog = log end
+    log[#log + 1] = line
+    while #log > MODEL_LOG_MAX do table.remove(log, 1) end
+end
+
+function PingGameUI:LogTargetModel(frame, targetID, npcID, targetType, loadedAt, fellBack, anim)
+    local m = frame.model
+    local function call(obj, name, ...)
+        if not obj[name] then return "n/a" end
+        local ok, a, b, c = pcall(obj[name], obj, ...)
+        if not ok then return "err" end
+        if c ~= nil then return sformat("%.2f,%.2f,%.2f", a or 0, b or 0, c) end
+        return tostring(a)
+    end
+    LogModelLine(sformat("npc %d %s: loaded %s, fell back %s, anim %s | alive %s, frame shown %s alpha %.2f"
+        .. " | model shown %s visible %s alpha %s file %s display %s size %.0fx%.0f cam %s pos %s",
+        npcID, TARGET_LABELS[targetType] or "?", loadedAt and sformat("%.2fs", loadedAt) or "never",
+        tostring(fellBack), tostring(anim), tostring(frame.targetID == targetID), tostring(frame:IsShown()),
+        frame:GetEffectiveAlpha(), tostring(m:IsShown()), tostring(m:IsVisible()), call(m, "GetEffectiveAlpha"),
+        call(m, "GetModelFileID"), call(m, "GetDisplayInfo"), m:GetWidth(), m:GetHeight(),
+        call(m, "GetCameraDistance"), call(m, "GetPosition")))
+end
+
 -- A preview's portrait (race or hazard icon), or its blob when no portrait exists:
 -- the portrait style, and the stand-in for a 3D preview that stays blank.
 local function ShowShowcasePortrait(cell)
@@ -1826,6 +1855,10 @@ function PingGameUI:OnGameStart()
     end
     wipe(activeTargetFrames)
     ClearRoundEffects()
+    if self:GetTargetStyle() == "3d" then
+        LogModelLine(sformat("Round start on %s, %s, %s", Utils.IS_FOREVER and "Forever" or "retail",
+            tostring(UnitFactionGroup("player")), date("%H:%M:%S")))
+    end
 end
 
 function PingGameUI:OnGameEnd(results)
@@ -2057,26 +2090,33 @@ function PingGameUI:OnTargetSpawned(target)
         -- A creature still blank at MODEL_GIVE_UP shows the target's portrait, so a
         -- target is never invisible. Facing and animation wait for the model.
         local thisTarget = target.id
+        local spawnAt, loadedAt, fellBack, anim = GetTime(), nil, false, nil
         FeedModel(frame.model, npcID, function(self)
+            loadedAt = GetTime() - spawnAt
             if frame.targetID ~= thisTarget then return end
             self:SetFacing(facing)
             if targetType == TARGET_ENEMY then
                 -- Try combat stance - guards are melee so 26 (ReadyUnarmed) should work
                 -- If NPC doesn't support it, WoW falls back to 0 (idle)
                 -- Use FreezeAnimation to lock a single attack frame instead
-                self:SetAnimation(26)   -- ReadyUnarmed
+                anim = 26               -- ReadyUnarmed
             elseif targetType == TARGET_HAZARD then
-                self:SetAnimation(4)    -- walking
+                anim = 4                -- walking
             elseif targetType == TARGET_ALLY then
-                self:SetAnimation(ALLY_SPAWN_ANIMS[math.random(#ALLY_SPAWN_ANIMS)])
+                anim = ALLY_SPAWN_ANIMS[math.random(#ALLY_SPAWN_ANIMS)]
             else
-                self:SetAnimation(0)    -- idle
+                anim = 0                -- idle
             end
+            self:SetAnimation(anim)
         end, function()
+            fellBack = true
             if frame.targetID ~= thisTarget then return end
             frame.model:Hide()
             ShowTargetPortrait(frame, targetType)
         end)
+        -- Probe: what each 3D target's model did, 2 s after it spawned (ring of the
+        -- last MODEL_LOG_MAX in BoundToLearnDB.modelLog, read after a /reload).
+        C_Timer.After(2, function() self:LogTargetModel(frame, thisTarget, npcID, targetType, loadedAt, fellBack, anim) end)
         frame.modelHit:Show()
     else
         -- Portraits (default): race icon atlas for enemy/ally, hazard icon for hazards
