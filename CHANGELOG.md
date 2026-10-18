@@ -2,6 +2,20 @@
 
 All notable changes to BoundToLearn are documented here.
 
+## [1.2.1] - 2026-10-17
+
+### Changed
+- **Icon Game start**: The song and the first falling note start together the moment the countdown ends. Songs with a quiet opening play it silently during the countdown, so the real music is playing on GO; the countdown runs up to 5 seconds for longer openings.
+- **Icon Game life bar**: The life bar is much wider, using the room the score, combo and timer leave free.
+- **Keybind Audit reach**: Keys for the right hand (U, I, O, P, J, K, L, M and everything right of them, the numpad and the arrows) now count as distant keys, like 7 to 0.
+- **Keybind Audit modifier combos**: A Shift, Ctrl or Alt combo on a key that is already a stretch (6, Y, H, N) or a distant key scores lower than the key alone. Combos on keys near WASD still score in full.
+- **Keybind Audit suggestions**: Distant keys and stretch combos mention when keys closer to WASD are still free.
+
+### Fixed
+- **Icon Game**: A different-sounding sting no longer plays over the first seconds of a song, and the music no longer fades in from silence.
+
+---
+
 ## [1.2.0] - 2026-10-17
 
 ### Added
