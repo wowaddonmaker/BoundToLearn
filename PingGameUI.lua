@@ -45,6 +45,17 @@ local function ModelBlank(model)
     return model.modelPending
 end
 
+-- Probe: a ring of the last MODEL_LOG_MAX lines in BoundToLearnDB.modelLog: one per
+-- 3D round target when it goes (its whole life, sampled by SampleTargetModels), plus
+-- a line at each round start. Read from SavedVariables after a /reload.
+local MODEL_LOG_MAX = 150
+local function LogModelLine(line)
+    local log = BoundToLearnDB.modelLog
+    if type(log) ~= "table" then log = {}; BoundToLearnDB.modelLog = log end
+    log[#log + 1] = line
+    while #log > MODEL_LOG_MAX do table.remove(log, 1) end
+end
+
 local function FeedModel(model, npcID, onLoaded, onFail)
     model.feedToken = (model.feedToken or 0) + 1
     local token = model.feedToken
@@ -588,6 +599,16 @@ local function AcquireTarget()
 end
 
 local function ReleaseTarget(frame)
+    local p = frame.probe
+    if p then
+        frame.probe = nil
+        LogModelLine(sformat("npc %d %s: lived %.1fs, model on screen %.1fs, blank on screen %.1fs, "
+            .. "model file after %s, loaded %s, fell back %s, anim %s, past the arena %s, file %s display %s",
+            p.npc, p.kind, GetTime() - p.spawnAt, p.shown, p.blank,
+            p.fileAt and sformat("%.2fs", p.fileAt) or "never", p.loadedAt and sformat("%.2fs", p.loadedAt) or "never",
+            tostring(p.fellBack or false), tostring(p.anim), tostring(p.outside or false), tostring(p.file),
+            tostring(p.display)))
+    end
     frame:Hide()
     frame:ClearAllPoints()
     frame:SetScript("OnUpdate", nil)
@@ -608,6 +629,34 @@ local function ReleaseTarget(frame)
         hoveredTargetID = nil
     end
     tinsert(targetPool, frame)
+end
+
+-- Probe sampler: every 0.1 s of a round, each 3D target's model while it is on
+-- screen. No model file counts as blank; an edge past the arena is noted.
+local modelSampler
+local function SampleTargetModels(ticker)
+    if not (gameArea and gameArea:IsVisible()) then
+        ticker:Cancel()
+        if modelSampler == ticker then modelSampler = nil end
+        return
+    end
+    local now = GetTime()
+    local aL, aR, aB, aT = gameArea:GetLeft(), gameArea:GetRight(), gameArea:GetBottom(), gameArea:GetTop()
+    for _, frame in pairs(activeTargetFrames) do
+        local p, m = frame.probe, frame.model
+        if p and m:IsVisible() then
+            p.shown = p.shown + 0.1
+            if ModelBlank(m) then
+                p.blank = p.blank + 0.1
+            else
+                p.fileAt = p.fileAt or (now - p.spawnAt)
+                p.file = m:GetModelFileID()
+                p.display = m.GetDisplayInfo and m:GetDisplayInfo()
+            end
+            local l, r, b, t = m:GetLeft(), m:GetRight(), m:GetBottom(), m:GetTop()
+            if l and aL and (l < aL or r > aR or b < aB or t > aT) then p.outside = true end
+        end
+    end
 end
 
 function PingGameUI:Initialize()
@@ -1725,35 +1774,6 @@ function PingGameUI:ModelCheck()
     nextOne()
 end
 
--- Probe: a ring of the last MODEL_LOG_MAX lines in BoundToLearnDB.modelLog, one per
--- 3D round target 2 s after it spawned (what its model did and whether it shows),
--- plus a line at each round start. Read from SavedVariables after a /reload.
-local MODEL_LOG_MAX = 150
-local function LogModelLine(line)
-    local log = BoundToLearnDB.modelLog
-    if type(log) ~= "table" then log = {}; BoundToLearnDB.modelLog = log end
-    log[#log + 1] = line
-    while #log > MODEL_LOG_MAX do table.remove(log, 1) end
-end
-
-function PingGameUI:LogTargetModel(frame, targetID, npcID, targetType, loadedAt, fellBack, anim)
-    local m = frame.model
-    local function call(obj, name, ...)
-        if not obj[name] then return "n/a" end
-        local ok, a, b, c = pcall(obj[name], obj, ...)
-        if not ok then return "err" end
-        if c ~= nil then return sformat("%.2f,%.2f,%.2f", a or 0, b or 0, c) end
-        return tostring(a)
-    end
-    LogModelLine(sformat("npc %d %s: loaded %s, fell back %s, anim %s | alive %s, frame shown %s alpha %.2f"
-        .. " | model shown %s visible %s alpha %s file %s display %s size %.0fx%.0f cam %s pos %s",
-        npcID, TARGET_LABELS[targetType] or "?", loadedAt and sformat("%.2fs", loadedAt) or "never",
-        tostring(fellBack), tostring(anim), tostring(frame.targetID == targetID), tostring(frame:IsShown()),
-        frame:GetEffectiveAlpha(), tostring(m:IsShown()), tostring(m:IsVisible()), call(m, "GetEffectiveAlpha"),
-        call(m, "GetModelFileID"), call(m, "GetDisplayInfo"), m:GetWidth(), m:GetHeight(),
-        call(m, "GetCameraDistance"), call(m, "GetPosition")))
-end
-
 -- A preview's portrait (race or hazard icon), or its blob when no portrait exists:
 -- the portrait style, and the stand-in for a 3D preview that stays blank.
 local function ShowShowcasePortrait(cell)
@@ -1873,6 +1893,8 @@ function PingGameUI:OnGameStart()
     if self:GetTargetStyle() == "3d" then
         LogModelLine(sformat("Round start on %s, %s, %s", Utils.IS_FOREVER and "Forever" or "retail",
             tostring(UnitFactionGroup("player")), date("%H:%M:%S")))
+        if modelSampler then modelSampler:Cancel() end
+        modelSampler = C_Timer.NewTicker(0.1, SampleTargetModels)
     end
 end
 
@@ -2107,34 +2129,34 @@ function PingGameUI:OnTargetSpawned(target)
         -- A creature still blank at MODEL_GIVE_UP shows the target's portrait, so a
         -- target is never invisible. Facing and animation wait for the model.
         local thisTarget = target.id
-        local spawnAt, loadedAt, fellBack, anim = GetTime(), nil, false, nil
+        -- Probe record for this target's whole life (SampleTargetModels, ReleaseTarget).
+        local probe = { npc = npcID, kind = TARGET_LABELS[targetType] or "?", spawnAt = GetTime(),
+            blank = 0, shown = 0 }
+        frame.probe = probe
         FeedModel(frame.model, npcID, function(self)
-            loadedAt = GetTime() - spawnAt
+            probe.loadedAt = GetTime() - probe.spawnAt
             if frame.targetID ~= thisTarget then return end
             self:SetFacing(facing)
             if targetType == TARGET_ENEMY then
                 -- Try combat stance - guards are melee so 26 (ReadyUnarmed) should work
                 -- If NPC doesn't support it, WoW falls back to 0 (idle)
                 -- Use FreezeAnimation to lock a single attack frame instead
-                anim = 26               -- ReadyUnarmed
+                probe.anim = 26               -- ReadyUnarmed
             elseif targetType == TARGET_HAZARD then
-                anim = 4                -- walking
+                probe.anim = 4                -- walking
             elseif targetType == TARGET_ALLY then
-                anim = ALLY_SPAWN_ANIMS[math.random(#ALLY_SPAWN_ANIMS)]
+                probe.anim = ALLY_SPAWN_ANIMS[math.random(#ALLY_SPAWN_ANIMS)]
             else
-                anim = 0                -- idle
+                probe.anim = 0                -- idle
             end
-            self:SetAnimation(anim)
+            self:SetAnimation(probe.anim)
         end, function()
-            fellBack = true
+            probe.fellBack = true
             unloadableNPC[npcID] = true   -- not picked again this session
             if frame.targetID ~= thisTarget then return end
             frame.model:Hide()
             ShowTargetPortrait(frame, targetType)
         end)
-        -- Probe: what each 3D target's model did, 2 s after it spawned (ring of the
-        -- last MODEL_LOG_MAX in BoundToLearnDB.modelLog, read after a /reload).
-        C_Timer.After(2, function() self:LogTargetModel(frame, thisTarget, npcID, targetType, loadedAt, fellBack, anim) end)
         frame.modelHit:Show()
     else
         -- Portraits (default): race icon atlas for enemy/ally, hazard icon for hazards
