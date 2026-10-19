@@ -2,6 +2,13 @@
 
 All notable changes to BoundToLearn are documented here.
 
+## [1.2.3] - 2026-10-19
+
+### Fixed
+- **Memory**: BoundToLearn uses about 4 MB less memory. The Icon Game's song charts are stored compactly, and only the song you play is unpacked when its round starts.
+
+---
+
 ## [1.2.2] - 2026-10-17
 
 ### Fixed
